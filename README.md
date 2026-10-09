@@ -4,6 +4,7 @@ Play Dying Light, Dying Light 2 and Dying Light: The Beast in VR. Features:
 * Your aim follows your controllers (each hand is controller by one VR controller)
 * Each hand has a purpose (left = tools, right = weapons)
 * The game's GUI exists on your hands instead of flat in front of you
+* Attacks are physically based, so swinging at an arm will hit the arm and not just deliver a generic attack
 
 This is a game pack for [Monaka VR](https://github.com/Mamfro/monaka_vr), which runs it.
 
@@ -18,16 +19,16 @@ This is a game pack for [Monaka VR](https://github.com/Mamfro/monaka_vr), which 
 
 | Game | Status | Controls | Aim | HUD |
 |---|---|---|---|---|
-| **Dying Light** | Beta | Motion controls | Head, controller | Dynamic, game HUD |
-| **Dying Light 2** | Beta | Motion controls | Head, controller | Dynamic, game HUD, monitor layout |
+| **Dying Light** | Pre-alpha | Motion controls | Head, controller | Dynamic, game HUD |
+| **Dying Light 2** | Pre-alpha | Motion controls | Head, controller | Dynamic, game HUD, monitor layout |
 | **Dying Light: The Beast** | Experimental | Motion controls | Head, controller | Dynamic, monitor layout |
 
 **Status**, from most to least finished:
-- **Beta**: you can probably play the whole game this way. Some rough edges remain.
+- **Pre-alpha**: you can probably play the whole game this way. Some very rough edges remain.
 - **Experimental**: probably runs, but rough.
 
 **Motion controls**: your VR controllers work as a gamepad, and your in-game hands and what they
-hold follow the controllers.
+hold follow the controllers. 
 
 **Aim**: what points your weapon. **Head** means you aim where you look; **Controller** means you
 aim where a controller points. Turning with the stick or mouse still works on top.
@@ -66,9 +67,9 @@ picking. "Hold d-pad menus" on the Game tab turns this off.
 | **Aim** | Head, controller. With a controller, melee and climbing still aim with your head. | Head, controller | Head, controller. Little tested. |
 | **HUD** | Dynamic (default): minimap, quests and weapon on the right hand; health and quick item on the left; the rest in front of you. | Dynamic in every DirectX 12 mode: compass and weapon on the right hand, health and stamina on the left; objective, waypoint and loot markers at their targets' distance (not yet hidden by walls); the rest in front of you. Other modes use the monitor layout. | Dynamic in DirectX 12, as Dying Light 2 (compass and weapon on the right hand, health and stamina on the left), without the world markers. Not yet checked in a headset. With it off, the monitor layout. |
 | **Hands** | Tracked. Not every weapon and item has been checked. | Tracked | Tracked. Little tested. |
-| **Melee** | Swing to attack | Swing to attack | Swing to attack. Little tested. |
+| **Melee** | Swing to attack | Swing to attack | Swing to attack. |
 | **Left hand** | Its own aim: grappling hook and throwables. | Its own aim: throwables and the other left-trigger accessories. Not yet checked in a headset. | As Dying Light 2. Not yet checked in a headset. |
-| **Finger tracking** | On a free hand | On a free hand. Not yet re-checked in a headset since a fix. | On a free hand. Not yet checked in a headset. |
+| **Finger tracking** | On a free hand | On a free hand. | On a free hand. |
 | **Cutscenes** | Mostly fine; some problems left | Flicker | Not reviewed |
 
 **Swing to attack**: swinging the controller starts the game's own attack. Your swing doesn't steer
@@ -76,15 +77,12 @@ the blow, but it beats pressing a trigger.
 
 ## Known bugs
 
-- **Dying Light and Dying Light 2:** cutscenes and scripted animations flicker.
+#### Dying Light
+* Some animations may still cause a flickering effect
+* Reaching behind your right shoulder to bring up the weapon wheel while holding a 2 handed rifle may move your character backwards
 
-## Comfort and safety
-
-- **Flashing:** cutscenes and scripted animations in Dying Light and Dying Light 2 flicker. If
-  flashing light affects you, don't play with this pack yet.
-- **Motion sickness:** walking in your room moves your character (room-scale), and your head turns
-  it. If you're prone to motion sickness, keep sessions short, take breaks, and turn off
-  **Room-scale movement** on the Game tab.
+#### Dying Light 2 and The Beast
+These not not been tested in a while. The shoulder-reach-for-weapon-wheel may not work correctly.
 
 ## When something goes wrong
 
