@@ -1,0 +1,41 @@
+[package]
+name = "monaka_beast"
+description = "Dying Light: The Beast producer, injected by monaka_loader: alternate-eye stereo on D3D12, and probes of the renderer's camera."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "monaka_beast"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+monaka_core.workspace = true
+monaka_channel.workspace = true
+monaka_hook.workspace = true
+monaka_arms.workspace = true
+eng_chr.workspace = true
+monaka_framegen.workspace = true
+monaka_pad.workspace = true
+monaka_producer.workspace = true
+monaka_stereo.workspace = true
+monaka_streamline.workspace = true
+
+[dependencies.windows]
+workspace = true
+features = [
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D_Fxc",
+    "Win32_Graphics_Direct3D12",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_System_Memory",
+]
+
+[dev-dependencies]
+monaka_launch.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,21 @@
+[package]
+name = "eng_chr"
+description = "Facts about Techland's Chrome Engine (Dying Light 2, The Beast, Dying Light 1): the arms skeleton component and the first-person arms callback, the game object behind the video settings, and the D3D12 renderer's present request and queue."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+monaka_arms.workspace = true
+monaka_core.workspace = true
+monaka_hook.workspace = true
+monaka_producer.workspace = true
+monaka_channel.workspace = true
+
+[dependencies.windows]
+workspace = true
+features = ["Win32_Graphics_Direct3D12", "Win32_Graphics_Dxgi_Common"]
+
+[lints]
+workspace = true

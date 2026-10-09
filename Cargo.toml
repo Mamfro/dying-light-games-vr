@@ -1,0 +1,39 @@
+[workspace]
+resolver = "3"
+members = ["shared", "dl1", "dl2", "beast"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "GPL-3.0-only"
+# A game pack carries its crate's `repository` as where it comes from (`monaka_core::pack::About`).
+repository = "https://github.com/Mamfro/dying-light-games-vr"
+
+# Monaka's crates, from the Monaka checkout two folders up: `monaka_vr`, with this repository in
+# `monaka_adapters/dying-light-games-vr` beside it. Edits to both build together.
+[workspace.dependencies]
+eng_chr = { path = "shared" }
+monaka_arms = { path = "../../monaka_vr/crates/arms" }
+monaka_channel = { path = "../../monaka_vr/crates/channel" }
+monaka_core = { path = "../../monaka_vr/crates/core" }
+monaka_framegen = { path = "../../monaka_vr/crates/framegen" }
+monaka_fsr11 = { path = "../../monaka_vr/crates/fsr11" }
+monaka_hook = { path = "../../monaka_vr/crates/hook" }
+monaka_launch = { path = "../../monaka_vr/crates/launch" }
+monaka_pad = { path = "../../monaka_vr/crates/pad" }
+monaka_producer = { path = "../../monaka_vr/crates/producer" }
+monaka_stereo = { path = "../../monaka_vr/crates/stereo" }
+monaka_streamline = { path = "../../monaka_vr/crates/streamline" }
+monaka_warp = { path = "../../monaka_vr/crates/warp" }
+windows = "0.62"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+# Code that runs inside a game must never unwind into the game's frames.
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"

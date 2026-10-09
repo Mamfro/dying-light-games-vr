@@ -1,0 +1,50 @@
+[package]
+name = "monaka_dl2"
+description = "Dying Light 2 producer: same-frame or depth-based head-tracked stereo (DirectX 11 or 12), injected into the game by monaka_loader."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "monaka_dl2"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+monaka_core.workspace = true
+monaka_channel.workspace = true
+monaka_hook.workspace = true
+monaka_arms.workspace = true
+eng_chr.workspace = true
+monaka_framegen.workspace = true
+monaka_pad.workspace = true
+monaka_streamline.workspace = true
+monaka_stereo.workspace = true
+monaka_producer.workspace = true
+
+[dependencies.windows]
+workspace = true
+features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_Kernel",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Threading",
+    "Win32_System_SystemInformation",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D_Fxc",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Direct3D12",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Gdi",
+]
+
+[dev-dependencies]
+monaka_launch.workspace = true
+
+[lints]
+workspace = true

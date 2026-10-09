@@ -1,0 +1,10 @@
+# DL1 dynamic HUD: the hands' panels and the HUD in front of the eyes, side by side.
+# Each save writes the eye pair and every HUD panel (<name>-panel-<piece>.png).
+0 focus DyingLightGame.exe
+0 head 0 -10
+0 hand right 0.22 -0.25 -0.35 0 -20
+0 hand left -0.22 -0.25 -0.35 0 -20
+6000 save panels-a
+9000 save panels-b
+12000 save panels-c
+14000 end

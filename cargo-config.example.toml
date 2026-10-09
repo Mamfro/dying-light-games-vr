@@ -1,0 +1,7 @@
+# Optional: copy this file to `.cargo/config.toml` (git-ignored) so the Dying Light DLLs are built
+# into Monaka's `target`, beside the launcher, instead of this repository's own. Then name them in
+# Monaka's `local/dev-games.txt`, one per line (monaka_dl1.dll, monaka_dl2.dll, monaka_beast.dll),
+# and the Monaka window and `monaka_play` offer them as local builds.
+
+[build]
+target-dir = "../../monaka_vr/target"

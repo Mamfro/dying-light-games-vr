@@ -1,0 +1,41 @@
+[package]
+name = "monaka_dl1"
+description = "Dying Light 1 producer: alternate-eye head-tracked stereo, injected into the game by monaka_loader."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "monaka_dl1"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+monaka_core.workspace = true
+monaka_channel.workspace = true
+monaka_hook.workspace = true
+monaka_arms.workspace = true
+monaka_framegen.workspace = true
+monaka_fsr11.workspace = true
+monaka_warp.workspace = true
+eng_chr.workspace = true
+monaka_pad.workspace = true
+monaka_producer.workspace = true
+monaka_stereo.workspace = true
+
+[dependencies.windows]
+workspace = true
+features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+]
+
+[dev-dependencies]
+monaka_launch.workspace = true
+
+[lints]
+workspace = true
