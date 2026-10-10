@@ -274,16 +274,25 @@ fn before_draw(context: *mut core::ffi::c_void, vertices: u32) -> Option<[ID3D11
     }
     let pose = stereo::pending_pose();
     let frustum = stereo::rendered_frustum(&pose, setup_eye)?;
+    // With the UI at a fixed size the HUD fills a band of its shape in the game's viewport: the
+    // whole viewport is placed (the placement is made for it), and the band keeps its place in it.
+    let layout = crate::hud::ui_size::layout_band(context, viewport, pass.base);
     let base = Rect::new(pass.base.TopLeftX, pass.base.TopLeftY, pass.base.Width, pass.base.Height);
     let rect = Placement::new(frustum, setup_eye, stereo::config().separation_for(&pose), settings.distance).rect(base, base.aspect(), settings.scale);
-    let placed = D3D11_VIEWPORT { TopLeftX: rect.x, TopLeftY: rect.y, Width: rect.width, Height: rect.height, ..pass.base };
+    let (sx, sy) = (rect.width / pass.base.Width, rect.height / pass.base.Height);
+    let placed = D3D11_VIEWPORT {
+        TopLeftX: rect.x + (layout.TopLeftX - pass.base.TopLeftX) * sx,
+        TopLeftY: rect.y + (layout.TopLeftY - pass.base.TopLeftY) * sy,
+        Width: layout.Width * sx,
+        Height: layout.Height * sy,
+        ..pass.base
+    };
     pass.last_set_x = placed.TopLeftX;
     // SAFETY: sets one viewport on the game's immediate context, on its own thread.
     unsafe { context.RSSetViewports(Some(&[placed])) };
-    crate::hud::ui_size::band_draw(context);
     SHIFTED_DRAWS.fetch_add(1, Relaxed);
     if crate::hud::panels::active() {
-        crate::hud::panels::note_viewports(pass.base);
+        crate::hud::panels::note_viewports(layout);
         PANEL_DRAW.store(true, Relaxed);
     }
     None

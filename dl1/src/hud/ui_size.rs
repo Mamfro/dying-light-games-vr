@@ -288,8 +288,29 @@ pub fn fill_draw(context: &ID3D11DeviceContext, size: (u32, u32)) {
     set_view(context, viewport, full);
 }
 
-/// A HUD draw with no layer of its own (the hybrid's layer, or placed in the eye): into a band of
-/// the fixed shape in the viewport bound now, when that viewport is narrower.
+/// The game's HUD viewport `base` narrowed to a band of the fixed shape, the space the HUD is laid
+/// out in when it is placed in the eye, with the bound scissor (in `base`'s pixels) carried into the
+/// band. `bound`, the viewport bound now, is given back after the draw ([`after_draw`]). `base` as it
+/// is while the UI is not fixed or is no narrower. The hand panels map from this band too, so their
+/// pieces and the game's clipping agree.
+pub fn layout_band(context: &ID3D11DeviceContext, bound: D3D11_VIEWPORT, base: D3D11_VIEWPORT) -> D3D11_VIEWPORT {
+    let Some((width, height)) = fixed() else { return base };
+    let aspect = width as f32 / height as f32;
+    if base.Width <= 0.0 || base.Height <= 0.0 || base.Width / base.Height >= aspect - 0.01 {
+        return base;
+    }
+    let band_height = base.Width / aspect;
+    let band = D3D11_VIEWPORT { TopLeftY: base.TopLeftY + (base.Height - band_height) / 2.0, Height: band_height, ..base };
+    let game_scissor = move_scissor(context, base, band);
+    *MOVED.lock().unwrap_or_else(|e| e.into_inner()) = Some((bound, game_scissor));
+    if BANDS.fetch_add(1, Relaxed) == 0 {
+        log!("fixed UI: the HUD is laid out in the band {:.0},{:.0} {:.0}x{:.0} of its viewport, then placed", band.TopLeftX, band.TopLeftY, band.Width, band.Height);
+    }
+    band
+}
+
+/// A HUD draw into the hybrid's HUD layer: into a band of the fixed shape in the viewport bound
+/// now, when that viewport is narrower.
 pub fn band_draw(context: &ID3D11DeviceContext) {
     let Some((width, height)) = fixed() else { return };
     let aspect = width as f32 / height as f32;
@@ -312,6 +333,16 @@ pub fn band_draw(context: &ID3D11DeviceContext) {
 /// rectangle (the game clips text boxes with one, in its viewport's pixels) carried along; both
 /// put back after the draw ([`after_draw`]).
 fn set_view(context: &ID3D11DeviceContext, from: D3D11_VIEWPORT, to: D3D11_VIEWPORT) {
+    let game_scissor = move_scissor(context, from, to);
+    // SAFETY: sets one viewport on the game's immediate context, on its own thread; put back after
+    // the draw.
+    unsafe { context.RSSetViewports(Some(&[to])) };
+    *MOVED.lock().unwrap_or_else(|e| e.into_inner()) = Some((from, game_scissor));
+}
+
+/// The bound scissor rectangle carried from the viewport `from` into `to`; the game's own, for
+/// [`after_draw`] to give back.
+fn move_scissor(context: &ID3D11DeviceContext, from: D3D11_VIEWPORT, to: D3D11_VIEWPORT) -> Option<RECT> {
     let mut count = 1u32;
     let mut scissor = [RECT::default()];
     // SAFETY: reads one scissor rectangle into a local.
@@ -320,15 +351,12 @@ fn set_view(context: &ID3D11DeviceContext, from: D3D11_VIEWPORT, to: D3D11_VIEWP
     let (sx, sy) = (to.Width / from.Width, to.Height / from.Height);
     let x = |v: i32| ((v as f32 - from.TopLeftX) * sx + to.TopLeftX).round() as i32;
     let y = |v: i32| ((v as f32 - from.TopLeftY) * sy + to.TopLeftY).round() as i32;
-    // SAFETY: sets one viewport and scissor on the game's immediate context, on its own thread;
-    // put back after the draw.
-    unsafe {
-        context.RSSetViewports(Some(&[to]));
-        if let Some(s) = game_scissor {
-            context.RSSetScissorRects(Some(&[RECT { left: x(s.left), top: y(s.top), right: x(s.right), bottom: y(s.bottom) }]));
-        }
+    if let Some(s) = game_scissor {
+        // SAFETY: sets one scissor on the game's immediate context, on its own thread; put back
+        // after the draw.
+        unsafe { context.RSSetScissorRects(Some(&[RECT { left: x(s.left), top: y(s.top), right: x(s.right), bottom: y(s.bottom) }])) };
     }
-    *MOVED.lock().unwrap_or_else(|e| e.into_inner()) = Some((from, game_scissor));
+    game_scissor
 }
 
 /// After a draw: the viewport and scissor a moved draw had, back.

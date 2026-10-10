@@ -335,6 +335,13 @@ fn before_present(driver: &Driver, chain: &IDXGISwapChain, n: u64) -> bool {
         }
         return true;
     }
+    // No world drawn for a few frames (a movie, a loading screen): to the flat screen.
+    if !world_drawn_recently()
+        && let Ok((image, device, context)) = monaka_channel::d3d::swapchain_parts(chain)
+    {
+        driver.with_publisher11(|publisher| crate::output::flat::publish(&device, &context, &image, n, publisher, driver.head()));
+        return true;
+    }
     note_label(n, config.schedule);
     false
 }
