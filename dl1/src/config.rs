@@ -64,6 +64,8 @@ pub struct Config {
     /// axe, the flat of a machete) lands as a blunt hit (`back_is_blunt=0`: every hit as the weapon
     /// deals it).
     pub back_is_blunt: bool,
+    /// Zombies' grabs never land on the player (on by default; `disable_zombie_grabs=0` lets them).
+    pub disable_zombie_grabs: bool,
     /// The headset's eye image size (`eye_size=WxH`, from `monaka_viewer --info`): the game renders
     /// at it while VR runs and gets its own size back at the stop.
     pub eye_size: Option<(u32, u32)>,
@@ -130,6 +132,7 @@ impl Config {
             physical_melee: melee::Physical::from_options(options, shared.aim.rig, true),
             melee_on_reach: options.switch("melee_on_reach", true),
             back_is_blunt: options.switch("back_is_blunt", true),
+            disable_zombie_grabs: options.switch("disable_zombie_grabs", true),
             eye_size: options.size("eye_size"),
             fsr: options.switch("fsr", false).then(|| Fsr {
                 scale: options.number("fsr_scale", 1.0, 3.0, 1.5),

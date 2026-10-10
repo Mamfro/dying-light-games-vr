@@ -27,6 +27,8 @@ pub const MANIFESTS: &[Manifest] = &[Manifest {
         opt("room_scale", "Room-scale movement", "Your real steps and leans move your character; walls and enemies still stop it.", Kind::Switch { default: true })
             .on(Shown::Game)
             .only_when("aim", "hand_rig"),
+        opt("disable_zombie_grabs", "Disable zombie grabs", "Zombies never grab you. Off: they grab and bite until you break free, as in the game.", Kind::Switch { default: true })
+            .on(Shown::Game),
         BINARY_FINGERS,
         opt("fsr", "FSR upscaling", "Renders each eye smaller, then upscales it (needs the headset resolution and Dying Light 2's FidelityFX DLLs).", Kind::Switch { default: false })
             .on(Shown::Engine)

@@ -20,7 +20,7 @@ mod view;
 use view::stereo;
 use output::{hybrid, upscale, video};
 use hud::{draws, panels, ui};
-use player::{aim, hands, melee, spots, walk};
+use player::{aim, grabs, hands, melee, spots, walk};
 
 use config::Config;
 use monaka_channel::hands::HandChannel;
@@ -236,6 +236,9 @@ fn attach(
         crate::research::install(&mut hooks, &engine_module, (desc.BufferDesc.Width, desc.BufferDesc.Height))?;
         // The game's UI kept at the monitor's size (they pass through when no size switch was made).
         crate::hud::ui_size::install(&mut hooks, &engine_module, &require_build(engine::GAMEDLL, engine::GAMEDLL_SHA256)?)?;
+        if config.disable_zombie_grabs {
+            grabs::install(&mut hooks, &require_build(engine::GAMEDLL, engine::GAMEDLL_SHA256)?)?;
+        }
         if let Some(settings) = config.room_scale {
             walk::install(&mut hooks, &engine_module)?;
             monaka_arms::roomscale::install(settings);
@@ -264,6 +267,7 @@ fn attach(
 fn stop() -> Result<(), Rejection> {
     crate::research::report();
     monaka_arms::roomscale::stop();
+    grabs::report();
     walk::restore();
     monaka_pad::stop();
     // The present thread retires the eye and gives back what the run changed.
