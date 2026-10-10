@@ -219,7 +219,7 @@ fn attach(
                 .inline(&hands::CAMERA_TARGET_ORIGINAL, "arms camera target", target, &engine::FPP_CAMERA_TARGET_PROLOGUE, hands::camera_target)
                 ?;
             if let Some(physical) = config.physical_melee {
-                melee::install(&mut hooks, &gamedll, physical)?;
+                melee::install(&mut hooks, &gamedll, &engine_module, physical, config.melee_on_reach, config.back_is_blunt)?;
             }
         }
         if config.controller_pad {

@@ -28,7 +28,7 @@ static INSTALLED: AtomicBool = AtomicBool::new(false);
 pub fn install(hooks: &mut Hooks, engine: &Module) -> Result<(), Rejection> {
     let target = engine.export(TAKE_DAMAGE).ok_or_else(|| Rejection::revision("the engine does not export IControlObject::TakeDamage"))?;
     // SAFETY: the detour has the export's signature; its prologue is decoded and moved.
-    unsafe { hooks.inline_decoded(&ORIGINAL, "IControlObject::TakeDamage", target, take_damage as TakeDamageFn)? };
+    unsafe { hooks.inline_chained(&ORIGINAL, "IControlObject::TakeDamage", target, take_damage as TakeDamageFn)? };
     INSTALLED.store(true, Relaxed);
     log!("melee probe: watching IControlObject::TakeDamage");
     Ok(())

@@ -57,6 +57,13 @@ pub struct Config {
     /// Physical melee (with the hand rig; [`crate::player::melee`]). DL1 starts a light attack
     /// when it is let go: swings press briefly.
     pub physical_melee: Option<melee::Physical>,
+    /// With physical melee, a weapon's swing attacks only once the blade is about to reach
+    /// something it can hit (`melee_on_reach=0`: every swing attacks).
+    pub melee_on_reach: bool,
+    /// With physical melee, a cutting weapon's hit that does not lead with the edge (the back of an
+    /// axe, the flat of a machete) lands as a blunt hit (`back_is_blunt=0`: every hit as the weapon
+    /// deals it).
+    pub back_is_blunt: bool,
     /// The headset's eye image size (`eye_size=WxH`, from `monaka_viewer --info`): the game renders
     /// at it while VR runs and gets its own size back at the stop.
     pub eye_size: Option<(u32, u32)>,
@@ -121,6 +128,8 @@ impl Config {
             pad_mask_real: options.switch("pad_mask_real", false),
             room_scale: roomscale::Settings::from_options(options, &shared),
             physical_melee: melee::Physical::from_options(options, shared.aim.rig, true),
+            melee_on_reach: options.switch("melee_on_reach", true),
+            back_is_blunt: options.switch("back_is_blunt", true),
             eye_size: options.size("eye_size"),
             fsr: options.switch("fsr", false).then(|| Fsr {
                 scale: options.number("fsr_scale", 1.0, 3.0, 1.5),

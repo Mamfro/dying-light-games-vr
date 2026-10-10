@@ -92,6 +92,51 @@ fn hand_holder(model: usize) -> Option<([f32; 3], [f32; 3])> {
     Some(([matrix[3], matrix[7], matrix[11]], [matrix[1], matrix[5], matrix[9]]))
 }
 
+/// `model`'s `R_HandHolder` world matrix (row-major 3x4: columns 0..2 the element's axes).
+fn hand_frame(model: usize) -> Option<[f32; 12]> {
+    let engine = ENGINE.get()?;
+    if model == 0 {
+        return None;
+    }
+    // SAFETY: a live IModelObject on the game thread; the engine returns -1 for a missing name.
+    let element = unsafe { (engine.element_id)(model as *mut c_void, c"R_HandHolder".as_ptr()) };
+    if element < 0 {
+        return None;
+    }
+    // SAFETY: a valid element index of that model.
+    mem::read::<[f32; 12]>(unsafe { (engine.world)(model as *mut c_void, element) } as usize)
+}
+
+/// The hand frame at the previous sweep, and the tip's motion summed in the hand's own axes
+/// (each frame's motion as a unit vector, so every frame counts alike): which side of the weapon
+/// leads in the game's own swings, its edge.
+static LAST_FRAME: std::sync::Mutex<Option<[f32; 12]>> = std::sync::Mutex::new(None);
+static LEAD: std::sync::Mutex<([f32; 3], u64)> = std::sync::Mutex::new(([0.0; 3], 0));
+
+/// The tip's motion since the previous sweep in the hand's axes (x, y along the blade, z), unit.
+fn tip_motion(model: usize) -> Option<[f32; 3]> {
+    let now = hand_frame(model)?;
+    let before = LAST_FRAME.lock().ok()?.replace(now)?;
+    // A point a metre out the blade (local +y).
+    let tip = |m: &[f32; 12]| [m[3] + m[1], m[7] + m[5], m[11] + m[9]];
+    let (a, b) = (tip(&before), tip(&now));
+    let d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+    let length = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+    if !(length > 0.002) {
+        return None;
+    }
+    let axis = |c: usize| [now[c], now[4 + c], now[8 + c]];
+    let local = [0, 1, 2].map(|c| {
+        let k = axis(c);
+        (d[0] * k[0] + d[1] * k[1] + d[2] * k[2]) / length
+    });
+    if let Ok(mut lead) = LEAD.lock() {
+        (0..3).for_each(|k| lead.0[k] += local[k]);
+        lead.1 += 1;
+    }
+    Some(local)
+}
+
 fn vec3(at: usize) -> [f32; 3] {
     mem::read::<[f32; 3]>(at).unwrap_or([f32::NAN; 3])
 }
@@ -112,8 +157,9 @@ unsafe extern "C" fn detect(controller: *mut c_void, track: *mut c_void, mode: i
         let rig_since = rig - RIG_AT_SWEEP.swap(rig, Relaxed);
         let track_name = TRACKS.iter().find(|(o, _)| ctrl + o == track as usize).map_or("?", |(_, name)| name);
         let fmt = |h: Option<([f32; 3], [f32; 3])>| h.map_or("none".to_owned(), |(at, along)| format!("{at:.3?} along {along:.2?}"));
+        let motion = tip_motion(object).map_or("none".to_owned(), |m| format!("{m:.2?}"));
         log!(
-            "sweep probe: {} ms sweep {n} track {track_name} mode {mode} attack type {} direction {:.2?} | object {object:#x} ({}) {} arms model {arms:#x} | hand {} | arms hand {} | rig calls since last sweep {rig_since}",
+            "sweep probe: {} ms sweep {n} track {track_name} mode {mode} attack type {} direction {:.2?} | object {object:#x} ({}) {} arms model {arms:#x} | hand {} | arms hand {} | tip motion in the hand's axes {motion} | rig calls since last sweep {rig_since}",
             ms(),
             mem::read::<i32>(ctrl + ATTACK_TYPE).unwrap_or(-1),
             vec3(ctrl + ATTACK_DIRECTION),
@@ -168,5 +214,11 @@ unsafe extern "C" fn deal(
 pub fn report() {
     if STARTED.get().is_some() {
         log!("sweep probe: {} sweeps, {} hits dealt", SWEEPS.load(Relaxed), HITS.load(Relaxed));
+        if let Ok(lead) = LEAD.lock()
+            && lead.1 > 0
+        {
+            let n = lead.1 as f32;
+            log!("sweep probe: the tip led along the hand's axes on average x {:.2} y {:.2} z {:.2} over {} sweeps (the weapon's edge leads in the game's swings)", lead.0[0] / n, lead.0[1] / n, lead.0[2] / n, lead.1);
+        }
     }
 }
