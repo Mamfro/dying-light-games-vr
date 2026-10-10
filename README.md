@@ -5,6 +5,7 @@ Play Dying Light, Dying Light 2 and Dying Light: The Beast in VR. Features:
 * Each hand has a purpose (left = tools, right = weapons)
 * The game's GUI exists on your hands instead of flat in front of you
 * Attacks are physically based, so swinging at an arm will hit the arm and not just deliver a generic attack
+* Dynamic attack damage types (a forwards slash does slashing damage, but a backhand hit without the blade does blunt instead)
 
 This is a game pack for [Monaka VR](https://github.com/Mamfro/monaka_vr), which runs it.
 
@@ -19,12 +20,14 @@ This is a game pack for [Monaka VR](https://github.com/Mamfro/monaka_vr), which 
 
 | Game | Status | Controls | Aim | HUD |
 |---|---|---|---|---|
-| **Dying Light** | Pre-alpha | Motion controls | Head, controller | Dynamic, game HUD |
+| **Dying Light** | Alpha | Motion controls | Head, controller | Dynamic, game HUD |
 | **Dying Light 2** | Pre-alpha | Motion controls | Head, controller | Dynamic, game HUD, monitor layout |
 | **Dying Light: The Beast** | Experimental | Motion controls | Head, controller | Dynamic, monitor layout |
 
-**Status**, from most to least finished:
-- **Pre-alpha**: you can probably play the whole game this way. Some very rough edges remain.
+**Status Meaning**, from most to least finished:
+- **Beta**: I'm confident that you can play the whole game this way. Small features/polish and deeper integration may be lacking.
+- **Alpha**: I'm somewhat confident you can play the whole game this way, but I haven't played multiple hours at a time.
+- **Pre-alpha**: It runs, but probably will be a bad experience. Very rough edges remain.
 - **Experimental**: probably runs, but rough.
 
 **Motion controls**: your VR controllers work as a gamepad, and your in-game hands and what they
@@ -82,7 +85,7 @@ the blow, but it beats pressing a trigger.
 * Reaching behind your right shoulder to bring up the weapon wheel while holding a 2 handed rifle may move your character backwards
 
 #### Dying Light 2 and The Beast
-These not not been tested in a while. The shoulder-reach-for-weapon-wheel may not work correctly.
+These have not been tested in a while. The shoulder-reach-for-weapon-wheel may not work correctly.
 
 ## When something goes wrong
 
