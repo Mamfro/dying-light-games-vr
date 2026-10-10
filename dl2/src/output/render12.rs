@@ -159,7 +159,7 @@ fn capture(swap: &IDXGISwapChain3) {
     if crate::output::framegen::enabled() && (eye == 1 || eye == 2) {
         // Frame generation publishes from its own path (and a pacing thread) through
         // [`publish_pair`], which takes this lock: let go of it first (held, the right eye's
-        // publish on this thread waited on itself and the game froze, 2026-10-08).
+        // publish on this thread waits on itself and the game freezes).
         drop(guard);
         return frame_generation(eye, &buffer);
     }

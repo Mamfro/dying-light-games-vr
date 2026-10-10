@@ -3,8 +3,8 @@ param([ValidateSet('Hand','Controller','Head','Mouse')][string]$Aim='Hand',[Vali
     [switch]$GameResolution,[switch]$NoLaunch,[ValidateRange(0.03,0.09)][double]$EyeSeparation=0.064,[ValidateRange(0.5,20)][double]$HudDistance=2.0,[switch]$FingerBinary,
     [ValidateRange(0.2,1.0)][double]$HudScale=0.36,[ValidateRange(0,120)][int]$SettleSeconds=20,[ValidateRange(-180,180)][double]$SyntheticYaw=[double]::NaN,
     [ValidatePattern('^[a-z_0-9]+=[\w.,:\-]+$')][string[]]$Experiment=@(),
-    # Older command lines keep working: -HeadAim, -ControllerAim, -NoHeadAim are -Aim Head, Controller, Mouse; the
-    # rest turned on what is now the default.
+    # Compatibility switches: -HeadAim, -ControllerAim, -NoHeadAim are -Aim Head, Controller, Mouse; the rest turn on
+    # what is the default anyway.
     [switch]$HeadAim,[switch]$ControllerAim,[switch]$NoHeadAim,[switch]$HandRig,[switch]$HandAim,[switch]$HeadsetResolution,[switch]$WorldHud)
 # Play Dying Light 1 in VR: .\tools\Play-DL1VR.ps1 with nothing else is the whole of it. It runs monaka_play, which attaches
 # the DL1 producer (monaka_dl1.dll) and shows it with monaka_viewer; starts the game through Steam if it is not running
@@ -41,7 +41,7 @@ $play=Join-Path $MonakaRoot 'target\release\monaka_play.exe'
 if (-not (Test-Path -LiteralPath $play)) { throw "Build first: cargo build --release -p monaka -p monaka_viewer -p monaka_dl1 (missing $play)" }
 $invariant=[Globalization.CultureInfo]::InvariantCulture
 function OnOff([bool]$on) { if ($on) { 'on' } else { 'off' } }
-# The older switches, strongest first (-NoHeadAim: no head aim, so no hand aim or hand either).
+# The compatibility switches, strongest first (-NoHeadAim: no head aim, so no hand aim or hand either).
 if ($NoHeadAim) { $Aim='Mouse' } elseif ($HeadAim) { $Aim='Head' } elseif ($ControllerAim) { $Aim='Controller' }
 $aimOption=@{ Hand='hand_rig'; Controller='controller'; Head='head'; Mouse='off' }[$Aim]
 $extra=@($Experiment)

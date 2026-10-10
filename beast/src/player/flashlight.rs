@@ -6,7 +6,7 @@
 //! (`logic_script.scr`: `f_pp_flashlight_pp_offset_move_x/y` and `_offset_sway`, from the change in
 //! the camera's direction and position). In VR the render camera alternates between the eyes and
 //! follows the head, so the sway never settles: the light swings with every head movement and
-//! shadows move against the player ("the light comes from the cursor", 2026-10-08). The scripts
+//! shadows move against the player, as if the light came from the cursor. The scripts
 //! scale the sway by `f_flashlight_pp_sway`, which the game sets through `CVarlist::Set`: here it
 //! is held at zero, and the source offset can be set there too (`flashlight_source=x,y`).
 //!
@@ -27,7 +27,7 @@ const VARLIST_SET: usize = 0xcbc840;
 const VARLIST_SET_PROLOGUE: [u8; 16] = [0x48, 0x89, 0x5c, 0x24, 0x10, 0x48, 0x89, 0x6c, 0x24, 0x18, 0x48, 0x89, 0x74, 0x24, 0x20, 0x57];
 const ADDRESS: u64 = 0x00ff_ffff_ffff_ffff;
 /// What the scripts scale the sway by: the scripts write their own variables directly, but the
-/// game sets this, and the source offset, through `CVarlist::Set` (measured 2026-10-08).
+/// game sets this, and the source offset, through `CVarlist::Set`.
 const SWAY: &str = "f_flashlight_pp_sway";
 const SOURCE: [&str; 2] = ["f_flashlight_pp_offset_source_x", "f_flashlight_pp_offset_source_y"];
 /// Names logged by the probe (values and counts).
@@ -48,7 +48,7 @@ pub struct Settings {
     /// The flashlight's shadow strength (the game's: 10), if set (written once, beside the sway).
     /// Its shadows are traced in 2D toward the light's point on screen, the screen centre, so each
     /// is thrown straight out from where the player looks; in VR each eye has its own centre and
-    /// the head never stops, so they swing and do not fuse (2026-10-08). 0 turns them off.
+    /// the head never stops, so they swing and do not fuse. 0 turns them off.
     pub shadow_scale: Option<f32>,
     /// The light's source offset (the game's: 0.2, -0.05), if set.
     pub source: Option<[f32; 2]>,

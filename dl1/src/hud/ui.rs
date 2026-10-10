@@ -3,8 +3,8 @@
 //! Dying Light 1's HUD is the engine's UI tree under the screen `HUD_DI`: named widgets
 //! (`HudRadar`, `health_wrap`, `StackObjectives`, ...) whose leaves are images and texts. The
 //! renderer replays the frame's recorded UI commands, so a draw itself carries no element; but
-//! the draws follow the tree's drawable leaves, and each one says where it is (a research probe,
-//! 2026-10-07): an image draw's matrix puts its quad's corner exactly on its leaf's global
+//! the draws follow the tree's drawable leaves, and each one says where it is: an image draw's
+//! matrix puts its quad's corner exactly on its leaf's global
 //! position; a text draw's first glyph sits on its text leaf's row (its glyphs are laid out in
 //! layout pixels). So once a frame, on the game thread, the drawable leaves are read here, each
 //! with its widget, place and kind ([`Layout`]), through the engine's own exported `IUIElement`
@@ -16,8 +16,8 @@
 //! cached of the tree ([`Cache`]).
 //!
 //! Each `IUIElement` wraps an engine object at +0x18 (its name: the string `[[object+8]]`; a
-//! text's string at +0x3d8, first its pointer: null when empty). Positions are layout pixels of
-//! the HUD's viewport (2644 on a 2644x2644 eye; the HUD's 16:9 lies at y 578).
+//! text's string at +0x3d8, first its pointer: null when empty). Positions are layout pixels, in
+//! the space of the HUD root's box ([`Layout::root`]).
 
 use monaka_hook::module::Module;
 use monaka_hook::probe::class_name;
@@ -52,7 +52,7 @@ pub struct Layout {
     pub pieces: [Option<[f32; 4]>; WIDGETS.len()],
     /// The root's own box (left, top, right, bottom, layout pixels): the space the boxes are in,
     /// which the HUD's draws map onto their viewport. Not the back buffer's size: with FSR the
-    /// game renders 1760x1760 and lays the HUD out at the screen's 3840x2160 (2026-10-08).
+    /// game renders each eye smaller and lays the HUD out at the screen's size.
     pub root: Option<[f32; 4]>,
     /// When it was taken (`monaka_channel::tick`).
     pub taken: u64,
@@ -152,7 +152,7 @@ pub fn install(hooks: &mut Hooks, engine: &Module) -> Result<(), Rejection> {
 }
 
 /// The engine object's opacity setter that `IUIElement::SetOpacity` (`export`) hands over to: its
-/// code is `mov rcx, [rcx+0x18]; test rcx, rcx; jne <setter>; ret` (2026-10-07).
+/// code is `mov rcx, [rcx+0x18]; test rcx, rcx; jne <setter>; ret`.
 fn internal_setter(export: usize) -> Option<usize> {
     let mut code = [0u8; 14];
     if !mem::read_bytes(export, &mut code) || code[..9] != [0x48, 0x8b, 0x49, 0x18, 0x48, 0x85, 0xc9, 0x0f, 0x85] || code[13] != 0xc3 {
@@ -163,8 +163,8 @@ fn internal_setter(export: usize) -> Option<usize> {
 }
 
 /// The engine object's opacity setter: a panel widget the game fades gets full opacity instead
-/// (`world_hud_opaque`). Held only after the game had set it (writing it back each frame raced
-/// the game's own fade, and the tool and weapon panels flickered, 2026-10-07).
+/// (`world_hud_opaque`). Held as the game sets it: writing it back afterwards each frame races
+/// the game's own fade, and the tool and weapon panels flicker.
 unsafe extern "system" fn set_opacity(object: *mut c_void, opacity: f32) {
     let _flight = InFlight::enter();
     let held = opacity < 1.0
@@ -206,6 +206,13 @@ fn seen(element: usize) {
     if element == 0 || BUSY.load(Relaxed) || !crate::view::stereo::capturing() {
         return;
     }
+    // A loading screen: a level is being loaded or unloaded and its UI freed. Reading the cached
+    // tree then reads freed elements (quitting to the menu would crash the game), so it is let go
+    // and found again once the world is drawn.
+    if !crate::view::stereo::world_drawn_recently() {
+        forget_tree();
+        return;
+    }
     let now = monaka_channel::tick();
     if now.saturating_sub(TAKEN.load(Relaxed)) < SNAPSHOT_EVERY_MS {
         return;
@@ -227,6 +234,24 @@ fn seen(element: usize) {
         }
     }
     BUSY.store(false, Relaxed);
+}
+
+/// Lets go of the HUD's root and everything cached of its tree (on the game thread, in [`seen`]).
+fn forget_tree() {
+    if ROOT.swap(0, Relaxed) == 0 {
+        return;
+    }
+    if let Ok(mut cache) = CACHE.lock() {
+        cache.root = 0;
+        cache.widgets.clear();
+    }
+    if let Ok(mut latest) = LAYOUT.lock() {
+        *latest = None;
+    }
+    static LOGGED: AtomicU64 = AtomicU64::new(0);
+    if LOGGED.fetch_add(1, Relaxed) < 20 {
+        log!("HUD elements: the world is not drawn (a loading screen): the UI tree is let go until it is");
+    }
 }
 
 /// The engine object behind an element, read without calling the engine (the getters read it
@@ -279,8 +304,8 @@ struct Widget {
 
 /// The widgets between snapshots: listed again every [`RELIST_EVERY`] snapshots (or for another
 /// root), the panels' read every other snapshot, the rest [`ROTATE`] at a time in turn. Read whole
-/// each time, the tree cost the game thread 1.6 ms a frame (690 elements at about 2.4 us each,
-/// in engine calls: 2026-10-07); the rest only tells where a panel's draws end.
+/// each time, the tree costs the game thread over a millisecond a frame (hundreds of elements,
+/// each read through engine calls); the rest only tells where a panel's draws end.
 struct Cache {
     root: usize,
     widgets: Vec<Widget>,
@@ -355,7 +380,7 @@ fn snapshot(calls: &Calls, root: usize, now: u64) -> Layout {
     cache.next = (next + ROTATE) % count;
     // A leaf outside the HUD's own box shows nothing (now and then a minimap icon sits thousands of
     // pixels off the screen): it would grow its piece's box past the screen for as long as the piece
-    // stays, and shrink the piece to a speck on its panel (2026-10-09).
+    // stays, and shrink the piece to a speck on its panel.
     let root = layout.root;
     let on_screen = |rect: [f32; 4]| root.is_none_or(|r| rect[0] >= r[0] - OFF_SCREEN_SLACK && rect[1] >= r[1] - OFF_SCREEN_SLACK && rect[2] <= r[2] + OFF_SCREEN_SLACK && rect[3] <= r[3] + OFF_SCREEN_SLACK);
     for widget in &cache.widgets {
@@ -378,8 +403,8 @@ pub const MINIMAP: usize = 0;
 
 /// A piece's box with one more of its leaves: the union of its leaves, except the minimap's, which
 /// is its largest leaf, the radar's frame. The radar also holds the icons of targets beyond its
-/// range, placed outside its circle and hidden by its round mask: counted, they grew the box to
-/// several times the minimap and left the map small in a corner of its panel (2026-10-09).
+/// range, placed outside its circle and hidden by its round mask: counted, they would grow the box
+/// to several times the minimap and leave the map small in a corner of its panel.
 fn piece_box(piece: usize, so_far: Option<[f32; 4]>, rect: [f32; 4]) -> [f32; 4] {
     let area = |r: [f32; 4]| (r[2] - r[0]).max(0.0) * (r[3] - r[1]).max(0.0);
     match so_far {
@@ -518,11 +543,11 @@ pub fn text_leaf(leaves: &[Leaf], glyph: [f32; 2]) -> Option<usize> {
         .map(|(i, _)| i)
 }
 
-/// An image draw's corner lies on its leaf's within this (layout pixels; measured: exact to the
-/// tenth logged).
+/// An image draw's corner lies on its leaf's within this (layout pixels; the two agree to a
+/// tenth).
 const CORNER_TOLERANCE: f32 = 1.0;
-/// A text's first glyph lies on its leaf's row within this (layout pixels; measured: 0 to 3.2,
-/// the shadow and outline passes a pixel or two off the text).
+/// A text's first glyph lies on its leaf's row within this (layout pixels; the glyph is up to
+/// about 3 off, the shadow and outline passes a pixel or two off the text).
 const ROW_TOLERANCE: f32 = 6.0;
 
 #[cfg(test)]
@@ -544,8 +569,8 @@ mod tests {
         assert_eq!(piece_box(2, Some(frame), far_icon), [2500.0, 78.0, 3585.0, 932.0]);
     }
 
-    /// Leaves of the 2026-10-07 HUD (logged by a probe): health's medkit back, its count, the quests'
-    /// title, text and icon.
+    /// Leaves of a logged HUD frame: health's medkit back, its count, the quests' title, text and
+    /// icon.
     fn leaves() -> Vec<Leaf> {
         let leaf = |piece, text, at: [f32; 2], size: [f32; 2]| Leaf { piece, text, at, rect: [at[0], at[1], at[0] + size[0], at[1] + size[1]], last: false };
         vec![

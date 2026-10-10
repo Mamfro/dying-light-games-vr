@@ -4,10 +4,10 @@
 //!
 //! Names: under `r_hand` and `l_hand` the thumb `finger01` -> `finger02` -> `finger03`, and the
 //! index, middle, ring and little finger's three knuckles `finger11`-`13`, `21`-`23`, `31`-`33`,
-//! `41`-`43`. Each finger hangs from its first knuckle's parent: in Dying Light 2 (probed
-//! 2026-10-07; 390 elements) a metacarpal `finger10` ... `40`; in Dying Light 1 the hand for the
-//! index and middle finger and a palm bone `hand1` for the ring and little finger (probed
-//! 2026-10-07). The thumb's first bone and the bones fingers hang from stay where the rig put them;
+//! `41`-`43`. Each finger hangs from its first knuckle's parent: in Dying Light 2 a metacarpal
+//! `finger10` ... `40`; in Dying Light 1 the hand for the index and middle finger and a palm bone
+//! `hand1` for the ring and little finger. The thumb's first bone and the bones fingers hang from
+//! stay where the rig put them;
 //! the `_normal_mask` helpers under the hand are left alone.
 
 use crate::fpp::ArmsSkeleton;
@@ -28,12 +28,10 @@ pub struct Axes {
 }
 
 impl Axes {
-    /// Dying Light 1: bones run along +x and curl toward the palm about +y (both hands; the rest
-    /// pose and a gripping hand, 2026-10-07).
+    /// Dying Light 1: bones run along +x and curl toward the palm about +y (both hands).
     pub const DYING_LIGHT_1: Self = Self { along: [1.0, 0.0, 0.0], curl: [0.0, 1.0, 0.0] };
     /// Dying Light 2 and The Beast (the same rig convention): along +x, curling about -y, the
-    /// opposite of Dying Light 1's (+y had every finger bending backwards in the headset, DL2
-    /// 2026-10-07, The Beast 2026-10-08).
+    /// opposite of Dying Light 1's (about +y every finger bends backwards).
     pub const DYING_LIGHT_2: Self = Self { along: [1.0, 0.0, 0.0], curl: [0.0, -1.0, 0.0] };
 }
 

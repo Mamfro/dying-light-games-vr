@@ -5,7 +5,7 @@
 //! word, physics off).
 //!
 //! `walk_push=x,z` (m/s, world axes) also adds that velocity to the wanted velocity: the body
-//! should move at that speed and stop at a wall (it does: 2026-10-08).
+//! moves at that speed and stops at a wall.
 
 use crate::player::walk::{self, BODY_POSITION, BODY_VELOCITY, EXTRA_VELOCITY, LOCK_POSITION, PHYSICS_OFF, SCRIPTED_MOVE, STATE, WANTED_VELOCITY};
 use monaka_hook::{Hooks, mem};

@@ -320,7 +320,7 @@ fn before_present(driver: &Driver, chain: &IDXGISwapChain, n: u64) -> bool {
         if let Ok((image, device, context)) = monaka_channel::d3d::swapchain_parts(chain) {
             // A frame without HUD draws was not upscaled at its scene copy: do it now.
             crate::output::upscale::capture(&context, &image, n);
-            driver.with_publisher11(|publisher| crate::output::upscale::publish(&device, &context, n, publisher, driver.head(), report));
+            driver.with_publisher11(|publisher| crate::output::upscale::publish(&device, &context, &image, n, publisher, driver.head(), report));
         }
         return true;
     }
@@ -347,8 +347,7 @@ static REVERSALS: [[AtomicU64; 2]; 2] = [const { [const { AtomicU64::new(0) }; 2
 static MOVING: [AtomicU64; 2] = [const { AtomicU64::new(0) }; 2];
 
 /// Measures each eye's view centre, frame to frame: a centre stepping back against its own motion
-/// is a jitter (the left eye jittered now and then, near things more: a position going back and
-/// forth, 2026-10-06).
+/// is a jitter (a position going back and forth, seen most on near things).
 fn note_step(eye: usize, center: &Mat34, turned: bool) {
     let eye = eye.min(1);
     let now = [center[3], center[7], center[11]];
@@ -380,7 +379,7 @@ fn note_step(eye: usize, center: &Mat34, turned: bool) {
 /// Each eye's last two view yaws (radians, positive left).
 static YAWS: Mutex<[[f32; 2]; 2]> = Mutex::new([[f32::NAN; 2]; 2]);
 /// Frames, by eye, whose view yaw left the line of the two before by over half a degree (a head
-/// turning smoothly turns the view smoothly; the left eye jittered with a real head, 2026-10-06):
+/// turning smoothly turns the view smoothly):
 /// [made from the turned live camera, rebuilt at view setup]; and frames measured.
 static YAW_JUMPS: [[AtomicU64; 2]; 2] = [const { [const { AtomicU64::new(0) }; 2] }; 2];
 static YAW_FRAMES: [AtomicU64; 2] = [const { AtomicU64::new(0) }; 2];
@@ -435,9 +434,8 @@ static LABEL_LAGS: [AtomicU64; 6] = [const { AtomicU64::new(0) }; 6];
 static LABEL_MISSES: AtomicU64 = AtomicU64::new(0);
 
 /// Measures the schedule against what was rendered: at present `n` the image is the eye the
-/// schedule says only if the latest eye camera written was chosen `latency` presents earlier. A
-/// left-eye image now and then drawn from the other eye's position made near things jitter
-/// (2026-10-06, headset).
+/// schedule says only if the latest eye camera written was chosen `latency` presents earlier. An
+/// image drawn from the other eye's position makes near things jitter.
 fn note_label(n: u64, schedule: Schedule) {
     let rendered = RENDERED.load(Acquire);
     if rendered == u64::MAX || schedule.shown_eye(n).is_none() {
@@ -567,7 +565,7 @@ fn origin_with(base: &Mat34, head_aim: bool, unlean: bool, baked: f32) -> Mat34 
 
 /// A camera the view would write is finite and within this of the game's own (metres): the head,
 /// the climb pullback and the eyes move it well under that. The game looks things up near its
-/// camera, and a position not finite or far out crashed it (gamedll+0xb19ca3, 2026-10-06).
+/// camera, and a position not finite or far out crashes it.
 const CAMERA_REACH: f32 = 5.0;
 
 fn plausible_camera(written: &Mat34, game: &Mat34) -> bool {
@@ -585,9 +583,9 @@ fn note_implausible_camera(what: &str, written: &Mat34, game: &Mat34) {
 
 /// The game just built the player camera, on its own thread, before laying out its HUD: turned to
 /// the view now too, as each present turns it. Turned only at presents (on the render thread), the
-/// game's HUD layout saw its own camera (the hand's, with hand aim) or the view's by thread timing,
-/// and the interact prompt it projects onto what you look at flickered between the two places;
-/// with the head aiming the two are one and it did not (2026-10-07).
+/// game's HUD layout would see its own camera (the hand's, with hand aim) or the view's by thread
+/// timing, and the interact prompt it projects onto what you look at would flicker between the two
+/// places (with the head aiming the two are one).
 pub fn turn_after_game_update() {
     let setup = setup();
     if !setup.config.turn_live_camera || !setup.config.turn_on_update || DRIVER.finished() || !DRIVER.capturing() || monaka_arms::traverse::traversing() {
@@ -604,7 +602,7 @@ pub fn turn_after_game_update() {
 /// Turns the live player camera to the view centre too, right after the game set it, so
 /// game-side visibility (culling, shadows) follows the head. With hand aim the game camera points
 /// along the controller instead; the character keeps its own look angles, so aiming stays with
-/// the hand. Doing it inside the game's own camera calls made "forward" wrong.
+/// the hand. Doing it inside the game's own camera calls makes "forward" wrong.
 fn turn_live_camera(writer: &CameraWriter, pose: &HeadPose, pair: u64, head_aim: bool, unlean: bool) {
     let view = IN_PLACE_VIEW.load(Relaxed);
     let Some((interface, _, camera)) = (view != 0).then(|| engine::live_camera(view)).flatten() else { return };
@@ -636,6 +634,17 @@ fn turn_live_camera(writer: &CameraWriter, pose: &HeadPose, pair: u64, head_aim:
     COUNTERS.live_turns.fetch_add(1, Relaxed);
 }
 
+/// The present of the last view setup that wrote an eye camera: the world was drawn then.
+static LAST_VIEW: AtomicU64 = AtomicU64::new(0);
+/// Presents without a view setup after which the world is not being drawn (a loading screen).
+const WORLD_GONE_AFTER: u64 = 8;
+
+/// Whether the world was drawn within the last few presents (not a loading screen, where levels
+/// are unloaded and their UI freed).
+pub fn world_drawn_recently() -> bool {
+    DRIVER.presents().saturating_sub(LAST_VIEW.load(Relaxed)) <= WORLD_GONE_AFTER
+}
+
 /// The view setup stage `(level, view)`.
 pub unsafe extern "system" fn view_setup(level: *mut core::ffi::c_void, view: *mut core::ffi::c_void) {
     let _flight = InFlight::enter();
@@ -644,6 +653,36 @@ pub unsafe extern "system" fn view_setup(level: *mut core::ffi::c_void, view: *m
     }
     // SAFETY: forwards the engine's own call.
     unsafe { VIEW_SETUP_ORIGINAL.get()(level, view) }
+}
+
+/// The largest element difference (`camera::distance`) at which the render cache's camera is one
+/// the view turned or the game set: the cache holds them as written, so a real match is near 0.
+const CAMERA_MATCH: f32 = 0.01;
+
+/// View setups by what the render cache held: [a turn of ours, the game's own camera, neither (a
+/// camera the view did not see: another camera rendering)], and the largest distance of a match.
+static CAMERA_MATCHES: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
+static CAMERA_MATCH_WORST: AtomicU32 = AtomicU32::new(0);
+
+fn note_camera_match(known: bool, to_turned: f32, to_base: f32, eye: usize) {
+    if !known {
+        return;
+    }
+    let nearest = to_turned.min(to_base);
+    let kind = if nearest >= CAMERA_MATCH {
+        2
+    } else {
+        CAMERA_MATCH_WORST.fetch_max(nearest.to_bits(), Relaxed);
+        if to_turned <= to_base { 0 } else { 1 }
+    };
+    let n = CAMERA_MATCHES[kind].fetch_add(1, Relaxed);
+    if kind == 2 && (n < 6 || (n + 1).is_power_of_two()) {
+        log!(
+            "eye {eye}: the render cache holds a camera the view did not see ({} so far; {to_turned:.3} from the nearest turn, {to_base:.3} from the nearest game camera; cutscene {}): made from it as the game set it",
+            n + 1,
+            aim::cutscene()
+        );
+    }
 }
 
 /// Writes the eye camera (head pose, eye offset, the eye's projection) into the view's cached
@@ -691,9 +730,8 @@ fn shift_render_camera(level: usize, view: usize) {
     }
     let center = sample;
     // With the live camera turned, the cache is normally refreshed from it: the view centre of the
-    // head pose it was turned with, which can be a present or two older than this frame's (a
-    // turning head jittered the left eye: 2026-10-06, harness head sweep, the left eye 337 of
-    // 1046 frames off the line of its view yaw, the right 75). The view centre is made here from
+    // head pose it was turned with, which can be a present or two older than this frame's (with a
+    // turning head, that jitters the eye). The view centre is made here from
     // the game's own camera every time: the turn's base when the cache holds a turn, else what the
     // game set (it rewrote the camera after the turn), with this frame's head pose.
     let mut turned = false;
@@ -705,7 +743,11 @@ fn shift_render_camera(level: usize, view: usize) {
         let known = live.history.min(TURNS);
         let to_base = (0..known).map(|i| distance(&sample.inverse, &live.bases[i])).fold(f32::INFINITY, f32::min);
         let to_turned = (0..known).map(|i| distance(&sample.inverse, &live.turned[i])).fold(f32::INFINITY, f32::min);
-        turned = known > 0 && to_turned <= to_base;
+        // A turn of ours only when the cache really holds one: nearest alone would also pick a turn
+        // for a camera that is neither (another camera rendering, as in a conversation), and that
+        // eye would then be made from the player's camera.
+        turned = known > 0 && to_turned <= to_base && to_turned < CAMERA_MATCH;
+        note_camera_match(known > 0, to_turned, to_base, eye);
         if !turned {
             COUNTERS.head_reapplied.fetch_add(1, Relaxed);
         } else if let Some(i) = (0..known).min_by(|&a, &b| distance(&sample.inverse, &live.turned[a]).total_cmp(&distance(&sample.inverse, &live.turned[b]))) {
@@ -757,6 +799,7 @@ fn shift_render_camera(level: usize, view: usize) {
         mem::write(state + engine::STATE_EXTENTS, frustum.extents(near));
     }
     setup.camera.on_state(state, &desired);
+    LAST_VIEW.store(DRIVER.presents(), Relaxed);
     RENDERED.store((chosen_at << 1) | eye as u64, Release);
     RENDER_THREAD.store(monaka_hook::thread_id(), Relaxed);
     if (crate::output::hybrid::enabled() || crate::output::upscale::enabled())
@@ -806,7 +849,7 @@ pub unsafe extern "system" fn set_fov(camera: *mut core::ffi::c_void, fov: f32) 
 }
 
 /// Remembers the level's mesh size-cull limits once; they are then lowered every frame from the
-/// present thread (a write from the view setup's thread did not survive to the next frame).
+/// present thread (a write from the view setup's thread does not survive to the next frame).
 fn relax_mesh_culling(shared: &mut ViewState, level: usize) {
     if shared.culling_rejected == Some(level) {
         return;
@@ -850,6 +893,11 @@ fn finish(driver: &Driver) {
         YAW_FRAMES[1].load(Relaxed)
     );
     log!("eye cameras from a turned live camera [this pair's head, an older one]: left {:?}, right {:?}", TURN_PAIRS[0].each_ref().map(|c| c.load(Relaxed)), TURN_PAIRS[1].each_ref().map(|c| c.load(Relaxed)));
+    log!(
+        "render cache cameras [a turn of ours, the game's own, neither]: {:?}; the farthest match {:.5}",
+        CAMERA_MATCHES.each_ref().map(|c| c.load(Relaxed)),
+        f32::from_bits(CAMERA_MATCH_WORST.load(Relaxed))
+    );
     let setup = setup();
     {
         let now = DRIVER.presents();
@@ -900,7 +948,7 @@ fn finish(driver: &Driver) {
     let (pairs, failures) = driver.with_publisher11(|p| (p.pairs(), p.failures())).unwrap_or((0, 0));
     let c = &COUNTERS;
     log!(
-        "run ended: pairs={pairs} publish_failures={failures} camera_shifts={} shift_failures={} head_applied={} head_reapplied={} live_turns={} widened_fov={} hud_draws_shifted={} draws_seen={} hud_layer_draws={}",
+        "run ended: pairs={pairs} publish_failures={failures} camera_shifts={} shift_failures={} head_applied={} head_reapplied={} live_turns={} widened_fov={} hud_draws_shifted={} draws_seen={} scene_copies={} hud_layer_draws={}",
         c.shifts.load(Relaxed),
         c.shift_failures.load(Relaxed),
         c.head_applied.load(Relaxed),
@@ -909,6 +957,7 @@ fn finish(driver: &Driver) {
         f32::from_bits(c.widened_fov_bits.load(Relaxed)),
         draws::shifted_draws(),
         draws::draws_seen(),
+        draws::scene_copies(),
         draws::layer_draws(),
     );
 }

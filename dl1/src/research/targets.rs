@@ -5,10 +5,9 @@
 //! per-object motion; drawn by a few full-screen draws means camera motion only, which we can
 //! compute ourselves from depth and the cameras we set.
 //!
-//! Measured 2026-10-06 (2644x2644): the G-buffer is four targets bound with depth (RGBA8, RGBA8,
-//! R10G10B10A2, R16G16_FLOAT), ~6000 draws a frame, and the R16G16_FLOAT one is written with
-//! motion blur on or off; with blur on, a chain of R16G16_FLOAT targets halving down to 165x165
-//! follows (the blur's tile maximum). The probe also dumps that fourth target a few times
+//! The G-buffer is four targets bound with depth (RGBA8, RGBA8, R10G10B10A2, R16G16_FLOAT), and
+//! the R16G16_FLOAT one is written with motion blur on or off; with blur on, a chain of
+//! R16G16_FLOAT targets halving in size follows (the blur's tile maximum). The probe also dumps that fourth target a few times
 //! ([`scene_copied`]) to see what it holds.
 
 use monaka_channel::d3d;

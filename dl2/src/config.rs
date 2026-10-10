@@ -88,10 +88,10 @@ pub struct Config {
     pub lock_pitch: bool,
     pub debug: u32,
     /// Which of `engine::ONCE_COMMANDS` the right eye skips (bit per index; `once_skip=`).
-    /// Default: the ray-tracing structures only. Measured 2026-10-05 in gameplay: skipping the wind
-    /// commands gives the right eye trees in another wind state (they look like other models), and
-    /// skipping spot shadows, probes and particles lights it differently; running those again costs
-    /// about 1 ms, the ray-tracing structures about 6 ms.
+    /// Default: the ray-tracing structures only. Skipping the wind commands gives the right eye
+    /// trees in another wind state (they look like other models), and skipping spot shadows, probes
+    /// and particles lights it differently; running those again costs about 1 ms, the ray-tracing
+    /// structures about 6 ms.
     pub once_skip: u32,
 }
 

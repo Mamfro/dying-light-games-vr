@@ -4,3 +4,4 @@
 pub(crate) mod draws;
 pub(crate) mod panels;
 pub(crate) mod ui;
+pub(crate) mod ui_size;

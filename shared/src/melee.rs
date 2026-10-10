@@ -6,11 +6,11 @@
 //! and the hand rig poses that hand. Three things in it are made for the canned attack animation
 //! instead, and are changed for the player's own controller:
 //!
-//! - the sweep runs only in a window that opens well after the attack starts (DL2: about 180 ms,
-//!   measured 2026-10-08), by when a real swing is over: here it opens at the attack's start;
+//! - the sweep runs only in a window that opens well after the attack starts (DL2: about 180 ms),
+//!   by when a real swing is over: here it opens at the attack's start;
 //! - the hit's direction is the attack animation's, through the controller's direction getter:
 //!   here that getter returns zero, so each hit keeps the direction the hand moved;
-//! - the blade is the weapon's range long (DL2: 1.49 m measured): here each swept segment is cut
+//! - the blade is the weapon's range long (DL2: 1.49 m): here each swept segment is cut
 //!   to the weapon in the hand ([`Physical::blade`]), or a fist's reach.
 
 use monaka_arms::melee::{Held, Physical};
@@ -33,7 +33,7 @@ pub struct Build {
     /// The controller's field for when the sweep starts, seconds after the attack's start.
     pub window_start: usize,
     /// The attack start's copy of it, behind the controller's "time until the hit window": left
-    /// alone, the blade is not sampled until then (DL2: an empty track for ~150 ms, measured).
+    /// alone, the blade is not sampled until then (DL2: an empty track for about 150 ms).
     pub window_start_copy: usize,
     /// The attack types the attack start sets up (bit per type, from its own check).
     pub attack_types: u32,
@@ -74,7 +74,7 @@ pub fn install(hooks: &mut Hooks, gamedll: &Module, build: Build, physical: Phys
     let _ = BUILD.set(build);
     let _ = PHYSICAL.set(physical);
     PLAYER_VTABLE.store(gamedll.at(build.player_vtable), Relaxed);
-    // SAFETY: the detours have the targets' signatures (read from their code and call sites);
+    // SAFETY: the detours have the targets' signatures (as their code and call sites use them);
     // the game DLL's build is checked by the caller; prologues are decoded and moved.
     unsafe {
         hooks.inline_decoded(&ATTACK_START_ORIGINAL, "melee attack start", gamedll.at(build.attack_start), attack_start as AttackStartFn)?;

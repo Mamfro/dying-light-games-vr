@@ -87,7 +87,7 @@ pub fn configure(options: &monaka_core::options::Options) {
 /// The probes' own hooks, beside the adapter's, on the renderer (`engine::RENDERER`).
 ///
 /// # Safety
-/// `renderer` is the build `engine.rs` was measured in (hash checked).
+/// `renderer` is the build `engine.rs` describes (hash checked).
 pub unsafe fn install(hooks: &mut Hooks, renderer: &Module, stereo: bool) -> Result<(), Rejection> {
     let o = options();
     if o.cameras {

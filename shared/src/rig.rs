@@ -2,8 +2,8 @@
 //! Light 1, whose aim is its own, calls [`crate::fpp::around`] itself): the
 //! player camera update calls the arms visual's camera-target callback right after setting the
 //! camera; around it the arms are snapshot as animated, then put on the controllers, and melee
-//! swings attack ([`crate::fpp::around`]). What the two games had each written around that call,
-//! once: the vtable check, the options, the pose the rig goes on (the game's own player camera as
+//! swings attack ([`crate::fpp::around`]). What both games do around that call is here: the
+//! vtable check, the options, the pose the rig goes on (the game's own player camera as
 //! head aim noted it, the tracking origin with head aim's share turned out, the head, the
 //! controllers). A game supplies its [`Facts`] and, per call, whether VR runs and the head.
 
@@ -67,7 +67,7 @@ impl Rig {
     /// engine has the skeleton access and the vis vtable slot names the callback.
     ///
     /// # Safety
-    /// `gamedll` is the inspected build (hash checked by the caller).
+    /// `gamedll` is the build the [`Facts`] describe (hash checked by the caller).
     pub unsafe fn install(&self, hooks: &mut Hooks, engine: &Module, gamedll: &Module, options: Options, original: &'static Original<CameraTargetFn>, detour: CameraTargetFn) -> Result<(), Rejection> {
         if options.rig || options.probe {
             crate::coskeleton::resolve(engine, &self.facts.skeleton)?;

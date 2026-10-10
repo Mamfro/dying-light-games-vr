@@ -33,7 +33,7 @@ RWTexture2D<uint> Keys:register(u0);RWTexture2D<unorm float4> Out:register(u1);
 [numthreads(8,8,1)] void Splat(uint3 id:SV_DispatchThreadID){
     if(id.x>=W || id.y>=H)return;
     // Solid HUD (text, icons) hides the world: leave a gap to fill. Translucent HUD (backing panels) is un-blended
-    // in Resolve; the UI layer is premultiplied (colour is 0 wherever alpha is 0; measured).
+    // in Resolve; the UI layer is premultiplied (colour is 0 wherever alpha is 0).
     // With a fallback image (HudFromFrame 2) every HUD-touched pixel is left for it, translucent HUD included.
     // HasUi 2: the HUD was kept out of the frame (its draws went onto the UI layer only), so nothing to leave.
     if(HasUi==1 && UiCover(int2(id.xy))>=(HudFromFrame>1.5?0.004:0.25))return;

@@ -85,7 +85,7 @@ fn is_arms(vis: usize) -> bool {
 fn model(vis: usize) -> Option<usize> {
     let holder = vis + engine::FPP_VIS_MODEL_HOLDER;
     let get = mem::read::<usize>(mem::read::<usize>(holder)? + engine::MODEL_HOLDER_GET_MODEL)?;
-    // Only code of the game DLL: anything else means the layout is not what was measured.
+    // Only code of the game DLL: anything else means the layout is not the one this code expects.
     if !Module::find(engine::GAMEDLL).is_some_and(|m| m.contains(get)) {
         return None;
     }
@@ -101,8 +101,8 @@ static UNTURNED: AtomicU64 = AtomicU64::new(0);
 /// The camera's camera-to-world matrix as the game set it, if the interface and its state point
 /// at each other. The present thread turns the player camera to the view, and once in a few
 /// hundred updates that turn lands between the game setting the camera and calling the arms: the
-/// arms were then placed against the head, a one-frame jump of the gun in one eye (measured
-/// 2026-10-06, `probe_rig`). Such a camera is mapped back to the game's ([`stereo::game_camera`]).
+/// arms would then be placed against the head, a one-frame jump of the gun in one eye. Such a
+/// camera is mapped back to the game's ([`stereo::game_camera`]).
 pub(crate) fn camera_matrix(camera: usize) -> Option<Mat34> {
     let state = mem::read::<usize>(camera + engine::INTERFACE_STATE)?;
     (mem::read::<usize>(state + engine::STATE_INTERFACE)? == camera).then_some(())?;

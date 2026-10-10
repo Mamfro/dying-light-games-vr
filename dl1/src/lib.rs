@@ -234,6 +234,8 @@ fn attach(
         }
         // The probes' own hooks (each only when its option asks).
         crate::research::install(&mut hooks, &engine_module, (desc.BufferDesc.Width, desc.BufferDesc.Height))?;
+        // The game's UI kept at the monitor's size (they pass through when no size switch was made).
+        crate::hud::ui_size::install(&mut hooks, &engine_module, &require_build(engine::GAMEDLL, engine::GAMEDLL_SHA256)?)?;
         if let Some(settings) = config.room_scale {
             walk::install(&mut hooks, &engine_module)?;
             monaka_arms::roomscale::install(settings);
@@ -266,8 +268,8 @@ fn stop() -> Result<(), Rejection> {
     monaka_pad::stop();
     // The present thread retires the eye and gives back what the run changed.
     stereo::DRIVER.retire(2000);
-    // The game applies it on its next frame, without us.
-    video::restore();
+    // The game applies it on its next frame; its levels then lay their menus out again.
+    video::restore_and_relayout();
     remove_hooks(&HOOKS, 2000)?;
     monaka_arms::controllers::close();
     monaka_pad::report();

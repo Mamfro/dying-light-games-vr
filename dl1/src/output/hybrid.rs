@@ -1,6 +1,6 @@
 //! DL1's side of alternate-eye rendering with depth (`monaka_stereo::hybrid`): which depth buffer is
-//! the scene's (the one bound last before the scene reaches the back buffer; probed 2026-10-05: a
-//! 3840x2160 D32S8 texture, every frame), when a frame's world image is complete (the first draw
+//! the scene's (the one bound last before the scene reaches the back buffer, a D32S8 texture),
+//! when a frame's world image is complete (the first draw
 //! after that copy, before the HUD), and which cameras the frame was rendered with (recorded by
 //! the view setup under the present number that chose its eye).
 

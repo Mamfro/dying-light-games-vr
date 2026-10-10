@@ -2,7 +2,7 @@
 //! (a `gui::IGroup` root with named `gui::IElement`s under it), reached through the engine's own
 //! exported functions. A document is found from the elements the game hands two of those
 //! functions (`IsActuallyVisible`, `GetActualOpacity`, hooked), followed up with `GetDocumentRoot`.
-//! Each element wraps a `gui::IObject` at offset 0 (its RTTI bases, 2026-10-07), whose `GetName`
+//! Each element wraps a `gui::IObject` at offset 0 (its RTTI bases), whose `GetName`
 //! is the element's name.
 //!
 //! The dynamic HUD ([`crate::panels`]) takes its pieces' boxes from here: each piece is a widget
@@ -14,8 +14,8 @@
 //! which widgets are visible whenever that changes.
 //!
 //! The exported `gui::IElement` getters are thin handles: `mov rax, [rcx+0x40]` to the element's
-//! implementation (`gui::CElement`) and a field read, or a jump on to it (2026-10-07, from the
-//! DLL). The game never calls the exported ones (hooked: not one call in play), so three of the
+//! implementation (`gui::CElement`) and a field read, or a jump on to it. The game never calls
+//! the exported ones, so three of the
 //! implementations they jump to are hooked instead (`GetWorldMatrix`'s, `GetActualPos`'s and
 //! `GetActualSize`'s, which the engine's own layout calls; each build's addresses and first bytes
 //! in its [`Build`]); those get the implementation object, which a stand-in handle (its +0x40 the
@@ -308,7 +308,7 @@ fn seen(implementation: usize) {
 
 /// Remembers a document root by its name (the names the pieces are addressed by), and every
 /// other document of its display list (under the list's canvas). Dying Light 2 puts each HUD
-/// layer on a list of its own (2026-10-07), so a layer is met when the engine lays something of
+/// layer on a list of its own, so a layer is met when the engine lays something of
 /// it out: the main layer (stamina, health, objectives) within seconds of play, later when
 /// standing still.
 fn note_root(calls: &Calls, root: usize) {

@@ -34,7 +34,7 @@ pub static RIG: Rig = Rig::new(Facts {
 });
 
 /// Installs the arms hook when the engine has the skeleton access and the vis vtable slot names the
-/// function measured.
+/// expected callback.
 ///
 /// # Safety
 /// `gamedll` is the inspected build (hash checked by the caller).

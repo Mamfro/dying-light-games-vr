@@ -71,7 +71,7 @@ pub fn install(hooks: &mut Hooks, engine: &Module, gamedll: &Module, build: Buil
     }
     let _ = BUILD.set(build);
     PLAYER_VTABLE.store(gamedll.at(build.player_vtable), Relaxed);
-    // SAFETY: the detours have the targets' signatures (read from their code and call sites); the
+    // SAFETY: the detours have the targets' signatures (as their code and call sites use them); the
     // engine's and the game DLL's builds are checked by the caller or above; prologues are
     // decoded and moved.
     unsafe {

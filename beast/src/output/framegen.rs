@@ -12,9 +12,9 @@
 //! vectors with the tags, and at DLSS's evaluate, on the game's native command list, the depth
 //! copied and the motion vectors carried onto this eye's own previous frame two frames back by
 //! chaining the game's own over the other eye's frame between (`motion_compose.hlsl`). The camera
-//! rebase per-eye DLSS uses (`motion_fix.hlsl`) takes everything as still world: it moved the
-//! weapon and arms, which move with the head, by the eyes' parallax, and they ghosted (PC capture
-//! 2026-10-06). The HUD goes through the interpolation (the game tags no UI layer here).
+//! rebase per-eye DLSS uses (`motion_fix.hlsl`) is not used here: it takes everything as still
+//! world, so it moves the weapon and arms, which move with the head, by the eyes' parallax, and
+//! they ghost. The HUD goes through the interpolation (the game tags no UI layer here).
 
 use monaka_framegen::motion::{self, MotionFix};
 use monaka_channel::d3d12::{self, Recorder};

@@ -171,8 +171,7 @@ fn start(session: &'static Session) -> Result<(), Rejection> {
     if let Some(r12) = &renderer_12 {
         present12::set_renderer(r12.base());
         let (rva, prologue) = engine::PRESENT_REQUEST_12;
-        // SAFETY: the present request (found by its message, prologue checked byte for byte) takes
-        // the request object.
+        // SAFETY: the present request (prologue checked byte for byte) takes the request object.
         unsafe {
             hooks.inline(&present12::PRESENT_REQUEST, "present request", r12.at(rva), prologue, present12::present_request as engine::PresentRequest12Fn)?;
         }

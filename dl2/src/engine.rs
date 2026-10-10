@@ -1,7 +1,6 @@
 //! Every fact about this Dying Light 2 build (Steam 1.29.3.0): module fingerprints, function
-//! addresses with their exact first instructions, globals and structure offsets. Addresses are
-//! from farmerarmor/DyingLight2VR (MIT) and the C++ producer's own research; prologues were
-//! decoded from the shipped DLLs.
+//! addresses with their exact first instructions, globals and structure offsets. Some addresses
+//! are from farmerarmor/DyingLight2VR (MIT); every prologue is the shipped DLL's own.
 
 use monaka_hook::Instruction;
 
@@ -175,9 +174,9 @@ pub const LOOK_YAW: usize = 0xb90;
 pub const LOOK_PITCH: usize = 0xb94;
 pub const TARGET_YAW: usize = 0xb98;
 pub const TARGET_PITCH: usize = 0xb9c;
-// The game's yaw turns right as it grows (headset test): `monaka_core::aim::Convention::DEGREES_YAW_RIGHT`.
+// The game's yaw turns right as it grows: `monaka_core::aim::Convention::DEGREES_YAW_RIGHT`.
 
-// --- First-person arms (gamedll; static, 2026-10-06) ---------------------------------------------------
+// --- First-person arms (gamedll) -----------------------------------------------------------------------
 // The arms visual is `PlayerFppVis_PH`; the player camera's +0x40 points at its `ICameraTarget` base
 // (+0x5b0, vtable `FPP_VIS_VTABLE`). The player camera update (gamedll 0x1194b90) sets the camera
 // (`FromForwardUpPos`), then calls the target's slot 12 with the camera: `FPP_CAMERA_TARGET`, DL1's
@@ -199,15 +198,12 @@ pub const SKELETON_LAYOUT: eng_chr::coskeleton::Layout =
     eng_chr::coskeleton::Layout { handle: 0x90, world_slot: 0x410, count_slot: 0x488, name_slot: 0x4a8, set_world_slot: 0x428 };
 /// The vis's two weapon visuals.
 pub const ARMS_LAYOUT: eng_chr::fpp::Layout = eng_chr::fpp::Layout { weapons: 0x888 };
-/// DL2's bones against DL1's (the rig's calibrations are DL1's). The right wrist: half turned about
-/// its own x (along the forearm), measured 2026-10-06 from the idle melee hold, DL2's `r_hand`
-/// against the camera [0.44 0.26 -0.87 | -0.40 -0.81 -0.44 | -0.81 0.54 -0.25] (axes scaled 0.88)
-/// against DL1's [-0.11 -0.11 0.99 | -0.24 0.97 0.08 | -0.96 -0.23 -0.14]: x 0.83, y -0.93, z -0.86
-/// (the holds differ by some 30 degrees). Without it the hands were upside down. The gun holder: not
-/// yet measured.
+/// DL2's bones against DL1's (the rig's calibrations are DL1's). The right wrist is half turned
+/// about its own x (along the forearm) against DL1's; without this the hands are upside down. The
+/// gun holder has no correction of its own.
 pub const BONE_AXES: monaka_arms::BoneAxes = monaka_arms::BoneAxes::DYING_LIGHT_2;
-/// The finger bones' axes ([`eng_chr::fingers`]; the skeleton probed 2026-10-07: `r_hand` carries
-/// the thumb `finger01`-`03` and a metacarpal `finger10`..`40` with three knuckles each).
+/// The finger bones' axes ([`eng_chr::fingers`]; `r_hand` carries the thumb `finger01`-`03` and a
+/// metacarpal `finger10`..`40` with three knuckles each).
 pub const FINGER_AXES: eng_chr::fingers::Axes = eng_chr::fingers::Axes::DYING_LIGHT_2;
 // --- D3D11 renderer -----------------------------------------------------------------------------------
 pub type PacketFn = unsafe extern "system" fn(packet: usize) -> usize;
@@ -239,7 +235,7 @@ pub const DLSS_OWNER_12: usize = 0x1648a0;
 pub const DLSS_GLOBAL_12: usize = 0x164ba0;
 
 // --- The engine's gui tree (the dynamic HUD; `eng_chr::gui`) ---------------------------------------------
-/// The implementations the exported `gui::IElement` getters jump to (RVAs from the jumps, 2026-10-07):
+/// The implementations the exported `gui::IElement` getters jump to:
 /// `GetWorldMatrix`'s `mov [rsp+0x10], rsi; push rdi; sub rsp, 0x50`; `GetActualPos`'s and
 /// `GetActualSize`'s `push rbx; sub rsp, 0x20; mov rbx, rcx`.
 pub const GUI_BUILD: eng_chr::gui::Build = eng_chr::gui::Build {
@@ -247,9 +243,8 @@ pub const GUI_BUILD: eng_chr::gui::Build = eng_chr::gui::Build {
     position: (0xa12dc0, &[Instruction::plain(&[0x40, 0x53]), Instruction::plain(&[0x48, 0x83, 0xec, 0x20]), Instruction::plain(&[0x48, 0x8b, 0xd9])]),
     size: (0xa12de0, &[Instruction::plain(&[0x40, 0x53]), Instruction::plain(&[0x48, 0x83, 0xec, 0x20]), Instruction::plain(&[0x48, 0x8b, 0xd9])]),
 };
-/// The pieces of the HUD the dynamic HUD takes (widgets of the HUD's documents, probed 2026-10-07):
-/// the compass bar on the minimap's panel, the objectives on the quests', the stamina bar on the
-/// quick item's. The weapon selector and the objectives were mapped in a safe zone: to be confirmed.
+/// The pieces of the HUD the dynamic HUD takes (widgets of the HUD's documents): the compass bar on
+/// the minimap's panel, the objectives on the quests', the stamina bar on the quick item's.
 pub const PIECES: [eng_chr::gui::Piece; 5] = {
     use eng_chr::gui::{Extent, Piece};
     [
@@ -261,9 +256,9 @@ pub const PIECES: [eng_chr::gui::Piece; 5] = {
     ]
 };
 
-// --- Physical melee and the movement step (gamedll, engine; 2026-10-08) -------------------------------
+// --- Physical melee and the movement step (gamedll, engine) -------------------------------------------
 /// The melee code (`eng_chr::melee`): the attack start's
-/// window at +0x1c8 opens about 180 ms in (measured), its copy at +0x460; attack types 0..=17.
+/// window at +0x1c8 opens about 180 ms in, its copy at +0x460; attack types 0..=17.
 pub const MELEE: eng_chr::melee::Build = eng_chr::melee::Build {
     attack_start: 0x154dd40,
     direction_getter: 0x1596db0,

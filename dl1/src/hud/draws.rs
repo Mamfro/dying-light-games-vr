@@ -1,4 +1,4 @@
-//! HUD and menus. Measured frame structure: the finished 3D image reaches the back buffer as one
+//! HUD and menus. The frame's structure: the finished 3D image reaches the back buffer as one
 //! unblended three-vertex draw, and every later draw to the back buffer in that frame is HUD or
 //! menu. Those draws get a viewport at the HUD's place in the eye ([`Placement`]: shrunk toward
 //! the eye's straight-ahead point, as each eye's image is off-centre, and shifted toward the
@@ -51,6 +51,8 @@ static PASS: Mutex<Pass> = Mutex::new(Pass {
 /// Fast path for every draw: is the immediate context drawing to the back buffer?
 static ON_BACKBUFFER: AtomicBool = AtomicBool::new(false);
 static SHIFTED_DRAWS: AtomicU64 = AtomicU64::new(0);
+/// Frames whose 3D image was seen reaching the back buffer (the HUD routing starts there).
+static SCENE_COPIES: AtomicU64 = AtomicU64::new(0);
 static ENABLED: AtomicBool = AtomicBool::new(false);
 
 pub fn enable() {
@@ -59,6 +61,15 @@ pub fn enable() {
 
 pub fn shifted_draws() -> u64 {
     SHIFTED_DRAWS.load(Relaxed)
+}
+
+/// The back buffer's size as the HUD was set up with.
+pub fn backbuffer_size() -> Option<(u32, u32)> {
+    SETTINGS.lock().ok()?.as_ref().map(|s| (s.backbuffer_width, s.backbuffer_height))
+}
+
+pub fn scene_copies() -> u64 {
+    SCENE_COPIES.load(Relaxed)
 }
 
 pub type DrawIndexedFn = unsafe extern "system" fn(*mut core::ffi::c_void, u32, u32, i32);
@@ -134,6 +145,7 @@ pub unsafe extern "system" fn set_targets(
                 }
             }
             ON_BACKBUFFER.store(on, Relaxed);
+            crate::research::backbuffer::bound(ctx, on, count, !depth.is_null());
             crate::research::targets::bound(count, views, !depth.is_null());
             crate::research::depth::bound(depth);
             if !depth.is_null() && (crate::output::hybrid::enabled() || crate::output::upscale::enabled()) {
@@ -174,6 +186,7 @@ fn before_draw(context: *mut core::ffi::c_void, vertices: u32) -> Option<[ID3D11
         return None;
     }
     let mut pass = PASS.lock().unwrap_or_else(|e| e.into_inner());
+    crate::research::backbuffer::draw(context, vertices, pass.scene_copied);
     if !pass.scene_copied {
         if vertices == 3 {
             let mut blend: Option<ID3D11BlendState> = None;
@@ -187,6 +200,7 @@ fn before_draw(context: *mut core::ffi::c_void, vertices: u32) -> Option<[ID3D11
             }
             pass.scene_copied = !desc.RenderTarget[0].BlendEnable.as_bool();
             if pass.scene_copied {
+                SCENE_COPIES.fetch_add(1, Relaxed);
                 crate::research::depth::scene_copied();
                 crate::research::targets::scene_copied(context);
             }
@@ -221,6 +235,13 @@ fn before_draw(context: *mut core::ffi::c_void, vertices: u32) -> Option<[ID3D11
         // their own locks, and the present holds theirs while asking for the HUD's rectangles.
         let (width, height) = SETTINGS.lock().ok()?.as_ref().map(|s| (s.backbuffer_width, s.backbuffer_height))?;
         drop(pass);
+        // The fixed UI (`hud::ui_size`) goes into an FSR layer of its own shape and size.
+        let fixed_layer = crate::hud::ui_size::fixed().filter(|_| !crate::output::hybrid::hud_layer()).map(crate::hud::ui_size::layer_size);
+        match fixed_layer {
+            Some(size) => crate::hud::ui_size::fill_draw(context, size),
+            None => crate::hud::ui_size::band_draw(context),
+        }
+        let (width, height) = fixed_layer.unwrap_or((width, height));
         // The hands' panels take their pieces' draws here too (the rest go into the layer): the
         // layout is the game's own viewport, unmoved in this path.
         if crate::hud::panels::active() {
@@ -259,6 +280,7 @@ fn before_draw(context: *mut core::ffi::c_void, vertices: u32) -> Option<[ID3D11
     pass.last_set_x = placed.TopLeftX;
     // SAFETY: sets one viewport on the game's immediate context, on its own thread.
     unsafe { context.RSSetViewports(Some(&[placed])) };
+    crate::hud::ui_size::band_draw(context);
     SHIFTED_DRAWS.fetch_add(1, Relaxed);
     if crate::hud::panels::active() {
         crate::hud::panels::note_viewports(pass.base);
@@ -272,6 +294,11 @@ fn before_draw(context: *mut core::ffi::c_void, vertices: u32) -> Option<[ID3D11
 /// piece on the hands goes into its panel instead, either way ([`crate::hud::panels::draw_hud`]).
 /// The binding goes through the original `OMSetRenderTargets`, so our own hook does not see it.
 fn draw_once_or_into_layer(context: *mut core::ffi::c_void, layer: Option<[ID3D11RenderTargetView; 2]>, draw: impl Fn()) {
+    draw_routed(context, layer, draw);
+    crate::hud::ui_size::after_draw(context);
+}
+
+fn draw_routed(context: *mut core::ffi::c_void, layer: Option<[ID3D11RenderTargetView; 2]>, draw: impl Fn()) {
     if SKIP_DRAW.swap(false, Relaxed) {
         return;
     }

@@ -73,7 +73,7 @@ pub fn take_command(now: u64) -> Option<Command> {
     }
 }
 
-/// The player's `IControlObject`: at +0x18 of the complete `PlayerDI` (its RTTI, 2026-10-07).
+/// The player's `IControlObject`: at +0x18 of the complete `PlayerDI`.
 fn control(character: usize) -> Option<usize> {
     Some(complete_object(character)? + engine::PLAYER_CONTROL_OBJECT)
 }

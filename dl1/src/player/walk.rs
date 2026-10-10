@@ -4,8 +4,8 @@
 //!
 //! Extra velocity goes into the body's wanted velocity, the one the stick sets: the game writes it
 //! only when it changes it and reads it outside the step, so the extra stays in it, on top of the
-//! game's own value (measured 2026-10-08: the body then moves at exactly that velocity and stops
-//! against walls). `AdditionalLinVel` did nothing to a standing body.
+//! game's own value (the body then moves at exactly that velocity and stops against walls).
+//! `AdditionalLinVel` is not used: it does nothing to a standing body.
 
 use crate::engine;
 use crate::player::hands;

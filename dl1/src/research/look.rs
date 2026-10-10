@@ -1,6 +1,6 @@
 //! Head aim's probes (`crate::player::aim`).
 //!
-//! - `probe_look` found DL1's look fields (2026-10-05): it logs who calls `FromForwardUpPos` on
+//! - `probe_look` finds DL1's look fields: it logs who calls `FromForwardUpPos` on
 //!   the player camera, the classes of the objects around that camera (and of the player objects
 //!   those point to), and which of their floats equal the camera's pitch (look well up or down
 //!   with the mouse before attaching); with head aim on it also traces the steering.
@@ -49,7 +49,7 @@ pub fn seen(camera: usize, forward: usize, site: usize) {
         return;
     }
     // Objects the camera points to, then the player objects those point to (in DL2 the look
-    // targets sat one level further, in the character), and the fields in each that hold the pitch.
+    // targets sit one level further, in the character), and the fields in each that hold the pitch.
     let mut seen = vec![camera];
     let report = |label: String, object: usize, class: &str| {
         let hits = find_floats(object, 0x3000, angle_matcher(pitch));

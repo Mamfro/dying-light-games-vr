@@ -1,8 +1,8 @@
-//! Every fact about this Dying Light: The Beast build (Steam, installed 2026-10-06): module
+//! Every fact about this Dying Light: The Beast build (Steam): module
 //! fingerprints, function addresses with their exact first instructions, and structure offsets.
 //! The Beast moved the renderer out of the engine into `renderer_x64_rwdi.dll`, which exports
 //! `CCamera` by name; the engine's `IBaseCamera` exports are thunks into it
-//! (`mov rcx, [rcx+0x38]; jmp [import]`). Prologues were decoded from the shipped DLL.
+//! (`mov rcx, [rcx+0x38]; jmp [import]`). Every prologue is the shipped DLL's own.
 
 use monaka_hook::Instruction;
 
@@ -55,8 +55,8 @@ pub const COMPUTE_FRUSTUM: Target = (
 // --- D3D12 renderer ------------------------------------------------------------------------------
 pub const RENDERER_12: &str = eng_chr::RD3D12;
 pub const RENDERER_12_SHA256: &str = "68BCDE0658BA0E93F5CA448C40AB10C1165A3B748CA06D50F3EF85239DDF2530";
-/// The present request (DL2's `PRESENT_REQUEST_12`, found by its
-/// `"hr = m_SwapChain4->Present1(interval, flags, &params)"` message).
+/// The present request (DL2's `PRESENT_REQUEST_12`; the function that reports
+/// `"hr = m_SwapChain4->Present1(interval, flags, &params)"`).
 pub use eng_chr::rd3d12::PresentRequestFn as PresentRequest12Fn;
 pub const PRESENT_REQUEST_12: (usize, &[Instruction]) = (
     0x76450,
@@ -117,13 +117,13 @@ pub const CAMERA_EXTENTS: usize = 0x1a0;
 pub const CAMERA_NEAR: usize = 0x1b0;
 pub const CAMERA_FAR: usize = 0x1b4;
 
-// --- The player's look and the first-person arms (gamedll; static, 2026-10-06) -----------------------
+// --- The player's look and the first-person arms (gamedll) -------------------------------------------
 // The Beast's player camera update (gamedll 0x15104b0) is DL2's instruction for instruction. The
 // camera's +0x40 points at the arms visual's `ICameraTarget` base (`PlayerFppVis_PH`, base at vis+0x5c0,
 // vtable `FPP_VIS_VTABLE`); the character `PlayerDI_PH` sits at [target - 0x580] (vis+0x40). Its look
 // angles are DL2's, 0x20 further: degrees, pitch positive up (the forward comes from
 // `GetVectorFromHorzVertAngle(+0xbb0, +0xbb4)`), and the look update smooth-damps them toward the
-// targets the input accumulates into. Yaw turning right as it grows: DL2's convention, unchecked.
+// targets the input accumulates into. Yaw is taken to turn right as it grows, as in DL2.
 pub const CAMERA_TARGET: usize = 0x40;
 /// The renderer's `CCamera` behind a game camera (the engine's camera calls are thunks into it).
 pub const CAMERA_RENDERER: usize = 0x38;
@@ -162,22 +162,22 @@ pub const SKELETON_LAYOUT: eng_chr::coskeleton::Layout =
     eng_chr::coskeleton::Layout { handle: 0x68, world_slot: 0x438, count_slot: 0x4c0, name_slot: 0x4c8, set_world_slot: 0x450 };
 pub const ARMS_LAYOUT: eng_chr::fpp::Layout = eng_chr::fpp::Layout { weapons: 0x910 };
 /// DL2's skeleton (its wrist half turned about x against DL1's): The Beast's idle one-handed melee
-/// wrist frame matches DL2's within about a degree (`probe_hands`, 2026-10-06). The gun holder:
-/// not yet measured, as in DL2.
+/// wrist frame matches DL2's within about a degree. The gun holder has no correction of its own,
+/// as in DL2.
 pub const BONE_AXES: monaka_arms::BoneAxes = monaka_arms::BoneAxes::DYING_LIGHT_2;
 /// The finger bones' axes ([`eng_chr::fingers`]), as Dying Light 2's.
 pub const FINGER_AXES: eng_chr::fingers::Axes = eng_chr::fingers::Axes::DYING_LIGHT_2;
 // --- The engine's gui tree (the dynamic HUD; `eng_chr::gui`) ---------------------------------------------
-/// The implementations the exported `gui::IElement` getters jump to (RVAs from the jumps in this
-/// build's exports, 2026-10-07): `GetWorldMatrix`'s `push rbx; sub rsp, 0x20; test byte
+/// The implementations the exported `gui::IElement` getters jump to: `GetWorldMatrix`'s
+/// `push rbx; sub rsp, 0x20; test byte
 /// [rcx+0x16a], 0x10`; `GetActualPos`'s and `GetActualSize`'s `push rbx; sub rsp, 0x20; mov rbx, rcx`.
 pub const GUI_BUILD: eng_chr::gui::Build = eng_chr::gui::Build {
     world: (0xaad8f0, &[Instruction::plain(&[0x40, 0x53]), Instruction::plain(&[0x48, 0x83, 0xec, 0x20]), Instruction::plain(&[0xf6, 0x81, 0x6a, 0x01, 0x00, 0x00, 0x10])]),
     position: (0xaa4f70, &[Instruction::plain(&[0x40, 0x53]), Instruction::plain(&[0x48, 0x83, 0xec, 0x20]), Instruction::plain(&[0x48, 0x8b, 0xd9])]),
     size: (0xaa4f90, &[Instruction::plain(&[0x40, 0x53]), Instruction::plain(&[0x48, 0x83, 0xec, 0x20]), Instruction::plain(&[0x48, 0x8b, 0xd9])]),
 };
-/// The pieces of the HUD the dynamic HUD takes: Dying Light 2's widget names until The Beast's
-/// are probed (`probe_gui=1` logs its documents and widgets).
+/// The pieces of the HUD the dynamic HUD takes, by Dying Light 2's widget names (`probe_gui=1`
+/// logs this game's documents and widgets).
 pub const PIECES: [eng_chr::gui::Piece; 5] = {
     use eng_chr::gui::{Extent, Piece};
     [
@@ -189,7 +189,7 @@ pub const PIECES: [eng_chr::gui::Piece; 5] = {
     ]
 };
 
-// --- Physical melee and the movement step (gamedll, engine; 2026-10-08) -------------------------------
+// --- Physical melee and the movement step (gamedll, engine) -------------------------------------------
 /// The melee code (`eng_chr::melee`): DL2's
 /// at new addresses; the attack start's window at +0x1d4 and its copy (behind the controller's
 /// "time until the hit window", 0xf5a7d0) at +0x530; attack types 0..=26; segments carry 16 more

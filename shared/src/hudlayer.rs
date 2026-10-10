@@ -3,13 +3,13 @@
 //! `gui` step draws the HUD straight onto the SDR colour buffer, after the post-processing that
 //! made it and before one full-screen draw copies it to the back buffer (the scripts in
 //! `data0.pak`, `renderloop/scripts/gui.ppfx`). The game sets no markers on its command lists
-//! (no `BeginEvent`, 2026-10-07), so the pass is told by the frame's shape: the game's command
+//! (no `BeginEvent`), so the pass is told by the frame's shape: the game's command
 //! lists are hooked (through the game queue's `ExecuteCommandLists`, which hands the first list
 //! over), each list's draws are grouped by the render target bound, and a frame's groups are
 //! strung in execution order.
 //!
-//! The HUD's group is the frame's last group of draws that are not full-screen triangles (The
-//! Beast, 2026-10-07: 46 draws onto the SDR buffer, then two full-screen copies to the back buffer).
+//! The HUD's group is the frame's last group of draws that are not full-screen triangles (the HUD's
+//! draws onto the SDR buffer come before the full-screen copies to the back buffer).
 //! Its render target, learned from one frame, names the HUD draws of the next: every draw onto it
 //! that is not a full-screen triangle. Each such draw is drawn a second time onto the layer (a
 //! cleared RGBA8 render target of the frame's size, bound in the game's place for that one draw),

@@ -2,7 +2,7 @@
 //! first-person arms visual by a component handle, through the engine's component pool. Its
 //! element access is exported by the engine (virtuals, called directly once the component's own
 //! vtable is seen to hold the same functions). Element type 4 is a bone (3 a helper), as the
-//! engine's `IModelObject::IsElementABone` tests (confirmed in DL2: 364 bones, 26 helpers).
+//! engine's `IModelObject::IsElementABone` tests.
 
 use crate::fpp::ArmsSkeleton;
 use monaka_arms::Skeleton;

@@ -25,7 +25,7 @@ pub struct Config {
     pub turn_on_update: bool,
     /// Ask the game for a field of view wide enough for both eyes, so the edges are not culled.
     pub widen_game_fov: bool,
-    /// Turn raster occlusion off: it is built from the camera this producer moves and hid
+    /// Turn raster occlusion off: it is built from the camera this producer moves and hides
     /// distant buildings at the centre of view.
     pub no_raster_occlusion: bool,
     /// Scale of the level's mesh size-cull limits; the headset view draws everything smaller.
@@ -80,11 +80,11 @@ pub struct Fsr {
     pub scale: f32,
     /// RCAS sharpening 0..1 (`fsr_sharpness`; 0 turns it off).
     pub sharpness: Option<f32>,
-    /// The G-buffer's object motion to UV units (`fsr_object_motion`; 0 leaves it out, which it
-    /// does until its units are measured).
+    /// The G-buffer's object motion to UV units (`fsr_object_motion`; 0, the default, leaves it
+    /// out: its units are not known).
     pub object_motion: f32,
     /// Whether the dispatch is told the jitter's content shift (1) or its opposite (-1). 1, as
-    /// AMD documents it, looked much sharper in the headset than -1 (blind A/B, 2026-10-06).
+    /// AMD documents it, is much sharper in the headset than -1.
     pub jitter_sign: f32,
 }
 
@@ -143,8 +143,8 @@ impl Config {
     }
 }
 
-/// A vertical field of view (degrees, 16:9) containing both eyes plus a margin. Headset tests:
-/// widening only the frustum edges left the bottom culled when looking up; a wider value did not.
+/// A vertical field of view (degrees, 16:9) containing both eyes plus a margin. Widening only the
+/// frustum edges leaves the bottom culled when looking up; a wider field of view does not.
 pub fn widened_fov(pose: &HeadPose) -> Option<f32> {
     let (mut horizontal, mut vertical) = (0.0f32, 0.0f32);
     for eye in &pose.fov {

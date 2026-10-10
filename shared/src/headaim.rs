@@ -55,7 +55,7 @@ pub struct Steered {
 }
 
 /// How a build's code loads a vertical look action's id beside its name, for
-/// [`HeadAim::pitch_actions_match`].
+/// [`pitch_actions_match`].
 #[derive(Clone, Copy, Debug)]
 pub enum IdLoad {
     /// `mov dword [rip+disp32], imm32` (`48 c7 05 disp32 imm32`): Dying Light 2.

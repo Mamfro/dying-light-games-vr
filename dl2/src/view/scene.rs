@@ -463,7 +463,7 @@ fn track_left(game: usize, token: u32, a: usize, b: usize) -> Option<(SceneInput
     if !config.depth_stereo && !config.has(debug::OFF_CENTRE) {
         // Each eye rendered with a centred projection covering its field of view, and published
         // with it: some of the game's screen-space shaders assume a centred projection, and an
-        // off-centre one leaves dark, smeared patches on near surfaces (measured 2026-10-05).
+        // off-centre one leaves dark, smeared patches on near surfaces.
         for (e, eye) in base.eyes.iter_mut().enumerate() {
             eye.fov = camera::centred_fov(&eye.fov);
             base.head.fov[e] = eye.fov;

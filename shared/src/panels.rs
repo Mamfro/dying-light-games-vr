@@ -8,7 +8,7 @@
 //! (`apps/viewer/src/panel.rs`, the same pieces as Dying Light 1's); the warp is told the
 //! rectangles and leaves them out of the HUD it lays over the eyes (the game draws its HUD into
 //! the frame too, and the warp takes it out of the world from the layer, so the layer must stay
-//! whole: blanking it there left the piece in the frame, 2026-10-07). A piece's panel shows its
+//! whole: a piece blanked in the layer would stay in the frame). A piece's panel shows its
 //! widget's box as the game laid it out, fitted to the panel's shape with a margin
 //! ([`monaka_core::hud::fit`]). The shaders are `panels12.hlsl`.
 
@@ -116,9 +116,8 @@ impl Panels {
                 Some(b) => {
                     // The widget's own box, as laid out: stable, so it is taken as it is. Its
                     // pixels are the frame's: in a square headset eye the 16:9 layout sits
-                    // letterboxed and the world matrices carry that offset (a 2644x1487 layout
-                    // put the compass at y 629 in a 2644x2644 frame, 2026-10-07), so the layout's
-                    // size is not a scale to apply.
+                    // letterboxed and the world matrices carry that offset, so the layout's size
+                    // is not a scale to apply.
                     piece.found = Some(b);
                     rects.push((i, monaka_core::hud::fit(b, MARGIN, piece.size)));
                 }

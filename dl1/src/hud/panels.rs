@@ -25,8 +25,8 @@
 //!
 //! A piece is shown while its widget has anything drawn, and its panel shows the widget's box
 //! (its leaves' union, grown while it stays). Nothing is measured from the image, no piece is
-//! found by where it lies (a geometric guess took the experience banner for the health and lost
-//! the quests between measurements, 2026-10-07).
+//! found by where it lies (a geometric guess takes the experience banner for the health and loses
+//! the quests between measurements).
 //!
 //! Its probes (`probe_hud`, `hud_hide`) are in `research::hud`.
 
@@ -286,7 +286,7 @@ pub fn draw_hud(context: *mut core::ffi::c_void, draw: &dyn Fn(), otherwise: &dy
             *cursor = i + 1;
             layout.leaves[i]
         }),
-        Placement::Pixels => first_glyph(ctx).and_then(|glyph| ui::text_leaf(&layout.leaves, glyph).map(|i| (glyph, layout.leaves[i]))).map(|(glyph, leaf)| {
+        Placement::Pixels => first_glyph(ctx).inspect(|&glyph| note_text(&layout.leaves, glyph)).and_then(|glyph| text_owner(layout, glyph).map(|leaf| (glyph, leaf))).map(|(glyph, leaf)| {
             // A text longer than its box (right-aligned, it starts left of it): the piece's box
             // takes it in.
             // Not the minimap's: its box is its frame ([`ui::MINIMAP`]).
@@ -321,6 +321,41 @@ pub fn draw_hud(context: *mut core::ffi::c_void, draw: &dyn Fn(), otherwise: &dy
     }
 }
 
+/// The leaf a text draw is ([`ui::text_leaf`]); else, for a text spilling out of its own box, the
+/// panel widget whose area holds its first glyph. The objective under the quest's title is
+/// right-aligned and wraps: its glyphs start left of and below the box the game gives it, but
+/// inside the objectives' area. Not the minimap's, whose area is its frame.
+fn text_owner(layout: &ui::Layout, glyph: [f32; 2]) -> Option<ui::Leaf> {
+    if let Some(i) = ui::text_leaf(&layout.leaves, glyph) {
+        return Some(layout.leaves[i]);
+    }
+    let inside = |b: &[f32; 4]| glyph[0] >= b[0] && glyph[0] <= b[2] && glyph[1] >= b[1] && glyph[1] <= b[3];
+    let piece = layout.pieces.iter().enumerate().filter(|&(i, _)| i != ui::MINIMAP).find(|(_, b)| b.as_ref().is_some_and(inside)).map(|(i, _)| i)?;
+    Some(ui::Leaf { piece: Some(piece), text: true, at: glyph, rect: [glyph[0], glyph[1], glyph[0], glyph[1]], last: false })
+}
+
+/// Text draws whose first glyph was read, and of them those matched to a text leaf.
+static TEXTS: [AtomicU64; 2] = [const { AtomicU64::new(0) }; 2];
+
+/// Research: a text draw's first glyph against the text leaves; the first unmatched ones (left to
+/// their widget's area, [`text_owner`]) are logged with the text leaf nearest by row.
+fn note_text(leaves: &[ui::Leaf], glyph: [f32; 2]) {
+    TEXTS[0].fetch_add(1, Relaxed);
+    if ui::text_leaf(leaves, glyph).is_some() {
+        TEXTS[1].fetch_add(1, Relaxed);
+        return;
+    }
+    static LOGGED: AtomicU64 = AtomicU64::new(0);
+    if LOGGED.load(Relaxed) >= 6 {
+        return;
+    }
+    let nearest = leaves.iter().filter(|l| l.text).min_by(|a, b| (a.rect[1] - glyph[1]).abs().total_cmp(&(b.rect[1] - glyph[1]).abs()));
+    if let Some(leaf) = nearest {
+        LOGGED.fetch_add(1, Relaxed);
+        log!("HUD text: a glyph at {:.1},{:.1} outside every text box (its widget's area decides); nearest by row: {:?} (piece {:?})", glyph[0], glyph[1], leaf.rect, leaf.piece);
+    }
+}
+
 /// HUD draws routed this run: [seen, placed by matrix, text in pixels, unplaced, matched to a
 /// leaf, into a panel].
 static ROUTING: [AtomicU64; 6] = [const { AtomicU64::new(0) }; 6];
@@ -330,6 +365,7 @@ pub fn report() {
     if active() || ROUTING[0].load(Relaxed) > 0 {
         let [seen, at, pixels, unknown, matched, panel] = ROUTING.each_ref().map(|c| c.load(Relaxed));
         log!("HUD panels: {seen} HUD draws routed ({at} placed by their matrix, {pixels} text, {unknown} unplaced), {matched} matched to a widget's part, {panel} drawn into a panel");
+        log!("HUD panels: {} text draws read, {} matched to a text leaf", TEXTS[0].load(Relaxed), TEXTS[1].load(Relaxed));
     }
 }
 
@@ -767,7 +803,7 @@ mod tests {
 
     #[test]
     fn hud_matrices_place_quads_and_leave_text_in_pixels() {
-        // Logged 2026-10-06: a minimap icon (its corner where the map saw it, 0.885 x 0.245), a
+        // Logged matrices: a minimap icon (its corner where the map saw it, 0.885 x 0.245), a
         // rotated minimap element, and quest text (pixels to the screen).
         let icon = [2.414, 0.0, 0.0, 2451.858, 0.0, -2.414, 0.0, 1640.567, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -1.0, 3191.590];
         let Placement::At([x, y]) = placement_of(&icon) else { panic!("{:?}", placement_of(&icon)) };

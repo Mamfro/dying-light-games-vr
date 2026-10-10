@@ -18,7 +18,7 @@ pub struct Config {
     /// `swing_attack`, `swing_speed`).
     pub melee: melee::Settings,
     /// Physical melee (with the hand rig; `eng_chr::melee`). The Beast starts a light attack when
-    /// it is let go (measured: 156 ms after a 150 ms press), as DL1 does: swings press briefly.
+    /// it is let go, as DL1 does: swings press briefly.
     pub physical_melee: Option<melee::Physical>,
     /// The flashlight in VR (with stereo; [`crate::player::flashlight`]): its camera-movement sway
     /// held at zero (`flashlight_steady`, default on) and its screen-space shadows off

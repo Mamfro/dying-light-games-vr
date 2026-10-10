@@ -1,8 +1,8 @@
 //! `probe_widget=<name>` (with the in-world HUD): the named widget of the game's UI tree
 //! (`crate::hud::ui`), its first part (kind and corner, layout pixels) at every snapshot, with the eye
 //! being chosen, the present, and which camera the player camera held as the game laid it out.
-//! Kept in memory and logged in one go once [`WATCHED_LINES`] are in: logged a line at a time,
-//! the game thread stuttered and the eyes got each other's images (2026-10-07).
+//! Kept in memory and logged in one go once [`WATCHED_LINES`] are in: logging a line at a time
+//! stalls the game thread enough that the eyes get each other's images.
 
 use super::options;
 use crate::hud::ui::Leaf;

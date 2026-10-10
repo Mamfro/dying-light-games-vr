@@ -3,8 +3,8 @@
 //! character's look targets are steered to it plus the head (or the aiming hand). A cutscene is
 //! the engine's own state ([`on_movie`]); then the view is its camera plus the head.
 //!
-//! DL1's look fields ([`LOOK`], offsets in `engine.rs`) were found with `probe_look`
-//! (`research::look`), the way DL2's were.
+//! DL1's look fields ([`LOOK`]) have their offsets in `engine.rs`; `probe_look`
+//! (`research::look`) finds them, the way it does for DL2.
 
 use crate::engine::{self, FromForwardFn};
 use crate::view::stereo;
@@ -21,7 +21,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::*};
 
 /// Where DL1 keeps the player's look targets.
 pub struct LookFields {
-    /// The module and offset of the call that sets the player camera (the probe's busiest
+    /// The module and offset of the call that sets the player camera (the busiest
     /// `FromForwardUpPos` call site during play).
     pub player_call: (&'static str, usize),
     /// From that camera to the character holding the look targets.
@@ -31,9 +31,7 @@ pub struct LookFields {
     pub convention: Convention,
 }
 
-/// DL1's mapping (see `engine.rs`). PC-verified 2026-10-05 with a fake head 30 degrees left and
-/// level: the camera went level within one update and turned 30 degrees left, steady for 6 s; the
-/// yaw turns right as it grows, as in DL2.
+/// DL1's mapping (see `engine.rs`): the yaw turns right as it grows, as in DL2.
 pub const LOOK: LookFields = LookFields {
     player_call: (engine::GAMEDLL, engine::PLAYER_CAMERA_CALL),
     character,
@@ -137,8 +135,8 @@ struct State {
     /// by the player's stick (climbing, by the stick's turn of the game camera). The view is this
     /// plus the head; the character is steered to it plus the head (or hand). Whatever else turns
     /// the character (a conversation facing the speaker, an attack's sway, a climb-up) turns the
-    /// character and its camera but never the view: with the view made from the game camera's
-    /// direction, each of those moved it, and every fix detected one more of them (2026-10-07).
+    /// character and its camera but never the view: a view made from the game camera's direction
+    /// moves with each of those, and they are too many to detect one by one.
     facing: Option<f32>,
     /// In a cutscene, the head's yaw as it began (radians): the cutscene's framing sits straight
     /// ahead of where the player faced then, and the head looks around in it.
@@ -189,13 +187,13 @@ pub fn keep_stick() {
 }
 
 /// The camera's yaw (degrees, positive left) for a target yaw `t` is this minus `t` whenever the
-/// camera follows the targets (every update logged in play and on ledges, 2026-10-06).
+/// camera follows the targets (in play and on ledges alike).
 const CAMERA_YAW_OF_TARGET: f32 = -90.0;
 
 /// A cutscene has the player: `IModelObject::IsObjectOnSomeMovie` on the character, asked at
-/// every update, so a cutscene already under way when VR starts counts too. The engine's own state:
-/// detecting cutscenes by how the camera behaved (off the look targets, the pitch written not
-/// kept) caught them late, let them go early, and took conversations for them (2026-10-07).
+/// every update, so a cutscene already under way when VR starts counts too. The engine's own state
+/// is used because detecting cutscenes by how the camera behaves (off the look targets, the pitch
+/// written not kept) catches them late, lets them go early, and takes conversations for them.
 static MOVIE: AtomicBool = AtomicBool::new(false);
 static MOVIE_SWITCHES: AtomicU64 = AtomicU64::new(0);
 static FACING_KNOWN: AtomicBool = AtomicBool::new(false);
@@ -210,7 +208,7 @@ pub fn resolve(engine_module: &Module) -> Result<(), Rejection> {
 }
 
 /// Whether a cutscene has `character` (a `PlayerDI`, checked by class: an `IModelObject` at its
-/// start, from its RTTI, 2026-10-07).
+/// start).
 fn on_movie(character: usize) -> bool {
     let Some(whole) = complete_object(character) else { return false };
     // SAFETY: the engine's own query on the character's IModelObject, on the game thread inside
@@ -330,7 +328,7 @@ fn steer(fields: &LookFields, camera: usize, site: usize, forward: usize) {
         None => {}
     }
     // Climbing or hanging, the game turns the character by where it looks (letting go with one
-    // hand to reach back, taking hold again) and fights look angles written into it: those kicked
+    // hand to reach back, taking hold again) and fights look angles written into it: those kick
     // the character back. The stick turns it there cleanly, so the head goes in as the stick: it
     // pushes the right stick until the game's camera looks where the head does. The player's own
     // stick turns the facing by what it turns the game's camera.
@@ -385,8 +383,8 @@ fn steer(fields: &LookFields, camera: usize, site: usize, forward: usize) {
     // head, whatever turned the camera.
     state.baked.record(frame, wrapped(camera_yaw - facing));
     // The character looks where the facing plus the head (or hand) does: kept nearest the yaw it
-    // has, so a player turned round in the room does not send it a full turn off (the game turned
-    // the character all the way round to them: 2026-10-06).
+    // has, so a player turned round in the room does not send it a full turn off (the game would
+    // turn the character all the way round to it).
     let target = yaw + wrapped_degrees(CAMERA_YAW_OF_TARGET - wrapped(facing + aim_yaw).to_degrees() - yaw);
     let limit = fields.convention.pitch_limit;
     let target_pitch = (aim_pitch * fields.convention.pitch_per_radian).clamp(-limit, limit);

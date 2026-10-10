@@ -13,9 +13,9 @@
 //!
 //! The HUD is kept out of the interpolation: in gameplay the game also tags each eye's UI layer, so
 //! the world is recovered from the frame and that layer, interpolated, and the newest real frame's
-//! layer is laid over the generated frame ([`HudComposer`]). (The game's own HUD-less frame is black
-//! while its frame generation is held off, and frame generation's own HUD handling, given it,
-//! returned the newest real frame unchanged: measured 2026-10-05.) Menus tag no UI layer; their
+//! layer is laid over the generated frame ([`HudComposer`]). The game's own HUD-less frame is not
+//! used: it is black while the game's frame generation is held off, and frame generation's own HUD
+//! handling, given it, returns the newest real frame unchanged. Menus tag no UI layer; their
 //! finished frames are interpolated.
 
 use monaka_channel::d3d12::{self, Recorder};
@@ -147,8 +147,8 @@ pub fn set_camera(camera: Camera) {
 struct Stream {
     eye: EyeStream,
     /// The world without its HUD, interpolated in place of the frame: a ring like the frame copies,
-    /// because frame generation reads the previous frame from its own texture (measured: with one
-    /// texture rewritten each frame, the "generated" frame was the newest one).
+    /// because frame generation reads the previous frame from its own texture (with one texture
+    /// rewritten each frame, the "generated" frame is just the newest one).
     world: [ID3D12Resource; SLOTS],
     /// The ring slot written last.
     world_slot: usize,

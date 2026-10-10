@@ -10,12 +10,15 @@
 //! research notes, its facts in `engine.rs`.
 
 pub mod arms;
+pub mod backbuffer;
 pub mod depth;
 pub mod drift;
 pub mod hud;
+pub mod layer;
 pub mod look;
 pub mod melee;
 pub mod pad;
+pub mod resize;
 pub mod sweep;
 pub mod targets;
 pub mod video;
@@ -37,6 +40,9 @@ pub struct Options {
     pub look: bool,
     /// `probe_depth`: the depth buffers bound before the scene reaches the back buffer.
     pub depth: bool,
+    /// `probe_backbuffer`: a few frames' back-buffer draws in order, and how many frames had the
+    /// 3D image's copy the HUD routing starts from.
+    pub backbuffer: bool,
     /// `probe_targets`: every render target drawn into each frame, in order (motion-vector hunting).
     pub targets: bool,
     /// `probe_video`: where the game keeps the current resolution.
@@ -58,6 +64,12 @@ pub struct Options {
     pub widget: Option<String>,
     /// `probe_pad`: what the engine asks SDL about game controllers.
     pub pad: bool,
+    /// `probe_resize`: each call of the levels' resolution-change handler, with its callers.
+    pub resize: bool,
+    /// `probe_layer` (with FSR): every few seconds the back buffer, the upscaled eye and the HUD
+    /// layer as PNG, to see what the game drew and where the HUD went.
+    pub layer: bool,
+
     /// `probe_melee`: every hit the game deals (`IControlObject::TakeDamage`): who built it, its bytes.
     pub melee: bool,
     /// `flat=1`: attach for the gameplay probes only, no stereo and nothing drawn differently.
@@ -79,6 +91,7 @@ impl Options {
         Self {
             look: options.switch("probe_look", false),
             depth: options.switch("probe_depth", false),
+            backbuffer: options.switch("probe_backbuffer", false),
             targets: options.switch("probe_targets", false),
             video: options.switch("probe_video", false),
             frames: options.switch("probe_frames", false),
@@ -91,6 +104,9 @@ impl Options {
             }),
             widget: options.text("probe_widget").map(str::to_owned),
             pad: options.switch("probe_pad", false),
+            resize: options.switch("probe_resize", false),
+            layer: options.switch("probe_layer", false),
+
             melee: options.switch("probe_melee", false),
             flat: options.switch("flat", false),
             hands: options.switch("probe_hands", false),
@@ -103,7 +119,7 @@ impl Options {
 
     /// The back-buffer draw hooks serve a probe.
     pub fn draws(&self) -> bool {
-        self.depth || self.targets
+        self.depth || self.targets || self.backbuffer
     }
 
     /// The arms callback serves a probe.
@@ -158,13 +174,16 @@ fn install_gameplay(hooks: &mut Hooks, engine_module: &Module) -> Result<(), Rej
         let gamedll = require_build(crate::engine::GAMEDLL, crate::engine::GAMEDLL_SHA256)?;
         sweep::install(hooks, engine_module, &gamedll)?;
     }
+    if o.resize {
+        resize::install(hooks, &require_build(crate::engine::GAMEDLL, crate::engine::GAMEDLL_SHA256)?)?;
+    }
     Ok(())
 }
 
 /// The probes' own hooks, beside the adapter's; `size` is the back buffer's.
 ///
 /// # Safety
-/// The engine and game DLL are the builds `engine.rs` was measured in (hash checked).
+/// The engine and game DLL are the builds `engine.rs` describes (hash checked).
 pub unsafe fn install(hooks: &mut Hooks, engine_module: &Module, size: (u32, u32)) -> Result<(), Rejection> {
     let o = options();
     if o.video {
@@ -191,6 +210,7 @@ pub fn finish() {
     look::report();
     depth::report();
     targets::report();
+    backbuffer::report();
 }
 
 /// After the hooks are off.
@@ -204,6 +224,9 @@ pub fn report() {
     melee::report();
     sweep::report();
     walk::report();
+    if options().resize {
+        resize::report();
+    }
     if options().pad {
         pad::report();
         monaka_pad::probe::report();

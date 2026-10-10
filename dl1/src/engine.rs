@@ -1,5 +1,4 @@
-//! Dying Light 1 engine facts, measured from the running game and valid only for the
-//! fingerprinted builds below.
+//! Dying Light 1 engine facts, valid only for the fingerprinted builds below.
 
 use monaka_core::camera::{Mat34, Mat44};
 use monaka_core::convention::{CameraConvention, ProjectionConvention};
@@ -36,7 +35,7 @@ pub const FROM_FORWARD_PROLOGUE: [Instruction; 2] = [
     Instruction::plain(&[0x48, 0x83, 0xec, 0x28]), // sub rsp, 0x28
     Instruction::plain(&[0x4c, 0x8b, 0x59, 0x08]), // mov r11, [rcx+8]
 ];
-/// Head aim (probed 2026-10-05, `probe_look`): the game sets the player camera
+/// Head aim: the game sets the player camera
 /// (`CameraFPPDI`) from `gamedll+0x343339`, once per update. The camera points at +0x50 into its
 /// `PlayerFppVis` (a subobject; RTTI gives the complete object), whose +0x50 is the character,
 /// `PlayerDI`. The character keeps its look angles in degrees as (yaw, pitch) pairs, pitch negative
@@ -45,8 +44,7 @@ pub const FROM_FORWARD_PROLOGUE: [Instruction; 2] = [
 pub const GAMEDLL: &str = "gamedll_x64_rwdi.dll";
 pub const GAMEDLL_SHA256: &str = "76F20D27C45C0B807D2F099022AD0ABC42CA90A8ADE7F761641518AF346D26A0";
 
-/// Vertical look input (found 2026-10-05 from DL2's converter, `gamedll_ph+0x1ec1700`): every
-/// input action passes through `gamedll+0x11928d0` (binding, receivers, value, source, repeat);
+/// Vertical look input (the same converter as DL2's): every input action passes through `gamedll+0x11928d0` (binding, receivers, value, source, repeat);
 /// the binding holds the action id at +0 and flags at +0x10, flag 0x10 meaning the converter
 /// applies `1 - value` (so the neutral value is 1). The action table entries (name pointer, two
 /// lengths, id at +0x10) are checked by name before the ids are trusted.
@@ -78,8 +76,7 @@ pub const CHARACTER_CLASS: &str = ".?AVPlayerDI@@";
 pub const TARGET_YAW: usize = 0x1174;
 pub const TARGET_PITCH: usize = 0x1178;
 pub const CURRENT_PITCH: usize = 0x1170;
-/// Video settings (found 2026-10-05): `IGame::GetScreenWidth` reads `[[game+8]+0xC0]+0`. That
-/// object holds the applied mode at +0x00 and the requested one at +0x18 (each: width, height,
+/// Video settings: `IGame::GetScreenWidth` reads `[[game+8]+0xC0]+0`. That object holds the applied mode at +0x00 and the requested one at +0x18 (each: width, height,
 /// bits, fullscreen byte at +0xc, ... 0x18 bytes; engine+0x23fe80 compares them). The game's tick
 /// (engine+0x22ca40 → +0x23fd40) runs `CVideoSettings::ApplyChanges` (engine+0x23ef50) when the
 /// pending byte +0x3f is set; the force byte +0x88 makes it reset the device even when the two
@@ -94,8 +91,7 @@ pub const VIDEO_FORCE_APPLY: usize = 0x88;
 // holds it): `eng_chr::game`.
 /// How far the player camera moves with its pitch (degrees, positive up): metres along its level
 /// heading and up, from pitch 0, every 5 degrees from -60 to 60. The character leans: looking 60
-/// degrees up puts the camera 0.37 m back. Measured 2026-10-06 standing still with a fake
-/// controller sweeping the pitch (`Capture-DL1.ps1 -HandYaw 0 -HandSweep`).
+/// degrees up puts the camera 0.37 m back. The values are for the character standing still.
 const CAMERA_LEAN: [(f32, f32); 25] = [
     (0.172, -0.116), (0.165, -0.105), (0.155, -0.090), (0.144, -0.077), (0.130, -0.066), (0.115, -0.055), (0.100, -0.046),
     (0.085, -0.035), (0.069, -0.026), (0.053, -0.018), (0.036, -0.011), (0.018, -0.005), (0.0, 0.0), (-0.035, 0.0),
@@ -116,7 +112,53 @@ pub fn camera_lean(pitch: f32) -> (f32, f32) {
     (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t)
 }
 
-/// The first-person arms (found 2026-10-06, static): `PlayerFppVis` is the camera's target (its
+// The levels' UI after a size change: the game DLL's
+// resolution-change handler, `gamedll+0x11442c0` (virtual 128, +0x400, of its `Level`, `LevelDI`,
+// `GameMenuModuleDI`, `MainMenuModule` and loading modules, each an `ILevel` whose engine `CLevel`
+// keeps it at +0xA8), notes where the level's UI screens are, has the level's UI manager make its
+// projection again (`UI_ON_RESOLUTION_CHANGE`, the only caller of that export), runs five more of
+// the level's virtuals and puts the screens back. The game does not run it when the video settings
+// change size. Run from outside, at the game's frame, it breaks the game (placeholder text on the
+// start screen, then access violations in the engine), so `output::video` makes only the
+// projection call on each level.
+
+/// A level's UI system, `[level + 0x568]` (the level an `ILevel` keeps at +8), and its UI manager at
+/// +0x1770, as `ILevel::GetIUIManager` reads it.
+pub const LEVEL_UI_HOLDER: usize = 0x568;
+pub const UI_HOLDER_MANAGER: usize = 0x1770;
+/// The UI system's auto layout: its update (engine+0x5dad30, from the level's update and render)
+/// checks `holder + 0x14C8` every frame (engine+0x580840) and places the screens' elements against
+/// the screen's edges again (each `.xui` element's `Anchor`) only when its bit 0 is set or its set
+/// of screens changed. It is set only at the stop, after the camera is made for the monitor: there
+/// it re-places what VR left placed for the square (such as the pause menu's SELECT hint, cut on
+/// the left). Set at the start, with the menus' camera still for the old size, it makes the pause
+/// menu worse.
+pub const UI_HOLDER_AUTO_LAYOUT: usize = 0x14C8;
+pub const AUTO_LAYOUT_DIRTY: u8 = 1;
+/// `void IUIManager::OnResolutionChange()`: the manager's two layers get their projection again,
+/// from the size in the video settings (`[[game + 8] + 0xC0]`, [`VIDEO_SETTINGS_IN_GAME`]).
+pub const UI_ON_RESOLUTION_CHANGE: &str = "?OnResolutionChange@IUIManager@@QEAAXXZ";
+// A level's game object (the game DLL's `ILevel`) is `[level + 0xA8]`, keeping the level at +8;
+// whether a level's UI shows, bit 0 of its UI system's +0x2E0. The menus are levels of the game
+// DLL's `MainMenuModuleDI` (the pause menu, map and inventory: made at the pause, gone at the
+// resume) and `GameMenuModuleDI`.
+/// The UI's own screen size (read by `IGame::GetScreenResolutionScale` through engine+0x5db980):
+/// element sizes, positions and font scales come from it, each as width/1280 or
+/// height/720 of the 1280x720 `.xui` design (the two disagree on a square screen, so pages
+/// overflow or shift). It is `i32` width/height at `[engine + UI_SIZE_SOURCE] + 0xC8/0xCC`, unless
+/// the byte at `UI_SIZE_OVERRIDDEN` is set: then the two `f32` at `UI_SIZE_OVERRIDE` (width, height).
+/// The engine sets that override to its design size while it saves UI packs (engine+0x5d90f0).
+/// The camera (`UI_ON_RESOLUTION_CHANGE`) reads the video settings' size instead.
+pub const UI_SIZE_OVERRIDDEN: usize = 0xA3FF4B;
+pub const UI_SIZE_OVERRIDE: usize = 0xABDF28;
+pub type UiOnResolutionChangeFn = unsafe extern "system" fn(*mut core::ffi::c_void);
+/// The game's levels (as `IGame::FreezeTimersOnLevels` and `SaveLevelsTimersState` walk them): an
+/// array of level pointers at `[[game + 8] + 0xE0]`, its length an
+/// `i32` at `[game + 8] + 0xE8`.
+pub const GAME_LEVELS: usize = 0xE0;
+pub const GAME_LEVEL_COUNT: usize = 0xE8;
+
+/// The first-person arms: `PlayerFppVis` is the camera's target (its
 /// `ICameraTarget` base sits at +0x2cb0; the player camera's +0x50 points into it). The camera
 /// calls the target's slot 9, a thunk to `gamedll+0xc24160 (vis, camera)`, which post-processes a
 /// few element (bone) world matrices against that camera: the root scaled toward the camera, and
@@ -130,8 +172,8 @@ pub const MODEL_HOLDER_GET_MODEL: usize = 0x10;
 /// The vis's element-index table and the indices the callback adjusts in it.
 pub const FPP_VIS_ELEMENTS: usize = 0x70;
 /// The vis's two weapon visuals (pointers; the callback hands each its field of view). With a gun
-/// drawn the first was a `FireWeaponVis` and the second empty (2026-10-06); melee weapons are the
-/// base `WeaponVis` by the class hierarchy (not yet seen in a probe).
+/// drawn the first is a `FireWeaponVis` and the second empty; melee weapons are the base
+/// `WeaponVis` by the class hierarchy.
 pub const FPP_VIS_WEAPONS: usize = 0x1020;
 pub const FPP_ELEMENT_SLOTS: [(usize, &str); 3] = [(0xd4, "root (scaled)"), (0x41c, "fov-corrected A"), (0x29c, "fov-corrected B")];
 pub type CameraTargetFn = unsafe extern "system" fn(*mut core::ffi::c_void, *mut core::ffi::c_void);
@@ -146,7 +188,7 @@ pub const SET_ELEMENT_WORLD: &str = "?SetElementWorldMatrix@IModelObject@@QEAAXH
 pub const ELEMENT_IS_BONE: &str = "?IsElementABone@IModelObject@@QEAA_NH@Z";
 /// Puts an element's descendants back on the model's reference frame (its rest pose: the skinned
 /// mesh's bind pose), the element itself left as it is. The engine exports no getter for the
-/// reference frame; this is how it is read (`probe_fingers`).
+/// reference frame; this is how it is read.
 pub const RESET_DESCENDANTS: &str = "?ResetElementsDescendantsToReferenceFrame@IModelObject@@QEAAXH@Z";
 pub type ResetDescendantsFn = unsafe extern "system" fn(*mut core::ffi::c_void, i32);
 /// An element's matrix against its parent (the reset writes these; the world matrices follow
@@ -164,7 +206,7 @@ pub type ElementIsBoneFn = unsafe extern "system" fn(*mut core::ffi::c_void, i32
 
 // Gamepads: the engine reads XInput itself (`CXPadDevice`, imports #2-#4 of XINPUT1_3, which in
 // this folder is the startup proxy), through the Steam overlay's hooks; its SDL 2.0.3 also reads
-// them, but only for events gameplay ignores. `monaka_pad::install` covers both (2026-10-06).
+// them, but only for events gameplay ignores. `monaka_pad::install` covers both.
 
 /// Present only as a check that the level variable store is the one these offsets describe.
 pub const MESH_CULL_SETTERS: [&str; 2] = ["?SetMeshCullSize@ILevel@@QEAAXM@Z", "?SetHSMMeshCullSize@ILevel@@QEAAXM@Z"];
@@ -205,8 +247,7 @@ pub type FromForwardFn = unsafe extern "system" fn(*mut core::ffi::c_void, *cons
 
 /// The projection the renderer's depth buffer was written with. The camera state keeps a standard
 /// infinite projection (depth = 1 - near / distance), but the renderer writes reverse-Z infinite
-/// depth, `near / distance` (measured 2026-10-05: sky 0.000001, ground 1.75 m below the camera
-/// 0.0286 with near 0.05), so the depth terms are replaced; the x/y terms stay.
+/// depth, `near / distance`, so the depth terms are replaced; the x/y terms stay.
 pub fn depth_buffer_projection(projection: &Mat44, near: f32) -> Mat44 {
     let mut p = *projection;
     p[10] = 0.0;

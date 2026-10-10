@@ -59,7 +59,7 @@ pub struct Callback {
 /// vtable slot is seen to name it.
 ///
 /// # Safety
-/// `gamedll` is the build `callback` was measured in.
+/// `gamedll` is the build `callback` describes.
 pub unsafe fn hook(hooks: &mut Hooks, gamedll: &Module, callback: &Callback, original: &'static Original<CameraTargetFn>, detour: CameraTargetFn) -> Result<(), Rejection> {
     let target = gamedll.at(callback.rva);
     if mem::read::<usize>(gamedll.at(callback.vtable) + callback.slot) != Some(target) {

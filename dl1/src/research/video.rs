@@ -1,5 +1,5 @@
-//! `probe_video`: where the game keeps the current resolution (found the video settings layout of
-//! `crate::output::video`): on the game's frames ([`eng_chr::game::observe`]), the objects around the game
+//! `probe_video`: where the game keeps the current resolution (the video settings layout
+//! `crate::output::video` relies on): on the game's frames ([`eng_chr::game::observe`]), the objects around the game
 //! object searched for the back buffer's size.
 
 use crate::engine;
