@@ -87,7 +87,7 @@ impl Rig {
             return;
         };
         let palms = controllers::palms();
-        let fpp_options = fpp::Options { rig: options.rig, probe: options.probe, melee: options.melee, fingers: (options.rig && options.fingers).then_some(self.facts.fingers), palms };
+        let fpp_options = fpp::Options { rig: options.rig, probe: options.probe, melee: options.melee, fingers: (options.rig && options.fingers).then_some(self.facts.fingers), palms, apart: false };
         let vis = target.wrapping_sub(self.facts.icamera_target);
         let key = match self.facts.camera_key_at {
             Some(at) => mem::read::<usize>(camera + at).unwrap_or(0),
@@ -99,6 +99,7 @@ impl Rig {
             }
             let head = head.filter(|h| h.valid != 0).ok_or("no head")?;
             let origin = aim.tracking_origin(&game, counter).ok_or("camera not levelled")?;
+            crate::hands::note(&origin, &palms);
             Ok(monaka_arms::Pose { game, origin, head, palms, aim_side: options.melee.aim_side, hold: [0.0; 3], gun, melee_holder: None, bones: self.facts.bones })
         };
         fpp::around(vis, &self.facts.arms, &fpp_options, crate::coskeleton::CoSkeleton::of, aim.player_camera(key), original, pose);

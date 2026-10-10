@@ -11,8 +11,11 @@
 
 pub mod arms;
 pub mod backbuffer;
+pub mod bindings;
+pub mod bow;
 pub mod depth;
 pub mod drift;
+pub mod give;
 pub mod hud;
 pub mod layer;
 pub mod look;
@@ -21,6 +24,7 @@ pub mod pad;
 pub mod resize;
 pub mod sweep;
 pub mod targets;
+pub mod throw;
 pub mod video;
 pub mod view;
 pub mod walk;
@@ -74,8 +78,13 @@ pub struct Options {
     pub melee: bool,
     /// `flat=1`: attach for the gameplay probes only, no stereo and nothing drawn differently.
     pub flat: bool,
+    /// `flat_buttons=1`, with `flat`: also the VR buttons (without crouch, which follows the head)
+    /// and the zombie grabs switch, which need no headset.
+    pub flat_buttons: bool,
     /// `probe_hands`: the arms model's elements and where the game puts them against its camera.
     pub hands: bool,
+    /// `probe_bow` (with the hand rig): the bow model's elements and which move as it is drawn.
+    pub bow: bool,
     /// `probe_fingers`: once, the hands' elements with their rest pose against the animated pose.
     pub fingers: bool,
     /// `probe_sweep`: what the player's melee hit detection sees.
@@ -84,6 +93,12 @@ pub struct Options {
     /// `walk_push=x,z` (m/s, world axes) also pushes it that way.
     pub walk: bool,
     pub walk_push: Option<[f32; 2]>,
+    /// `probe_bindings`: each input layout the game applies to its bindings, and who asks.
+    pub bindings: bool,
+    /// `probe_throw`: each throw and drop of an item, and the objects they make.
+    pub throw: bool,
+    /// `give=Name:count,...` (testing only): items given to the player once, a few seconds into play.
+    pub give: Option<String>,
 }
 
 impl Options {
@@ -109,11 +124,16 @@ impl Options {
 
             melee: options.switch("probe_melee", false),
             flat: options.switch("flat", false),
+            flat_buttons: options.switch("flat_buttons", false),
             hands: options.switch("probe_hands", false),
+            bow: options.switch("probe_bow", false),
             fingers: options.switch("probe_fingers", false),
             sweep: options.switch("probe_sweep", false),
             walk: options.switch("probe_walk", false),
             walk_push: options.floats::<2>("walk_push", 5.0),
+            bindings: options.switch("probe_bindings", false),
+            give: options.text("give").map(str::to_owned),
+            throw: options.switch("probe_throw", false),
         }
     }
 
@@ -148,17 +168,23 @@ pub fn configure(options: &monaka_core::options::Options, dir: &std::path::Path)
     if options.targets {
         targets::enable();
     }
+    if let Some(items) = &options.give {
+        give::configure(items);
+    }
     log!("research: {options:?}");
     let _ = OPTIONS.set(options);
     let _ = DIR.set(dir.to_path_buf());
 }
 
-/// `flat=1`: only the gameplay probes' hooks, on the game as it plays on the monitor. `None`
-/// without `flat`.
-pub fn flat(engine_module: &Module) -> Option<Result<(), Rejection>> {
+/// `flat=1`: only the gameplay probes' hooks, on the game as it plays on the monitor, and with
+/// `flat_buttons=1` the adapter's own that need no headset (`buttons`). `None` without `flat`.
+pub fn flat(engine_module: &Module, buttons: impl FnOnce(&mut Hooks) -> Result<(), Rejection>) -> Option<Result<(), Rejection>> {
     options().flat.then(|| {
         let mut hooks = Hooks::default();
         install_gameplay(&mut hooks, engine_module)?;
+        if options().flat_buttons {
+            buttons(&mut hooks)?;
+        }
         log!("flat: probes only, no stereo");
         enable_hooks(&crate::HOOKS, hooks)
     })
@@ -176,6 +202,20 @@ fn install_gameplay(hooks: &mut Hooks, engine_module: &Module) -> Result<(), Rej
     }
     if o.resize {
         resize::install(hooks, &require_build(crate::engine::GAMEDLL, crate::engine::GAMEDLL_SHA256)?)?;
+    }
+    if o.throw {
+        throw::install(hooks, &require_build(crate::engine::GAMEDLL, crate::engine::GAMEDLL_SHA256)?, engine_module)?;
+    }
+    if o.bindings {
+        bindings::install(hooks, &require_build(crate::engine::GAMEDLL, crate::engine::GAMEDLL_SHA256)?)?;
+    }
+    // The game-frame callback is one; `probe_video` takes it when on.
+    if give::wanted() && !o.video {
+        let gamedll = require_build(crate::engine::GAMEDLL, crate::engine::GAMEDLL_SHA256)?;
+        // SAFETY: the game DLL is the build `engine.rs` describes (hash checked above); the export's
+        // type is `float IGame::GetGameTimeDelta() const`.
+        unsafe { eng_chr::game::hook(hooks, &gamedll)? };
+        eng_chr::game::observe(give::frame);
     }
     Ok(())
 }
@@ -226,6 +266,12 @@ pub fn report() {
     walk::report();
     if options().resize {
         resize::report();
+    }
+    if options().bindings {
+        bindings::report();
+    }
+    if options().throw {
+        throw::report();
     }
     if options().pad {
         pad::report();

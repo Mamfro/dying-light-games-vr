@@ -205,6 +205,14 @@ fn start(session: &Session) -> Result<(), Rejection> {
         {
             log!("physical melee off: {}", why.reason);
         }
+        if config.disable_zombie_grabs {
+            eng_chr::grabs::enable();
+        }
+        if config.handwork != eng_chr::handwork::Options::default()
+            && let Some(gamedll) = &gamedll
+        {
+            eng_chr::handwork::install(&mut hooks, gamedll, &engine::HANDWORK, config.handwork);
+        }
         if let Some(settings) = config.room_scale
             && let Some(gamedll) = &gamedll
         {
@@ -308,6 +316,8 @@ fn stop() -> Result<(), Rejection> {
     head::HEAD.close();
     monaka_arms::controllers::close();
     hands::report();
+    eng_chr::handwork::report();
+    eng_chr::grabs::report();
     eng_chr::gui::report();
     monaka_arms::roomscale::stop();
     eng_chr::walk::report();

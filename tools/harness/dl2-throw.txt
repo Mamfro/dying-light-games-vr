@@ -1,0 +1,47 @@
+# Dying Light 2: throwing by hand (motion_throw). In gameplay with a throwable chosen as the tool (throwing
+# knives are easiest to see), standing still in the open. Two throws with the left controller while LT is held:
+# a fast one straight ahead (about 9 m/s), then a slower one up and to the left (about 4 m/s); LT is let go at the
+# end of each swing. The log's "throw by hand" lines give each throw's hand speed and direction, the frames show
+# the throwable leaving the left hand. The throw uses the hand the game throws with (its throw controller says);
+# if the log shows the right hand, mirror the left hand's lines onto the right.
+0     focus DyingLightGame_x64_rwdi.exe
+0     head 0 0
+0     pad none 0 0
+0     hand right 0.2 -0.3 -0.35 0 0
+0     hand left -0.2 -0.3 -0.35 0 0
+3000  save ready
+4000  pad none 255 0
+4000  hand left -0.15 0.10 0.15 0 30
+5400  save fast_held
+5510  hand left -0.150 0.081 0.056 0 25
+5520  hand left -0.150 0.062 -0.038 0 20
+5530  hand left -0.150 0.044 -0.131 0 15
+5540  hand left -0.150 0.025 -0.225 0 10
+5550  hand left -0.150 0.006 -0.319 0 5
+5560  hand left -0.150 -0.013 -0.412 0 0
+5570  hand left -0.150 -0.031 -0.506 0 -5
+5580  hand left -0.150 -0.050 -0.600 0 -10
+5580  pad none 0 0
+5640  save fast_60
+5830  save fast_250
+6180  save fast_600
+7080  hand left -0.2 -0.3 -0.35 0 0
+10000 pad none 255 0
+10000 hand left -0.05 -0.20 -0.10 0 0
+11400 save left_up_held
+11515 hand left -0.090 -0.155 -0.135 4 3
+11530 hand left -0.130 -0.110 -0.170 8 6
+11545 hand left -0.170 -0.065 -0.205 12 9
+11560 hand left -0.210 -0.020 -0.240 16 12
+11575 hand left -0.250 0.025 -0.275 20 15
+11590 hand left -0.290 0.070 -0.310 24 18
+11605 hand left -0.330 0.115 -0.345 28 21
+11620 hand left -0.370 0.160 -0.380 32 24
+11635 hand left -0.410 0.205 -0.415 36 27
+11650 hand left -0.450 0.250 -0.450 40 30
+11650 pad none 0 0
+11710 save left_up_60
+11900 save left_up_250
+12250 save left_up_600
+13150 hand left -0.2 -0.3 -0.35 0 0
+16000 end

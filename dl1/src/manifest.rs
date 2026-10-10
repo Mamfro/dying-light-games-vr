@@ -29,6 +29,23 @@ pub const MANIFESTS: &[Manifest] = &[Manifest {
             .only_when("aim", "hand_rig"),
         opt("disable_zombie_grabs", "Disable zombie grabs", "Zombies never grab you. Off: they grab and bite until you break free, as in the game.", Kind::Switch { default: true })
             .on(Shown::Game),
+        opt("throw_by_hand", "Throw by hand", "Throw tools with your left hand: they leave as you let go of the trigger, as fast and where your hand throws them.", Kind::Switch { default: true })
+            .on(Shown::Game)
+            .only_when("aim", "hand_rig"),
+        opt("bow_by_hand", "Bow by hand", "Hold the bow in your left hand, pull the string back with your right while holding the trigger, let go to shoot.", Kind::Switch { default: true })
+            .on(Shown::Game)
+            .only_when("aim", "hand_rig"),
+        opt("shoot_from_barrel", "Shoot from the barrel", "Shots leave the gun's muzzle where the gun in your hand points, not from your eyes.", Kind::Switch { default: true })
+            .on(Shown::Game)
+            .only_when("aim", "hand_rig"),
+        opt("lockpick_by_hand", "Lockpick by hand", "Twist your left hand to turn the pick and your right hand to turn the screwdriver.", Kind::Switch { default: true })
+            .on(Shown::Game)
+            .only_when("aim", "hand_rig"),
+        opt("reload_gesture", "Reload gesture", "With a gun, bring your left hand to it and pull away to reload.", Kind::Switch { default: true })
+            .on(Shown::Game)
+            .only_when("aim", "hand_rig"),
+        opt("vr_buttons", "VR buttons", "B turns the flashlight on and off, tap Y to heal (hold Y still repairs), and duck in your room to crouch. Off: the game's own buttons.", Kind::Switch { default: true })
+            .on(Shown::Game),
         BINARY_FINGERS,
         opt("fsr", "FSR upscaling", "Renders each eye smaller, then upscales it (needs the headset resolution and Dying Light 2's FidelityFX DLLs).", Kind::Switch { default: false })
             .on(Shown::Engine)

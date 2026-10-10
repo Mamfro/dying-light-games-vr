@@ -1,0 +1,45 @@
+# Dying Light 2: the bow by hand (motion_bow). In gameplay with a bow in hand and arrows, standing still in the
+# open. Two shots: fire (RT) held, the right hand (the string) pulled back from the left (the bow), held, RT let go.
+# The first is a long draw (the hands 0.53 m apart, about 84%) straight ahead, the second a shorter one (0.41 m,
+# about 58%) up and to the left. The log's "bow by hand" lines give each arrow's direction; the frames show the
+# draw and the arrow leaving along the line from the right hand through the left.
+0     focus DyingLightGame_x64_rwdi.exe
+0     head 0 0
+0     pad none 0 0
+0     hand left -0.05 -0.15 -0.45 0 0
+0     hand right 0.00 -0.15 -0.32 0 0
+3000  save ready
+3000  pad none 0 255
+3260  hand right 0.000 -0.150 -0.280 0 0
+3320  hand right 0.000 -0.150 -0.240 0 0
+3380  hand right 0.000 -0.150 -0.200 0 0
+3440  hand right 0.000 -0.150 -0.160 0 0
+3500  hand right 0.000 -0.150 -0.120 0 0
+3560  hand right 0.000 -0.150 -0.080 0 0
+3620  hand right 0.000 -0.150 -0.040 0 0
+3680  hand right 0.000 -0.150 0.000 0 0
+3740  hand right 0.000 -0.150 0.040 0 0
+3800  hand right 0.000 -0.150 0.080 0 0
+4000  save long_drawn
+4600  pad none 0 0
+4660  save long_60
+4850  save long_250
+5200  save long_600
+6000  hand right 0.00 -0.15 -0.32 0 0
+8000  hand left -0.25 0.05 -0.40 20 15
+8000  hand right -0.15 -0.05 -0.30 20 15
+8200  pad none 0 255
+8450  hand right -0.137 -0.062 -0.275 20 15
+8500  hand right -0.125 -0.075 -0.250 20 15
+8550  hand right -0.112 -0.087 -0.225 20 15
+8600  hand right -0.100 -0.100 -0.200 20 15
+8650  hand right -0.087 -0.112 -0.175 20 15
+8700  hand right -0.075 -0.125 -0.150 20 15
+8750  hand right -0.062 -0.138 -0.125 20 15
+8800  hand right -0.050 -0.150 -0.100 20 15
+9000  save short_drawn
+9400  pad none 0 0
+9460  save short_60
+9650  save short_250
+10000 save short_600
+11000 end

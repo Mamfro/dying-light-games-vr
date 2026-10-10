@@ -103,6 +103,12 @@ fn start(session: &'static Session) -> Result<(), Rejection> {
         {
             log!("physical melee off: {}", why.reason);
         }
+        if config.disable_zombie_grabs {
+            eng_chr::grabs::enable();
+        }
+        if hand_rig && config.handwork != eng_chr::handwork::Options::default() {
+            eng_chr::handwork::install(&mut hooks, gamedll, &engine::HANDWORK, config.handwork);
+        }
         let flashlight = &config.flashlight;
         if (flashlight.steady || flashlight.source.is_some() || flashlight.shadow_offset.is_some() || flashlight.shadow_scale.is_some() || flashlight.probe)
             && let Err(why) = player::flashlight::install(&mut hooks, &engine_module, config.flashlight)
@@ -271,6 +277,8 @@ fn stop() -> Result<(), Rejection> {
     aim::release(500);
     monaka_arms::roomscale::stop();
     eng_chr::walk::report();
+    eng_chr::handwork::report();
+    eng_chr::grabs::report();
     player::flashlight::report();
     monaka_pad::stop();
     camera_update::disable();

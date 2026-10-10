@@ -66,6 +66,22 @@ pub struct Config {
     pub back_is_blunt: bool,
     /// Zombies' grabs never land on the player (on by default; `disable_zombie_grabs=0` lets them).
     pub disable_zombie_grabs: bool,
+    /// The VR button layout (`vr_buttons=0`: the game's own): B flashlight, tap Y heal, crouch by
+    /// ducking.
+    pub vr_buttons: bool,
+    /// With the hand rig: tools thrown with the left hand's own throw (`throw_by_hand=0`: the
+    /// game's throw along the view).
+    pub throw_by_hand: bool,
+    /// With the hand rig: the bow drawn by pulling the string hand back and loosed along the hands
+    /// (`bow_by_hand=0`: the game's shot along the view).
+    pub bow_by_hand: bool,
+    /// With the hand rig: lockpicking by twisting the hands (`lockpick_by_hand=0`: the sticks).
+    pub lockpick_by_hand: bool,
+    /// With the hand rig: a gun's shots leave its muzzle along its barrel (`shoot_from_barrel=0`:
+    /// from the eye along the aim).
+    pub shoot_from_barrel: bool,
+    /// With the hand rig and the VR buttons: the left hand to the gun and away reloads.
+    pub reload_gesture: bool,
     /// The headset's eye image size (`eye_size=WxH`, from `monaka_viewer --info`): the game renders
     /// at it while VR runs and gets its own size back at the stop.
     pub eye_size: Option<(u32, u32)>,
@@ -133,6 +149,12 @@ impl Config {
             melee_on_reach: options.switch("melee_on_reach", true),
             back_is_blunt: options.switch("back_is_blunt", true),
             disable_zombie_grabs: options.switch("disable_zombie_grabs", true),
+            vr_buttons: options.switch("vr_buttons", true),
+            throw_by_hand: options.switch("throw_by_hand", true),
+            bow_by_hand: options.switch("bow_by_hand", true),
+            lockpick_by_hand: options.switch("lockpick_by_hand", true),
+            shoot_from_barrel: options.switch("shoot_from_barrel", true),
+            reload_gesture: options.switch("reload_gesture", true),
             eye_size: options.size("eye_size"),
             fsr: options.switch("fsr", false).then(|| Fsr {
                 scale: options.number("fsr_scale", 1.0, 3.0, 1.5),

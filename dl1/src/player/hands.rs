@@ -95,6 +95,23 @@ fn model(vis: usize) -> Option<usize> {
     (!model.is_null()).then_some(model as usize)
 }
 
+/// The element called `name` in `model`, if any.
+pub(crate) fn find_element(model: &Model, name: &str) -> Option<i32> {
+    fpp::ArmsSkeleton::find(model, name)
+}
+
+/// The model of what the arms hold in weapon slot `slot` (0 the right hand's, 1 the left's), if
+/// anything (a weapon's visual is its own model).
+pub(crate) fn weapon_model(vis: usize, slot: usize) -> Option<Model<'static>> {
+    let weapon = mem::read::<usize>(vis + LAYOUT.weapons + slot * 8).filter(|&w| w != 0)?;
+    Model::new(ELEMENTS.get()?, weapon)
+}
+
+/// The model of the bow the arms hold, if they hold one (a bow's visual is its own model).
+pub(crate) fn held_bow(vis: usize) -> Option<Model<'static>> {
+    Model::new(ELEMENTS.get()?, fpp::held_bow(vis, &LAYOUT)?)
+}
+
 /// Calls that were handed the camera already turned to the view.
 static UNTURNED: AtomicU64 = AtomicU64::new(0);
 
@@ -254,6 +271,7 @@ pub unsafe extern "system" fn camera_target(vis: *mut c_void, camera: *mut c_voi
         melee: config.melee,
         fingers: (config.aim.rig && config.fingers.tracking).then_some(FINGER_AXES),
         palms,
+        apart: crate::player::throwing::throwing_now(),
     };
     let game = camera_matrix(camera);
     let pose = |game: Mat34, gun: bool| -> Result<monaka_arms::Pose, &'static str> {
@@ -277,6 +295,13 @@ pub unsafe extern "system" fn camera_target(vis: *mut c_void, camera: *mut c_voi
     let outcome = fpp::around(vis, &LAYOUT, &options, Model::of, game, original, pose);
     crate::research::arms::moved(outcome.placed.as_ref(), game);
     crate::research::arms::after(vis, camera, outcome.before.as_ref());
+    crate::player::bow::place_string(vis);
+    crate::player::throwing::place_tool(vis);
+    crate::research::bow::after(vis);
+    crate::player::hand_world::sample();
+    if let Some(game) = game {
+        crate::player::hand_world::sample_controllers(&stereo::tracking_origin(&game, true, config.aim.hand), palms);
+    }
     note_frame();
 }
 

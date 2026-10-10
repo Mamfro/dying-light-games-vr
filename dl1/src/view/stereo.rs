@@ -533,6 +533,7 @@ fn suggest_render_size(config: &Config, pose: &HeadPose) {
 fn view_center(base: &Mat34, pose: &HeadPose, head_aim: bool, unlean: bool, baked: f32) -> Mat34 {
     let origin = origin_with(base, head_aim, unlean, baked);
     monaka_arms::roomscale::note_view(&origin, pose.position);
+    crate::player::controls::note_head(pose.position[1]);
     apply_head(&origin, pose.orientation, pose.position)
 }
 

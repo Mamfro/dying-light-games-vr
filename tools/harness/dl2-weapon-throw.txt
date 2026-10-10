@@ -1,0 +1,28 @@
+# Dying Light 2: the melee weapon thrown by hand (motion_throw). In gameplay with a throwable melee weapon in hand
+# (a machete or an axe), standing still in the open. The throw button (right stick click) held past 0.3 s with the
+# right hand drawn back, then a fast swing straight ahead (about 8 m/s) as it is let go. The log's "weapon thrown by
+# hand" line gives the swing's speed and the speed thrown; the frames show the weapon leaving.
+0     focus DyingLightGame_x64_rwdi.exe
+0     head 0 0
+0     pad none 0 0
+0     hand left -0.2 -0.3 -0.35 0 0
+0     hand right 0.2 -0.3 -0.35 0 0
+3000  save ready
+3000  pad rs 0 0
+3000  hand right 0.25 0.10 0.15 0 30
+3500  save held
+3610  hand right 0.244 0.075 0.062 0 -10
+3620  hand right 0.237 0.050 -0.025 0 -10
+3630  hand right 0.231 0.025 -0.113 0 -10
+3640  hand right 0.225 0.000 -0.200 0 -10
+3650  hand right 0.219 -0.025 -0.288 0 -10
+3660  hand right 0.213 -0.050 -0.375 0 -10
+3670  hand right 0.206 -0.075 -0.463 0 -10
+3680  hand right 0.200 -0.100 -0.550 0 -10
+3680  pad none 0 0
+3740  save swing_60
+3930  save swing_250
+4280  save swing_600
+4800  save swing_1100
+5500  hand right 0.2 -0.3 -0.35 0 0
+8000  end

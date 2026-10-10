@@ -204,6 +204,29 @@ pub const MELEE: eng_chr::melee::Build = eng_chr::melee::Build {
     segment: 0x44,
     player_vtable: PLAYER_VTABLE,
 };
+/// The player's live parameter block (vtable slot +0x5e0) and the grab flags in it
+/// (`eng_chr::grabs`): `InfectedGrabBlocked` +0x10ec0, `CantBeGrabbed` +0x1510.
+pub const GRABS: eng_chr::grabs::Build = eng_chr::grabs::Build { parameters_slot: 0x5e0, flags: [0x10ec0, 0x1510] };
+/// What the hands do with the game's own actions (`eng_chr::handwork`), DL2's at new addresses:
+/// - the throw controller: update vtable slot 143, state at +0x40, the release made once (+0x132),
+///   the throwing hand at +0x138;
+/// - the dropped item's launch: velocity +0x7d4, thrown +0x7ed, owner +0x850;
+/// - the player's aim part (player +0x1b0): eye slot +0x58, look slot +0x50;
+/// - the bow controller: update slot 143, the clock at slot +0x368, state at +0x40, the draw's start
+///   at +0x68;
+/// - the gun's reload step runner.
+/// The lockpick minigame's fields are not read for this build.
+pub const HANDWORK: eng_chr::handwork::Builds = {
+    use eng_chr::handwork::*;
+    Builds {
+        throw: Some(throwing::Build { update: 0x1036360, velocity: 0xf5a1e0, start: 0xf53e50, release: 0x1007720, state: 0x40, released: 0x132, hand: 0x138, player_vtable: PLAYER_VTABLE }),
+        weapon_throw: Some(weapon_throw::Build { launch: 0xd682c0, velocity: 0x7d4, thrown: 0x7ed, owner: 0x850, player_vtable: PLAYER_VTABLE }),
+        aim: aim::Build { eye: 0x1286a30, look: 0x12867d0 },
+        bow: Some(bow::Build { update: 0x1034250, arrow: 0xff8d50, full_draw: 0xf55d10, clock_slot: 0x368, state: 0x40, draw_start: 0x68, player_vtable: PLAYER_VTABLE }),
+        reload: Some(reload::Build { steps: 0x106d650, player_vtable: PLAYER_VTABLE }),
+        lockpick: None,
+    }
+};
 /// The player's movement step (`eng_chr::walk`): the module step is `PlayerBulletPhysicsModule`'s
 /// vtable slot 120, `GameStep` the character interface's slot 127 (+0x3f8). The engine's build is
 /// not pinned: `GameStep`'s first bytes are.

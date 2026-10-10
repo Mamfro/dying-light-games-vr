@@ -91,7 +91,10 @@ fn player_camera_update(camera: usize, forward: [f32; 3]) {
     let character = mem::read::<usize>(camera + engine::CAMERA_TARGET).filter(|&t| t != 0).and_then(|target| AIM.character_of(target));
     let head = scene::vr_active().then(|| head::HEAD.current()).flatten();
     let steered = match character {
-        Some(character) => AIM.steer(character, head, counter),
+        Some(character) => {
+            eng_chr::grabs::hold(character, &engine::GRABS);
+            AIM.steer(character, head, counter)
+        }
         None => {
             TOOL.release();
             None

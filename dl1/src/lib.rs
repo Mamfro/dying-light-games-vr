@@ -20,7 +20,7 @@ mod view;
 use view::stereo;
 use output::{hybrid, upscale, video};
 use hud::{draws, panels, ui};
-use player::{aim, grabs, hands, melee, spots, walk};
+use player::{aim, bow, controls, grabs, gun, hand_world, hands, lockpick, melee, spots, throwing, walk};
 
 use config::Config;
 use monaka_channel::hands::HandChannel;
@@ -73,7 +73,12 @@ fn start(session: &Session) -> Result<(), Rejection> {
     let config = Config::from_options(&options);
     log!("{config:?}");
     crate::research::configure(&options, session.dir());
-    if let Some(started) = crate::research::flat(&engine_module) {
+    let flat_buttons = |hooks: &mut monaka_hook::Hooks| {
+        let gamedll = require_build(engine::GAMEDLL, engine::GAMEDLL_SHA256)?;
+        controls::install(hooks, &gamedll, &engine_module, false)?;
+        grabs::install(hooks, &gamedll)
+    };
+    if let Some(started) = crate::research::flat(&engine_module, flat_buttons) {
         return started;
     }
     if config.fsr.is_some() && (config.hybrid || config.eye_size.is_none()) {
@@ -221,6 +226,20 @@ fn attach(
             if let Some(physical) = config.physical_melee {
                 melee::install(&mut hooks, &gamedll, &engine_module, physical, config.melee_on_reach, config.back_is_blunt)?;
             }
+            // What the hands do with the world's objects, from where the rig puts them.
+            hand_world::resolve(&engine_module)?;
+            if config.throw_by_hand {
+                throwing::install(&mut hooks, &gamedll, &engine_module)?;
+            }
+            if config.bow_by_hand {
+                bow::install(&mut hooks, &gamedll)?;
+            }
+            if config.lockpick_by_hand {
+                lockpick::install(&mut hooks, &gamedll)?;
+            }
+            if config.shoot_from_barrel {
+                gun::install(&mut hooks, &gamedll)?;
+            }
         }
         if config.controller_pad {
             // Optional: without it VR runs, the controllers' buttons just do nothing.
@@ -236,6 +255,9 @@ fn attach(
         crate::research::install(&mut hooks, &engine_module, (desc.BufferDesc.Width, desc.BufferDesc.Height))?;
         // The game's UI kept at the monitor's size (they pass through when no size switch was made).
         crate::hud::ui_size::install(&mut hooks, &engine_module, &require_build(engine::GAMEDLL, engine::GAMEDLL_SHA256)?)?;
+        if config.vr_buttons {
+            controls::install(&mut hooks, &require_build(engine::GAMEDLL, engine::GAMEDLL_SHA256)?, &engine_module, config.reload_gesture && config.aim.rig)?;
+        }
         if config.disable_zombie_grabs {
             grabs::install(&mut hooks, &require_build(engine::GAMEDLL, engine::GAMEDLL_SHA256)?)?;
         }
@@ -268,6 +290,12 @@ fn stop() -> Result<(), Rejection> {
     crate::research::report();
     monaka_arms::roomscale::stop();
     grabs::report();
+    throwing::report();
+    bow::report();
+    gun::report();
+    lockpick::report();
+    hand_world::report();
+    controls::stop();
     walk::restore();
     monaka_pad::stop();
     // The present thread retires the eye and gives back what the run changed.

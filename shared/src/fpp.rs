@@ -88,6 +88,9 @@ pub struct Options {
     /// Each controller's palm in tracking space, by side, for the swings (the same the `pose`
     /// closure puts the arms on).
     pub palms: [Option<HandPose>; 2],
+    /// The game's animation brings the hands together now but each stays on its own controller
+    /// (Dying Light 1: a tool thrown from the left hand). A bow always is ([`is_bow`]).
+    pub apart: bool,
 }
 
 /// What one call did: the arms as animated (taken when the rig or the probe wanted them) and,
@@ -147,8 +150,8 @@ pub fn around<S: ArmsSkeleton>(
     if probing && let (Some(skeleton), Some(camera)) = (&skeleton, camera) {
         probe(skeleton, before.as_ref(), &camera, vis, call);
     }
-    if options.probe {
-        probe_weapons(vis, layout);
+    if options.probe || options.rig {
+        note_weapons(vis, layout);
     }
     if !options.rig {
         return Outcome { before, placed: None };
@@ -156,6 +159,9 @@ pub fn around<S: ArmsSkeleton>(
     let weapon = mem::read::<usize>(vis + layout.weapons).unwrap_or(0);
     let held = Held::of(weapon);
     melee::update(held, options.palms, &options.melee);
+    // A bow is held apart (the bow in the left hand, the string in the right), and whatever the
+    // producer says is.
+    monaka_arms::hands_apart(options.apart || held_bow(vis, layout).is_some());
     let moved = match (&skeleton, &before, camera) {
         (Some(skeleton), Some(before), Some(camera)) => pose(camera, held == Held::Gun).and_then(|pose| monaka_arms::follow(skeleton, before, &pose)),
         (_, _, None) => Err("no player camera"),
@@ -174,6 +180,30 @@ pub fn around<S: ArmsSkeleton>(
             Outcome { before, placed: Some(placed) }
         }
     }
+}
+
+/// The class of the arms' weapon visual for a bow.
+const BOW_VIS_CLASS: &str = ".?AVBowVis@@";
+
+/// The bow the arms hold, in either weapon slot (a bow is held in the left hand).
+pub fn held_bow(vis: usize, layout: &Layout) -> Option<usize> {
+    [0, 8].into_iter().filter_map(|slot| mem::read::<usize>(vis + layout.weapons + slot)).find(|&w| is_bow(w))
+}
+
+/// Whether the arms' weapon visual `weapon` (0 for none) is a bow (its class, the vtable then kept).
+pub fn is_bow(weapon: usize) -> bool {
+    static BOW_VTABLE: AtomicU64 = AtomicU64::new(0);
+    let Some(vtable) = mem::read::<usize>(weapon).filter(|_| weapon != 0) else { return false };
+    let known = BOW_VTABLE.load(Relaxed);
+    if known != 0 {
+        return known == vtable as u64;
+    }
+    let bow = class_name(weapon).as_deref() == Some(BOW_VIS_CLASS);
+    if bow {
+        BOW_VTABLE.store(vtable as u64, Relaxed);
+        log!("hand rig: a bow is held apart, the bow on the left controller and the string on the right");
+    }
+    bow
 }
 
 fn note_skip(why: &'static str, call: u64) {
@@ -260,11 +290,13 @@ fn probe<S: ArmsSkeleton>(skeleton: &S, before: Option<&Snapshot>, game: &Mat34,
 }
 
 /// The arms visual's two weapon visuals, logged whenever either changes, with their classes.
-fn probe_weapons(vis: usize, layout: &Layout) {
+/// Logs what the arms hold in each weapon slot when it changes (the first changes).
+fn note_weapons(vis: usize, layout: &Layout) {
     static LAST: Mutex<[usize; 2]> = Mutex::new([0; 2]);
+    static LOGGED: AtomicU64 = AtomicU64::new(0);
     let Ok(mut last) = LAST.lock() else { return };
     let now = [mem::read::<usize>(vis + layout.weapons).unwrap_or(0), mem::read::<usize>(vis + layout.weapons + 8).unwrap_or(0)];
-    if now != *last {
+    if now != *last && LOGGED.fetch_add(1, Relaxed) < 40 {
         let describe = |p: usize| if p == 0 { "none".to_string() } else { format!("{p:#x} {}", class_name(p).unwrap_or_default()) };
         log!("weapons: slot 0 {}, slot 1 {}", describe(now[0]), describe(now[1]));
         *last = now;

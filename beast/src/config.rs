@@ -28,6 +28,11 @@ pub struct Config {
     pub flashlight: crate::player::flashlight::Settings,
     /// Room-scale following (with the hand rig; `monaka_arms::roomscale`).
     pub room_scale: Option<roomscale::Settings>,
+    /// What the hands do with the game's own throw, bow and reload (`motion_throw`, `motion_bow`,
+    /// `manual_reload`, with the hand rig; `eng_chr::handwork`).
+    pub handwork: eng_chr::handwork::Options,
+    /// The biters' front grabs held off (`disable_zombie_grabs`; `eng_chr::grabs`).
+    pub disable_zombie_grabs: bool,
     /// Alternate-eye stereo on D3D12, published on the channel named in `live-channel.txt`
     /// (`stereo=0`: the probes only).
     pub stereo: bool,
@@ -77,6 +82,13 @@ impl Config {
                 probe: options.switch("probe_flashlight", false),
             },
             room_scale: roomscale::Settings::from_options(options, &shared),
+            disable_zombie_grabs: options.switch("disable_zombie_grabs", true),
+            handwork: eng_chr::handwork::Options {
+                throw: options.switch("motion_throw", true) && shared.aim.rig,
+                bow: options.switch("motion_bow", true) && shared.aim.rig,
+                reload: options.switch("manual_reload", true) && shared.aim.rig,
+                lockpick: false,
+            },
             stereo,
             eye_size: options.size("eye_size").filter(|_| stereo),
             framegen: options.choice("mode", &[("framegen", true), ("standard", false)], options.switch("framegen", false)),

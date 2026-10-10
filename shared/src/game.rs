@@ -32,13 +32,23 @@ unsafe extern "system" fn time_delta(game: usize) -> f32 {
     unsafe { TIME_DELTA_ORIGINAL.get()(game) }
 }
 
-/// Prepares the import hook that learns the game object.
+/// Prepares the import hook that learns the game object; nothing when it is in place already.
+/// Hooked twice, the second would take the first for the game's function and keep it as the
+/// original: the hook would then call itself until the thread's stack ran out.
 ///
 /// # Safety
 /// `gamedll` must be the game DLL, whose import of [`GAME_TIME_DELTA`] has [`TimeDeltaFn`]'s type.
 pub unsafe fn hook(hooks: &mut Hooks, gamedll: &Module) -> monaka_hook::Result<()> {
+    if hooked(gamedll) {
+        return Ok(());
+    }
     // SAFETY: the caller's guarantee.
     unsafe { hooks.import(&TIME_DELTA_ORIGINAL, "GetGameTimeDelta", gamedll, ENGINE, GAME_TIME_DELTA, time_delta as TimeDeltaFn) }
+}
+
+/// Whether the game DLL's import already calls the hook.
+pub fn hooked(gamedll: &Module) -> bool {
+    gamedll.import_slot(ENGINE, GAME_TIME_DELTA).and_then(mem::read::<usize>) == Some(time_delta as TimeDeltaFn as usize)
 }
 
 /// Has `observer` called with the game object on each frame the game runs.

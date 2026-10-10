@@ -76,6 +76,11 @@ pub struct Config {
     pub physical_melee: Option<melee::Physical>,
     /// Room-scale following (with the hand rig; `monaka_arms::roomscale`).
     pub room_scale: Option<roomscale::Settings>,
+    /// What the hands do with the game's own throw, bow, reload and lockpick (`motion_throw`,
+    /// `motion_bow`, `manual_reload`, `motion_lockpick`, with the hand rig; `eng_chr::handwork`).
+    pub handwork: eng_chr::handwork::Options,
+    /// The biters' front grabs held off (`disable_zombie_grabs`; `eng_chr::grabs`).
+    pub disable_zombie_grabs: bool,
     /// The headset's recommended eye size (`eye_size=WxH`, from the OpenXR runtime).
     pub eye_size: Option<(u32, u32)>,
     /// One render per frame, eyes taking turns (`mode=alternate`, D3D12).
@@ -119,6 +124,13 @@ impl Config {
             melee: melee::Settings::from_options(options, shared.aim.side),
             physical_melee: melee::Physical::from_options(options, shared.aim.rig, false),
             room_scale: roomscale::Settings::from_options(options, &shared),
+            disable_zombie_grabs: options.switch("disable_zombie_grabs", true),
+            handwork: eng_chr::handwork::Options {
+                throw: options.switch("motion_throw", true) && shared.aim.rig,
+                bow: options.switch("motion_bow", true) && shared.aim.rig,
+                reload: options.switch("manual_reload", true) && shared.aim.rig,
+                lockpick: options.switch("motion_lockpick", true) && shared.aim.rig,
+            },
             eye_size: options.size("eye_size"),
             alternate_eye: mode == Mode::Alternate,
             depth_stereo: mode == Mode::Depth,

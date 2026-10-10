@@ -1,0 +1,27 @@
+# Dying Light 2: reloading by hand (manual_reload). In gameplay with a pistol or rifle in hand and spare ammo,
+# facing an empty spot. Three shots, then reload (X) with the left hand away from the gun: the reload should wait.
+# Two seconds on, the left hand comes to the right (within 0.22 m) and stays: the reload should run and finish.
+# The log's "reload by hand" lines say when the hand came and left; the frames show the reload paused, then going.
+0     focus DyingLightGame_x64_rwdi.exe
+0     head 0 0
+0     pad none 0 0
+0     hand right 0.15 -0.20 -0.40 0 0
+0     hand left -0.30 -0.40 -0.15 0 0
+3000  save ready
+3200  pad none 0 255
+3300  pad none 0 0
+3700  pad none 0 255
+3800  pad none 0 0
+4200  pad none 0 255
+4300  pad none 0 0
+5000  pad x 0 0
+5150  pad none 0 0
+6000  save waiting_1
+7000  save waiting_2
+7000  hand left 0.08 -0.24 -0.34 0 0
+7500  save working_500
+8500  save working_1500
+9500  save working_2500
+10500 save working_3500
+11500 hand left -0.30 -0.40 -0.15 0 0
+12500 end

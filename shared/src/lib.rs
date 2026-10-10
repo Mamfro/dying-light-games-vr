@@ -1,17 +1,21 @@
 //! Techland's Chrome Engine as Dying Light 2 and The Beast run it (and Dying Light 1 where noted):
 //! head aim on the player character ([`headaim`]), the first-person arms on the controllers
 //! ([`rig`] around the arms callback [`fpp`], their skeleton component [`coskeleton`], tracked
-//! fingers on it [`fingers`]), the game object behind the video settings ([`game`]), the HUD as a
-//! layer and its pieces ([`hudlayer`], [`gui`], [`panels`], [`hudfix`]), physical melee
-//! ([`melee`]) and the player's movement step for room-scale following ([`walk`]), and the D3D12
-//! renderer's present request and queue ([`rd3d12`]). Each game crate supplies the addresses of
-//! its own build.
+//! fingers on it [`fingers`], the palms in the world [`hands`]), what the hands do with the game's
+//! own throw, bow, reload and lockpick ([`handwork`]), the biters' grabs held off ([`grabs`]), the
+//! game object behind the video settings ([`game`]), the HUD as a layer and its pieces
+//! ([`hudlayer`], [`gui`], [`panels`], [`hudfix`]), physical melee ([`melee`]) and the player's
+//! movement step for room-scale following ([`walk`]), and the D3D12 renderer's present request and
+//! queue ([`rd3d12`]). Each game crate supplies the addresses of its own build.
 
 pub mod coskeleton;
 pub mod fingers;
 pub mod fpp;
 pub mod game;
+pub mod grabs;
 pub mod gui;
+pub mod hands;
+pub mod handwork;
 pub mod headaim;
 pub mod hudfix;
 pub mod hudlayer;

@@ -38,6 +38,7 @@ pub fn note_camera(renderer_camera: usize, back: [f32; 3], up: [f32; 3], positio
 /// head (VR stopping), the head's share goes back.
 pub fn steer(target: usize, head: Option<HeadPose>) {
     if let Some(character) = AIM.character_of(target) {
+        eng_chr::grabs::hold(character, &crate::engine::GRABS);
         AIM.steer(character, head, None);
     }
 }

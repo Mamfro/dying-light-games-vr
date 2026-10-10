@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([ValidateRange(2,600)][int]$Seconds=60,[ValidateRange(0,60)][int]$DelaySeconds=3,[ValidatePattern('^[a-z_]+=[\w.,\-]+$')][string[]]$Probe=@('probe_melee=1'))
+param([ValidateRange(2,600)][int]$Seconds=60,[ValidateRange(0,60)][int]$DelaySeconds=3,[ValidatePattern('^[a-z_]+=[\w.,:\-]+$')][string[]]$Probe=@('probe_melee=1'))
 # A flat probe of Dying Light 1, no headset and no stereo: attaches monaka_dl1.dll with flat=1 (only the gameplay probes'
 # hooks; the game plays on the monitor as usual) for -Seconds, then stops it and prints its log. -Probe picks the
 # probes (default probe_melee=1: every hit the game deals). The game pauses without focus: click into it first.
