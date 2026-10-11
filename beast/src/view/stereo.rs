@@ -14,6 +14,7 @@ use monaka_channel::ChannelName;
 use monaka_channel::pose::{HeadSource, PoseChannel, Synthetic};
 use monaka_core::alternate::Schedule;
 use monaka_core::camera::{self, Frustum, Mat34};
+use monaka_core::hud::{Placement, Rect};
 use monaka_core::protocol::HeadPose;
 use monaka_hook::{AtomicF32, mem};
 use monaka_producer::log;
@@ -45,6 +46,9 @@ static EYE_TEST: AtomicF32 = AtomicF32::zero();
 static GAME_SCALE: [AtomicF32; 2] = [AtomicF32::zero(), AtomicF32::zero()];
 /// PC check of the pose records' timing: the head of every other pair turned this far (radians).
 static LATENCY_TEST: AtomicF32 = AtomicF32::zero();
+
+/// The HUD's size and distance while it is laid over the eyes ([`Settings::hud`]).
+static HUD: Mutex<Option<(f32, f32)>> = Mutex::new(None);
 
 /// Each eye rendered with the headset's field of view (centred, see [`Frustum::symmetric`]): the
 /// player camera's near-plane extents are written just before the game rebuilds its projection
@@ -85,6 +89,8 @@ struct Counters {
     unpaired: AtomicU64,
     failed: AtomicU64,
     no_queue: AtomicU64,
+    /// Frames of a menu, published flat.
+    menu: AtomicU64,
 }
 static COUNTERS: Counters = Counters {
     eye_writes: AtomicU64::new(0),
@@ -103,6 +109,7 @@ static COUNTERS: Counters = Counters {
     unpaired: AtomicU64::new(0),
     failed: AtomicU64::new(0),
     no_queue: AtomicU64::new(0),
+    menu: AtomicU64::new(0),
 };
 
 pub struct Settings {
@@ -113,6 +120,9 @@ pub struct Settings {
     pub eye_test_degrees: f32,
     pub latency_test_degrees: f32,
     pub headset_fov: bool,
+    /// The HUD's size (1 its size on a monitor) and distance (metres) in front of the eyes, when
+    /// it is laid over them (`eng_chr::hudover`).
+    pub hud: Option<(f32, f32)>,
 }
 
 /// The stereo channel's name, once stereo started (the dynamic HUD's panel channels sit beside it).
@@ -132,6 +142,7 @@ pub fn start(settings: Settings) {
     LATENCY_TEST.store(settings.latency_test_degrees.to_radians());
     *FOV.lock().unwrap_or_else(|e| e.into_inner()) = FovState { game: None, written: [0.0; 4], restore: false, restored: false };
     HEADSET_FOV.store(settings.headset_fov, Release);
+    *HUD.lock().unwrap_or_else(|e| e.into_inner()) = settings.hud;
     let test = |name: &str, degrees: f32| if degrees != 0.0 { format!(", {name} test {degrees} degrees") } else { String::new() };
     log!(
         "alternate-eye stereo on {} (latency {}, eye separation {} m, {} field of view{}{}{})",
@@ -222,7 +233,13 @@ pub fn before_present(swap: &IDXGISwapChain3, queue: Option<ID3D12CommandQueue>)
         if let Some(shown) = label.map(|l| l.eye).or(scheduled) {
             crate::research::history::shown(shown);
         }
+        let menu = !crate::output::framegen::enabled() && eng_chr::gui::menu_open();
         let step = match label {
+            // A menu (the game's whole screen): flat to both eyes, on the viewer's screen.
+            _ if menu => {
+                COUNTERS.menu.fetch_add(1, Relaxed);
+                publisher.show_flat(swap, &queue)
+            }
             // Frame generation makes and publishes the pairs itself, from labelled frames.
             Some(label) if crate::output::framegen::enabled() => crate::output::framegen::present(swap, &queue, label.eye, label.pose, &HEAD, report),
             // No eye camera drew it (a menu, the pause screen): flat to both eyes.
@@ -298,6 +315,69 @@ fn remember_written(written: Written) {
 /// Whether stereo runs (eye cameras are written).
 pub fn running() -> bool {
     EYE.load(Acquire) >= 0
+}
+
+/// How the HUD layer goes over the frame about to present (`size` its pixels): in its eye's place
+/// at the HUD's distance and size, with that eye's disparity; a frame no eye camera drew (a menu
+/// over a still world) gets it centred, with none. `None` while stereo does not run (the game's own
+/// layout then).
+pub fn hud_over(size: (u32, u32)) -> Option<eng_chr::hudover::Params> {
+    let (scale, distance) = (*HUD.lock().ok()?)?;
+    if !ENABLED.load(Acquire) {
+        return None;
+    }
+    // A wheel held open is shown smaller than the HUD (the HUD with it, while it is open).
+    let scale = if wheel_open() { scale.min(WHEEL_SCALE) } else { scale };
+    let label = LABEL.lock().ok().and_then(|l| l.as_ref().map(|l| (l.eye, l.pose)));
+    let (frustum, eye, ipd) = match label {
+        Some((eye, pose)) => (eye_frustum(&pose, eye).or_else(game_frustum)?, eye, pose.ipd_or(SEPARATION.load())),
+        None => (game_frustum()?, 0, 0.0),
+    };
+    let image = Rect::sized(size.0 as f32, size.1 as f32);
+    let rect = Placement::new(frustum, eye, ipd, distance).rect(image, image.aspect(), scale).array();
+    Some(eng_chr::hudover::Params { rect, cross_radius: CROSS_RADIUS * size.1 as f32, ..Default::default() })
+}
+
+/// The share of the frame's height around the HUD's centre drawn at the aim point (the crosshair).
+const CROSS_RADIUS: f32 = 0.03;
+/// The HUD's size (of the eye's vertical field) while a wheel is held open.
+const WHEEL_SCALE: f32 = 0.25;
+/// The game opens a wheel on a d-pad press held past a tap (a tap cycles the item instead).
+const WHEEL_HOLD_MS: u64 = 210;
+/// The d-pad directions that hold a wheel open: the tools' (left) and the weapons' (right).
+const WHEEL_BUTTONS: u16 = monaka_core::pad::button::DPAD_LEFT | monaka_core::pad::button::DPAD_RIGHT;
+
+/// Whether a wheel is held open: its d-pad direction held past a tap (the player's, or the
+/// viewer's for a hand reached over a shoulder).
+fn wheel_open() -> bool {
+    static HELD_SINCE: AtomicU64 = AtomicU64::new(0);
+    let held = monaka_pad::buttons(250).is_some_and(|b| b & WHEEL_BUTTONS != 0);
+    let now = monaka_channel::tick().max(1);
+    if !held {
+        HELD_SINCE.store(0, Relaxed);
+        return false;
+    }
+    let since = match HELD_SINCE.compare_exchange(0, now, Relaxed, Relaxed) {
+        Ok(_) => now,
+        Err(since) => since,
+    };
+    now.saturating_sub(since) >= WHEEL_HOLD_MS
+}
+
+/// The frustum eye `eye` of `pose` was rendered with: the headset's, centred, or the game's (also
+/// for a pose without a field of view).
+fn eye_frustum(pose: &HeadPose, eye: usize) -> Option<Frustum> {
+    let headset_fov = HEADSET_FOV.load(Acquire) && COUNTERS.frusta.load(Relaxed) > 0;
+    if headset_fov { Frustum::from_fov(pose.fov[eye]).map(|f| f.symmetric()) } else { game_frustum() }
+}
+
+/// The game camera's own frustum (from its projection's scales).
+fn game_frustum() -> Option<Frustum> {
+    let scale = [GAME_SCALE[0].load(), GAME_SCALE[1].load()];
+    scale.iter().all(|s| s.is_finite() && *s > 0.0).then(|| {
+        let (x, y) = (1.0 / scale[0], 1.0 / scale[1]);
+        Frustum { left: -x, right: x, up: y, down: -y }
+    })
 }
 
 /// The renderer reports the camera position it renders the coming frame with (DLSS's camera
@@ -534,7 +614,7 @@ pub fn report(seconds: f64) {
     let rate = monaka_producer::rates(now, &LAST, seconds);
     log!(
         "stereo: pairs {:.1}/s, left eyes {:.1}/s, eye cameras {:.1}/s, failures {:.1}/s (unpaired {}, refused {}, no queue {}, head {}); \
-         camera updates early {}, late {}, resynced {}; frames labelled {}, unmatched {}, unlabelled {}, label differed from timing {}; held back for the eye size {}; headset frusta {}",
+         camera updates early {}, late {}, resynced {}; frames labelled {}, unmatched {}, unlabelled {}, label differed from timing {}; held back for the eye size {}; headset frusta {}; menu frames flat {}",
         rate[0],
         rate[1],
         rate[2],
@@ -552,6 +632,7 @@ pub fn report(seconds: f64) {
         COUNTERS.label_disagreed.load(Relaxed),
         COUNTERS.size_waits.load(Relaxed),
         COUNTERS.frusta.load(Relaxed),
+        COUNTERS.menu.load(Relaxed),
     );
 }
 

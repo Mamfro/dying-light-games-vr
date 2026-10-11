@@ -183,23 +183,27 @@ fn start(session: &'static Session) -> Result<(), Rejection> {
         unsafe {
             hooks.inline(&present12::PRESENT_REQUEST, "present request", r12.at(rva), prologue, present12::present_request as engine::PresentRequest12Fn)?;
         }
-        // The dynamic HUD (`world_hud=0` turns it off): the HUD as a layer of its own from the
-        // game's command lists (`probe_hud=1`: its probe), the pieces' boxes from the engine's
-        // gui tree (`probe_gui=1`: its probe), the pieces on the hands, out of the eyes.
+        // The HUD as a layer of its own from the game's command lists (`probe_hud=1`: its
+        // probe): with stereo, kept out of the frame and laid back over each eye in front of it
+        // (the HUD, menus and wheels at `hud_scale` and `hud_distance`; `hud=0` leaves them as the
+        // game draws them). The dynamic HUD (`world_hud=0` turns it off): the pieces' boxes from
+        // the engine's gui tree (`probe_gui=1`: its probe), the pieces on the hands, out of the eyes.
         let (probe_hud, probe_gui) = (crate::research::options().hud, crate::research::options().gui);
         let world_hud = stereo && config.hud.world;
-        if world_hud || probe_hud {
+        let laid_over = stereo && config.hud.shown;
+        if world_hud || laid_over || probe_hud {
             match present12::game_queue() {
                 // SAFETY: the game's live direct queue.
                 Some(queue) => {
-                    if let Err(e) = unsafe { eng_chr::hudlayer::install(&mut hooks, &queue, false, probe_hud, channel.clone()) } {
+                    if let Err(e) = unsafe { eng_chr::hudlayer::install(&mut hooks, &queue, laid_over, probe_hud, channel.clone()) } {
                         log!("hud layer off: {e}");
                     }
                 }
                 None => log!("hud layer off: the game queue is not known yet"),
             }
         }
-        if world_hud || probe_gui {
+        // The gui tree also tells when a menu is open (shown flat, with the HUD laid over the eyes).
+        if world_hud || laid_over || probe_gui {
             match Module::find(engine::ENGINE).ok_or_else(|| Rejection::not_ready("the engine is not loaded")).and_then(|engine_module| eng_chr::gui::install(&mut hooks, &engine_module, &engine::GUI_BUILD)) {
                 Ok(()) => eng_chr::gui::configure(probe_gui, if world_hud { &engine::PIECES } else { &[] }, stereo::running),
                 Err(why) => log!("gui tree unavailable (no dynamic HUD): {}", why.reason),
@@ -218,6 +222,7 @@ fn start(session: &'static Session) -> Result<(), Rejection> {
         eye_test_degrees: config.eye_test_degrees,
         latency_test_degrees: config.latency_test_degrees,
         headset_fov: config.headset_fov,
+        hud: config.hud.shown.then_some((config.hud.scale, config.hud.distance)),
     });
     if let (Some(_), Some(gamedll)) = (config.eye_size, &gamedll) {
         // SAFETY: the fingerprinted game DLL imports GetGameTimeDelta with this type.
@@ -298,6 +303,7 @@ fn stop() -> Result<(), Rejection> {
     monaka_producer::remove_hooks(&HOOKS, 2000)?;
     eng_chr::panels::close();
     eng_chr::hudfix::close();
+    eng_chr::hudover::close();
     eng_chr::gui::report();
     framegen::close();
     monaka_pad::report();

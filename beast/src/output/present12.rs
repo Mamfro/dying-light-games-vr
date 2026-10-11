@@ -8,7 +8,7 @@ use monaka_producer::log;
 use eng_chr::rd3d12::query;
 use std::sync::atomic::Ordering::{AcqRel, Relaxed};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize};
-use windows::Win32::Graphics::Direct3D12::ID3D12CommandQueue;
+use windows::Win32::Graphics::Direct3D12::{D3D12_RESOURCE_STATE_PRESENT, ID3D12CommandQueue, ID3D12Resource};
 use windows::Win32::Graphics::Dxgi::IDXGISwapChain3;
 use windows::core::Interface;
 
@@ -40,19 +40,33 @@ pub unsafe extern "system" fn present_request(object: usize) -> usize {
         if let Some((width, height)) = size {
             crate::output::video::presented(width, height);
         }
-        // The HUD layer of this frame: its pieces onto the hands and out of the eye about to be
-        // taken (the back buffer, in PRESENT).
+        // The HUD layer of this frame: its pieces onto the hands (the dynamic HUD), and the eye
+        // about to be taken (the back buffer, in PRESENT) given its HUD in front of it (kept out of
+        // the frame, laid back over it) or, with the HUD drawn in, the pieces taken out. A menu is
+        // the game's whole screen, shown flat: its frame keeps the menu as the game draws it.
+        let menu = crate::view::stereo::running() && eng_chr::gui::menu_open();
         let queue = game_queue();
         let layer = queue.as_ref().zip(size).and_then(|(queue, size)| eng_chr::hudlayer::take_layer(queue, size));
-        if let (Some(queue), Some(layer), Some(swap), true) = (&queue, &layer, &swap, crate::WORLD_HUD.load(Relaxed))
-            && let Some(channel) = crate::view::stereo::channel()
-        {
-            let rects = eng_chr::panels::publish(queue, layer, &channel, monaka_channel::tick());
+        if let (Some(queue), Some(layer), Some(swap), Some((width, height))) = (&queue, &layer, &swap, size)
             // SAFETY: COM calls on the game's live swapchain, on the thread that presents it.
-            if let Ok(buffer) = unsafe { swap.GetBuffer::<windows::Win32::Graphics::Direct3D12::ID3D12Resource>(swap.GetCurrentBackBufferIndex()) } {
-                eng_chr::hudfix::take_out(queue, &buffer, windows::Win32::Graphics::Direct3D12::D3D12_RESOURCE_STATE_PRESENT, layer, &rects);
+            && let Ok(buffer) = unsafe { swap.GetBuffer::<ID3D12Resource>(swap.GetCurrentBackBufferIndex()) }
+        {
+            let rects = match (crate::WORLD_HUD.load(Relaxed), crate::view::stereo::channel()) {
+                (true, Some(channel)) => eng_chr::panels::publish(queue, layer, &channel, monaka_channel::tick()),
+                _ => Vec::new(),
+            };
+            if eng_chr::hudlayer::redirecting() {
+                // The HUD back where the game laid it out: in a menu (the frame that opened it), or
+                // with stereo not running yet (or any more).
+                let whole = eng_chr::hudover::Params { rect: [0.0, 0.0, width as f32, height as f32], ..Default::default() };
+                let params = if menu { whole } else { crate::view::stereo::hud_over((width, height)).unwrap_or(whole).leaving_out(&rects) };
+                eng_chr::hudover::lay(queue, &buffer, D3D12_RESOURCE_STATE_PRESENT, layer, &params);
+            } else if !menu {
+                eng_chr::hudfix::take_out(queue, &buffer, D3D12_RESOURCE_STATE_PRESENT, layer, &rects);
             }
         }
+        // From the next frame's draws on: a menu's go to the frame.
+        eng_chr::hudlayer::let_through(menu);
         n = swap.and_then(|swap| crate::view::stereo::before_present(&swap, queue.clone()));
         drop(layer);
         if let Some(queue) = &queue {

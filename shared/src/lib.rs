@@ -19,6 +19,7 @@ pub mod hands;
 pub mod handwork;
 pub mod headaim;
 pub mod hudfix;
+pub mod hudover;
 pub mod hudlayer;
 pub mod melee;
 pub mod model;

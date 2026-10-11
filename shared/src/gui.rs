@@ -171,6 +171,40 @@ fn active() -> bool {
 }
 /// Document roots by name, as met.
 static ROOTS: Mutex<Vec<(String, usize)>> = Mutex::new(Vec::new());
+/// When an element of a menu document was last worked on (the tick, ms; 0 never), and that menu.
+static MENU_AT: AtomicU64 = AtomicU64::new(0);
+static MENU: Mutex<String> = Mutex::new(String::new());
+/// A menu worked on this recently is open.
+const MENU_FRESH_MS: u64 = 250;
+
+/// Whether `name` is a menu's document: the pause menu, the inventory and its tabs, the map
+/// (`MenuPause`, `MenuInventory`, `MenuPlayerTabs`, ...), not the button hints shown in play or
+/// the faders of a screen change.
+fn is_menu(name: &str) -> bool {
+    name.starts_with("Menu") && !name.starts_with("MenuHints") && !name.to_ascii_lowercase().ends_with("fader")
+}
+
+/// The engine worked on an element of document `root`: a menu's is noted (and named in the log
+/// when it opens).
+fn note_menu(root: usize, now: u64) {
+    let Ok(roots) = ROOTS.lock() else { return };
+    let Some(name) = roots.iter().find(|(_, r)| *r == root).map(|(n, _)| n).filter(|n| is_menu(n)) else { return };
+    if !menu_open()
+        && let Ok(mut last) = MENU.lock()
+        && *last != *name
+    {
+        log!("gui: the menu '{name}' is open");
+        name.clone_into(&mut last);
+    }
+    MENU_AT.store(now, Relaxed);
+}
+
+/// Whether a menu is open (one of its elements worked on lately): the game's whole screen is the
+/// menu, shown flat rather than as the world.
+pub fn menu_open() -> bool {
+    let at = MENU_AT.load(Relaxed);
+    at != 0 && monaka_channel::tick().saturating_sub(at) < MENU_FRESH_MS
+}
 static LAYOUT_AT: AtomicU64 = AtomicU64::new(0);
 /// The pieces are read at most this often (ms): once a frame.
 const LAYOUT_EVERY_MS: u64 = 8;
@@ -286,6 +320,7 @@ fn seen(implementation: usize) {
     let now = monaka_channel::tick();
     if root != 0 {
         note_root(calls, root);
+        note_menu(root, now);
         // The probe: a document not met before is read at once, the others again every so often.
         let known = DOCUMENTS.lock().is_ok_and(|d| d.contains_key(&root));
         if PROBING.load(Relaxed) && (!known || now.saturating_sub(SNAPSHOT_AT.load(Relaxed)) >= SNAPSHOT_EVERY_MS) {
@@ -652,5 +687,20 @@ pub fn report() {
     if CALLS.lock().is_ok_and(|c| c.is_some()) {
         let documents = ROOTS.lock().map(|r| r.iter().map(|(name, _)| name.clone()).collect::<Vec<_>>()).unwrap_or_default();
         log!("gui: getter calls: {}; documents met: {}", called(), if documents.is_empty() { "none".to_owned() } else { documents.join(", ") });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_menus_are_the_menu_documents_but_the_hints_and_faders() {
+        for menu in ["MenuPause", "MenuInventory", "MenuPlayerTabs", "MenuTabsBackground"] {
+            assert!(is_menu(menu), "{menu}");
+        }
+        for other in ["MenuHints", "MenuPrefader", "MenuPostFader", "hud_screen_layer_0", "CursorScreen", "TooltipScreen"] {
+            assert!(!is_menu(other), "{other}");
+        }
     }
 }

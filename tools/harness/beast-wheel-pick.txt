@@ -1,0 +1,26 @@
+# Dying Light: The Beast: how a held wheel takes a pick. In gameplay, nothing open. The weapons wheel (d-pad right
+# held) picked with Y (the top slot), let go; then the weapons wheel again picked with the right stick flicked left
+# (the left slot), let go. The frames during each show the slot the wheel marks, the ones after show the weapon in
+# hand: a face button that picks changes it the first time, the stick the second.
+0     focus DyingLightGame_TheBeast_x64_rwdi.exe
+0     head 0 0
+0     pad none 0 0
+0     stick 0 0 0 0
+0     hand right 0.2 -0.3 -0.35 0 0
+0     hand left -0.2 -0.3 -0.35 0 0
+3500  save before
+4000  pad right 0 0
+4800  save open_1
+5000  pad right+y 0 0
+5300  save y_held
+5600  pad right 0 0
+6000  pad none 0 0
+7500  save after_y
+9000  pad right 0 0
+9800  save open_2
+10000 stick 0 0 -1 0
+10300 save stick_held
+10600 stick 0 0 0 0
+11000 pad none 0 0
+12500 save after_stick
+13000 end

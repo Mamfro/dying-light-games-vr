@@ -61,9 +61,19 @@ static PROBING: AtomicBool = AtomicBool::new(false);
 /// without its HUD, for a producer that lays the layer over the eyes itself.
 static REDIRECT: AtomicBool = AtomicBool::new(false);
 
+/// The HUD draws go to the frame for now (as well as onto the layer): a menu, shown as the game
+/// draws it ([`let_through`]).
+static LET_THROUGH: AtomicBool = AtomicBool::new(false);
+
 /// Whether the HUD draws are kept out of the frame (see [`install`]).
 pub fn redirecting() -> bool {
-    REDIRECT.load(Relaxed) && LAYER_VIEW.load(Relaxed) != 0
+    REDIRECT.load(Relaxed) && !LET_THROUGH.load(Relaxed) && LAYER_VIEW.load(Relaxed) != 0
+}
+
+/// With the HUD kept out of the frame: from the next draws on, the draws go to the frame too
+/// (`through`, a menu the producer shows whole) or are kept out again.
+pub fn let_through(through: bool) {
+    LET_THROUGH.store(through, Relaxed);
 }
 
 /// Counts of the hooked calls, to see the hooks work.
@@ -244,7 +254,7 @@ unsafe fn draw(list: *mut c_void, hud: Option<Bound>, draw: impl Fn()) {
     // SAFETY: the caller's.
     unsafe {
         match hud {
-            Some(bound) if REDIRECT.load(Relaxed) => {
+            Some(bound) if REDIRECT.load(Relaxed) && !LET_THROUGH.load(Relaxed) => {
                 if !onto_layer(list, &bound, &draw) {
                     draw();
                 }

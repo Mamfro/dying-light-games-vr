@@ -1,0 +1,19 @@
+# Dying Light: The Beast: frames as the headset gets them every 3 s for 30 s, nothing pressed, for screens a
+# person opens by hand (the game ignores the script's pad in its menus). In gameplay at the start; then by hand:
+# the inventory open from about 5 s to 13 s, the weapon wheel held from about 17 s to 23 s, back to play after.
+0     focus DyingLightGame_TheBeast_x64_rwdi.exe
+0     head 0 0
+0     pad none 0 0
+0     hand right 0.2 -0.3 -0.35 0 0
+0     hand left -0.2 -0.3 -0.35 0 0
+3000  save t03
+6000  save t06
+9000  save t09
+12000 save t12
+15000 save t15
+18000 save t18
+21000 save t21
+24000 save t24
+27000 save t27
+30000 save t30
+31000 end

@@ -1,0 +1,23 @@
+# Dying Light: The Beast: the weapon and tool wheels as the headset gets them. In gameplay, nothing open. D-pad
+# right held for four seconds (the weapons wheel), let go, then d-pad left held for four seconds (the tools wheel),
+# as the viewer holds them for a hand reached over a shoulder. The wheels should come out at a quarter of the
+# view's height (the HUD with them), the HUD at its usual size before, between and after.
+0     focus DyingLightGame_TheBeast_x64_rwdi.exe
+0     head 0 0
+0     pad none 0 0
+0     hand right 0.2 -0.3 -0.35 0 0
+0     hand left -0.2 -0.3 -0.35 0 0
+3500  save play
+4000  pad right 0 0
+5000  save weapons_1000
+6500  save weapons_2500
+7900  save weapons_3900
+8000  pad none 0 0
+9500  save between
+10000 pad left 0 0
+11000 save tools_1000
+12500 save tools_2500
+13900 save tools_3900
+14000 pad none 0 0
+15500 save after
+16000 end
