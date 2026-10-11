@@ -60,7 +60,7 @@ fn takes_its_own_eye_size() {
     assert!(hints.len() == 1 && hints[0].contains("2160x2160"), "{hints:?}");
     assert!(Values::default().set_checked(beast, "eye_size", "100x100").is_err());
     let text = file(beast, &parsed(beast, &["aim=hand_rig", "mode=framegen", "latency=3", "stereo=off"]), None);
-    assert_eq!(text, "aim=hand_rig\nworld_hud=1\nfinger_tracking=1\nroom_scale=1\nmotion_throw=1\nmotion_bow=1\nmanual_reload=1\ndisable_zombie_grabs=1\nfinger_binary=0\nmode=framegen\nstereo=0\nlatency=3\neye_separation=0.064\nother_builds=0");
+    assert_eq!(text, "aim=hand_rig\nworld_hud=1\nfinger_tracking=1\nroom_scale=1\ndisable_zombie_grabs=1\nfinger_binary=0\nmode=framegen\nstereo=0\nlatency=3\neye_separation=0.064\nother_builds=0");
     // The window offers the shared settings and none of the command line's.
-    assert!(beast.options.iter().filter(|o| o.shown != Shown::Line).map(|o| o.id).eq(["aim", "aim_hand", "render_size", "world_hud", "finger_tracking", "room_scale", "motion_throw", "motion_bow", "manual_reload", "disable_zombie_grabs", "finger_binary", "mode", "controller_proxy", "other_builds"]));
+    assert!(beast.options.iter().filter(|o| o.shown != Shown::Line).map(|o| o.id).eq(["aim", "aim_hand", "render_size", "world_hud", "finger_tracking", "room_scale", "disable_zombie_grabs", "finger_binary", "mode", "controller_proxy", "other_builds"]));
 }

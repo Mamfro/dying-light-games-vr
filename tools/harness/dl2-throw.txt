@@ -1,9 +1,8 @@
-# Dying Light 2: throwing by hand (motion_throw). In gameplay with a throwable chosen as the tool (throwing
-# knives are easiest to see), standing still in the open. Two throws with the left controller while LT is held:
-# a fast one straight ahead (about 9 m/s), then a slower one up and to the left (about 4 m/s); LT is let go at the
-# end of each swing. The log's "throw by hand" lines give each throw's hand speed and direction, the frames show
-# the throwable leaving the left hand. The throw uses the hand the game throws with (its throw controller says);
-# if the log shows the right hand, mirror the left hand's lines onto the right.
+# Dying Light 2: throwing by hand. In gameplay with a throwable chosen as the tool (throwing knives are
+# easiest to see), standing still in the open. Two throws with the left controller while LT is held: a fast one
+# straight ahead (about 9 m/s), then a slower one up and to the left (about 4 m/s); LT is let go at the end of each
+# swing. The log's "throw by hand" lines give each throw's hand speed and direction (from the left hand whichever
+# hand the game throws with); the frames show the throwable leaving the left hand along the swing, not the look.
 0     focus DyingLightGame_x64_rwdi.exe
 0     head 0 0
 0     pad none 0 0

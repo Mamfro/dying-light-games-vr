@@ -10,6 +10,7 @@
 //! research notes, its facts in `engine.rs`.
 
 pub mod cameras;
+pub mod give;
 pub mod history;
 pub mod motion;
 pub mod streamline;
@@ -45,6 +46,9 @@ pub struct Options {
     pub dump: Option<String>,
     pub vp: Option<String>,
     pub frames: bool,
+    /// `give=Name:count,...` (testing only): items given to the player once, a few seconds into play
+    /// (`give`).
+    pub give: Option<String>,
 }
 
 impl Options {
@@ -61,6 +65,7 @@ impl Options {
             dump: options.text("dump_object").map(str::to_owned),
             vp: options.text("vp_probe").map(str::to_owned),
             frames: options.switch("frame_probe", false),
+            give: options.text("give").map(str::to_owned),
         }
     }
 
@@ -81,6 +86,9 @@ pub fn options() -> &'static Options {
 pub fn configure(options: &monaka_core::options::Options) {
     let options = Options::from_options(options);
     log!("research: {options:?}");
+    if let Some(items) = &options.give {
+        give::configure(items);
+    }
     let _ = OPTIONS.set(options);
 }
 
@@ -97,6 +105,23 @@ pub unsafe fn install(hooks: &mut Hooks, renderer: &Module, stereo: bool) -> Res
     if stereo && o.refs {
         // SAFETY: the caller's guarantee.
         unsafe { history::install_refs(hooks, renderer)? };
+    }
+    Ok(())
+}
+
+/// The probes' own hooks on the game DLL (`gamedll`, when the run has it).
+///
+/// # Safety
+/// `gamedll` is the build `engine.rs` describes (hash checked).
+pub unsafe fn install_game(hooks: &mut Hooks, gamedll: Option<&Module>) -> Result<(), Rejection> {
+    if give::wanted() {
+        let Some(gamedll) = gamedll else {
+            log!("give: not given: this run does not hook the game DLL (it needs stereo)");
+            return Ok(());
+        };
+        // SAFETY: the caller's guarantee; the import's type is `float IGame::GetGameTimeDelta() const`.
+        unsafe { eng_chr::game::hook(hooks, gamedll)? };
+        eng_chr::game::observe(give::frame);
     }
     Ok(())
 }

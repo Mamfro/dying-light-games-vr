@@ -88,8 +88,8 @@ pub struct Options {
     /// Each controller's palm in tracking space, by side, for the swings (the same the `pose`
     /// closure puts the arms on).
     pub palms: [Option<HandPose>; 2],
-    /// The game's animation brings the hands together now but each stays on its own controller
-    /// (Dying Light 1: a tool thrown from the left hand). A bow always is ([`is_bow`]).
+    /// The game's animation brings the hands together now but each stays on its own controller (a
+    /// tool thrown from the left hand). A bow always is ([`is_bow`]).
     pub apart: bool,
 }
 
@@ -107,6 +107,10 @@ struct Counters {
 }
 static COUNTERS: Counters = Counters { calls: AtomicU64::new(0), moved: AtomicU64::new(0), not_moved: AtomicU64::new(0) };
 static SKIPS: Mutex<Vec<(&'static str, u64)>> = Mutex::new(Vec::new());
+/// When the rig last saw the arms hold a bow.
+static BOW_SEEN: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+/// A bow seen this recently is still held.
+const BOW_FRESH: std::time::Duration = std::time::Duration::from_millis(300);
 
 /// Calls of [`around`] so far.
 pub fn calls() -> u64 {
@@ -159,6 +163,9 @@ pub fn around<S: ArmsSkeleton>(
     let weapon = mem::read::<usize>(vis + layout.weapons).unwrap_or(0);
     let held = Held::of(weapon);
     let bow = held_bow(vis, layout).is_some();
+    if let Ok(mut seen) = BOW_SEEN.lock() {
+        *seen = bow.then(std::time::Instant::now);
+    }
     // A bow (in the left hand's slot, the right's empty) swings nothing: its draw is the attack,
     // and an empty right hand would punch, firing it.
     melee::update(if bow { Held::Gun } else { held }, options.palms, &options.melee);
@@ -183,6 +190,11 @@ pub fn around<S: ArmsSkeleton>(
             Outcome { before, placed: Some(placed) }
         }
     }
+}
+
+/// Whether the rig saw the arms hold a bow lately.
+pub fn bow_held() -> bool {
+    BOW_SEEN.lock().ok().and_then(|s| *s).is_some_and(|at| at.elapsed() < BOW_FRESH)
 }
 
 /// The class of the arms' weapon visual for a bow.

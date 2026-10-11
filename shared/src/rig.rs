@@ -87,7 +87,7 @@ impl Rig {
             return;
         };
         let palms = controllers::palms();
-        let fpp_options = fpp::Options { rig: options.rig, probe: options.probe, melee: options.melee, fingers: (options.rig && options.fingers).then_some(self.facts.fingers), palms, apart: false };
+        let fpp_options = fpp::Options { rig: options.rig, probe: options.probe, melee: options.melee, fingers: (options.rig && options.fingers).then_some(self.facts.fingers), palms, apart: crate::handwork::throwing::throwing_now() };
         let vis = target.wrapping_sub(self.facts.icamera_target);
         let key = match self.facts.camera_key_at {
             Some(at) => mem::read::<usize>(camera + at).unwrap_or(0),

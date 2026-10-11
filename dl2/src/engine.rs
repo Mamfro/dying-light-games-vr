@@ -274,23 +274,25 @@ pub const MELEE: eng_chr::melee::Build = eng_chr::melee::Build {
 pub const GRABS: eng_chr::grabs::Build = eng_chr::grabs::Build { is_busy: 0x20fb220, in_climb: 0x20fb300, min_distance: 0x20fb5d0 };
 /// What the hands do with the game's own actions (`eng_chr::handwork`):
 /// - the throw controller (`WeaponThrowController`): update vtable slot 137, state at +0x40 (2 to 4
-///   a throw under way), the release made once (+0x12e), the throwing hand at +0x134;
+///   a throw under way), the release made once (+0x12e), the throwing hand at +0x134; the player's
+///   parameter block (slot +0x618) with `ThrowParabolaEnabled` at +0x6ba0;
 /// - the dropped item's launch (a thrown melee weapon): velocity +0x7f8, thrown +0x811, owner +0x878;
 /// - the player's aim part (player +0x1b0): eye slot +0x58, look slot +0x50;
 /// - the bow controller (`WeaponBowController`): update slot 137, one arrow, the full draw time, the
 ///   clock at slot +0x340, state at +0x38 (3 the draw), the draw's start at +0x60;
-/// - the gun's reload step runner;
+/// - the gun controller (`WeaponFireController`): update slot 137, the reload start (as the reload
+///   input calls it), state at +0x38;
 /// - the lockpick minigame: the pick's input step (`Lockpicking::Picklock` slot +0x4f0), the input
 ///   poll, `_ACTION_LOCKPICKING_SCREWDRIVER_LEFT`; the pick's minigame +0x120, its state +0xd4,
 ///   blocked +0x15c, target angle +0x144, moving +0x140.
 pub const HANDWORK: eng_chr::handwork::Builds = {
     use eng_chr::handwork::*;
     Builds {
-        throw: Some(throwing::Build { update: 0x1585c40, velocity: 0x14f1590, start: 0x14ee830, release: 0x156bec0, state: 0x40, released: 0x12e, hand: 0x134, player_vtable: PLAYER_VTABLE }),
+        throw: Some(throwing::Build { update: 0x1585c40, velocity: 0x14f1590, start: 0x14ee830, release: 0x156bec0, state: 0x40, released: 0x12e, hand: 0x134, player_vtable: PLAYER_VTABLE, parameters_slot: 0x618, arc: 0x6ba0 }),
         weapon_throw: Some(weapon_throw::Build { launch: 0x18c8490, velocity: 0x7f8, thrown: 0x811, owner: 0x878, player_vtable: PLAYER_VTABLE }),
         aim: aim::Build { eye: 0xf7bab0, look: 0xf7b900 },
         bow: Some(bow::Build { update: 0x1583c30, arrow: 0x1562fd0, full_draw: 0x14ef9b0, clock_slot: 0x340, state: 0x38, draw_start: 0x60, player_vtable: PLAYER_VTABLE }),
-        reload: Some(reload::Build { steps: 0x15a1da0, player_vtable: PLAYER_VTABLE }),
+        reload: Some(reload::Build { update: 0x1584970, start: 0x1574670, state: 0x38, prepare: None, player_vtable: PLAYER_VTABLE }),
         lockpick: Some(lockpick::Build {
             pick_input: 0xa258e0,
             poll: 0x1ed0170,

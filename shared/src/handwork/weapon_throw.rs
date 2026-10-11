@@ -1,14 +1,15 @@
-//! Throwing the melee weapon by hand (`motion_throw`, with the hand rig): the weapon flies the way
-//! the right hand swung it, as hard as it swung, instead of along the look at the game's speed.
+//! Throwing the melee weapon by hand (with the hand rig): the weapon flies the way the right hand
+//! swung it, as hard as it swung, instead of along the look at the game's speed; a hand at rest
+//! drops it.
 //!
 //! The game throws a melee weapon as an attack (the throw button held, then its animation); at the
 //! animation's release the weapon becomes a dropped item, and the dropped item's launch gives it a
 //! velocity once: a fixed speed (or the player's throw power), along the player's aim, or solved
 //! toward an aim point. Here, right after a launch of an item the player threw, its velocity is
-//! replaced by the hand's fastest over the last [`SWING_WITHIN`] s with some part along the game's
-//! own direction, at the game's speed scaled by the hand's ([`super::throwing`]'s rule). The
-//! release comes some way into the animation, after the swing, so the window is long. The weapon
-//! starts from where it is: in the hand.
+//! replaced by the right controller's swing: as fast as its fastest over the last [`SWING_WITHIN`]
+//! s, the way it travelled through that moment, at the game's speed scaled by the hand's
+//! ([`super::throwing`]'s rule). The release comes some way into the animation, after the swing,
+//! so the window is long. The weapon starts from where it is: in the hand.
 
 use super::throwing::thrown;
 use crate::hands;
@@ -36,8 +37,11 @@ pub struct Build {
 
 /// The part of the player an item's owner pointer points at.
 const OWNER_PART: usize = 0x100;
-/// The swing's speed is the hand's fastest over this long before the launch (seconds).
-const SWING_WITHIN: f32 = 0.6;
+/// The swing's speed is the hand's fastest over this long before the launch (seconds)...
+const SWING_WITHIN: f32 = 0.5;
+/// ...and its way the hand's from this long before that fastest moment to this long after.
+const STROKE_BEFORE: f32 = 0.1;
+const STROKE_AFTER: f32 = 0.04;
 
 type LaunchFn = unsafe extern "C" fn(usize, u8);
 
@@ -74,7 +78,10 @@ unsafe extern "C" fn launch(item: usize, toss: u8) {
     if before != Some([0.0; 3]) || hands::length(game) < 1e-3 || !players_throw(item, &build, player_vtable) {
         return;
     }
-    let Some((hand, _)) = hands::peak_velocity(RIGHT_HAND, SWING_WITHIN, Some(game)) else { return };
+    let Some(fastest) = hands::fastest(RIGHT_HAND, SWING_WITHIN) else { return };
+    let speed = hands::length(fastest);
+    let way = hands::stroke(RIGHT_HAND, SWING_WITHIN, STROKE_BEFORE, STROKE_AFTER).unwrap_or(if speed > 0.0 { fastest.map(|c| c / speed) } else { [0.0; 3] });
+    let hand = way.map(|c| c * speed);
     let Some(throw) = thrown(hand, hands::length(game)) else { return };
     if mem::write(item + build.velocity, throw) && THROWS.fetch_add(1, Relaxed) < 40 {
         log!("weapon thrown by hand: the swing at {:.1} m/s, the game's {:.1} m/s, thrown at {:.1} m/s", hands::length(hand), hands::length(game), hands::length(throw));

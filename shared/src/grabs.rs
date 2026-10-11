@@ -23,7 +23,7 @@ use monaka_hook::module::Module;
 use monaka_hook::{Hooks, InFlight, Original, mem, probe};
 use monaka_producer::{Rejection, log};
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 
 /// One build's sync action condition checks, each `(condition, participants) -> passes` (game DLL
@@ -58,11 +58,14 @@ static IS_BUSY_ORIGINAL: Original<CheckFn> = Original::new();
 static IN_CLIMB_ORIGINAL: Original<CheckFn> = Original::new();
 static MIN_DISTANCE_ORIGINAL: Original<CheckFn> = Original::new();
 static REFUSED: AtomicU64 = AtomicU64::new(0);
-/// Each participant class seen, by vtable: whether it is a player's.
-static CLASSES: Mutex<Option<HashMap<usize, bool>>> = Mutex::new(None);
+/// Each participant class seen, by vtable: whether it is a player's (none: no class to read).
+static CLASSES: Mutex<Option<HashMap<usize, Option<bool>>>> = Mutex::new(None);
+/// The game DLL, whose code alone is called on a participant.
+static GAMEDLL: OnceLock<Module> = OnceLock::new();
 
 /// Hooks `build`'s three condition checks in the game DLL.
 pub fn install(hooks: &mut Hooks, gamedll: &Module, build: Build) -> Result<(), Rejection> {
+    let _ = GAMEDLL.set(*gamedll);
     // SAFETY: the detours have the checks' signature (as every sync action condition's check: the
     // condition and the participants, a bool back); the game DLL's build is checked by the caller;
     // the prologues are decoded and moved.
@@ -77,18 +80,24 @@ pub fn install(hooks: &mut Hooks, gamedll: &Module, build: Build) -> Result<(), 
 
 /// Whether `object` (a C++ object, possibly a base in the middle of one) is a player's: its class's
 /// RTTI name says "Player" (`PlayerDI_PH` and the player's own parts; the AI's are named for the
-/// AI). Each class is looked up once and logged.
-fn is_player(object: usize) -> bool {
-    let Some(vtable) = mem::read::<usize>(object).filter(|&v| v != 0) else { return false };
-    let Ok(mut classes) = CLASSES.lock() else { return false };
+/// AI). None when it has no class to read (not such an object). Each class is looked up once and
+/// logged.
+fn is_player(object: usize) -> Option<bool> {
+    let vtable = mem::read::<usize>(object).filter(|&v| v != 0)?;
+    let mut classes = CLASSES.lock().ok()?;
     let classes = classes.get_or_insert_with(HashMap::new);
     if let Some(&known) = classes.get(&vtable) {
         return known;
     }
     let name = probe::class_name(object);
-    let player = name.as_deref().is_some_and(|n| n.contains("Player"));
+    let player = name.as_deref().map(|n| n.contains("Player"));
     if classes.len() < 40 {
-        log!("zombie grabs: a grab's victim of class {} is {}", name.as_deref().unwrap_or("?"), if player { "a player: refused" } else { "not a player" });
+        let what = match player {
+            Some(true) => "a player: refused",
+            Some(false) => "not a player",
+            None => "no class: left alone",
+        };
+        log!("zombie grabs: a grab's victim of class {} is {what}", name.as_deref().unwrap_or("?"));
     }
     classes.insert(vtable, player);
     player
@@ -99,13 +108,19 @@ fn victim_is_player(participants: usize, index: i32) -> bool {
     let Some(entries) = mem::read::<usize>(participants + ENTRIES).map(|p| p & 0xffff_ffff_ffff).filter(|&p| p != 0) else { return false };
     let Ok(index) = usize::try_from(index) else { return false };
     let Some(actor) = mem::read::<usize>(entries + index * ENTRY + ACTOR).filter(|&a| a != 0) else { return false };
-    if is_player(actor) {
-        return true;
+    match is_player(actor) {
+        Some(true) => return true,
+        // Not a C++ object with a class: the participants are not laid out as read here, and
+        // nothing of it is called.
+        None => return false,
+        Some(false) => {}
     }
-    let Some(getter) = mem::read::<usize>(actor).and_then(|vtable| mem::read::<usize>(vtable + STATE_SLOT)).filter(|&g| g != 0) else { return false };
-    // SAFETY: the actor's own state getter, as the check itself calls it on this thread.
+    let getter = mem::read::<usize>(actor).and_then(|vtable| mem::read::<usize>(vtable + STATE_SLOT));
+    let Some(getter) = getter.filter(|&g| GAMEDLL.get().is_some_and(|m| m.contains(g))) else { return false };
+    // SAFETY: the actor's own state getter (an object with a class, its slot the game DLL's code),
+    // as the check itself calls it on this thread.
     let state = unsafe { std::mem::transmute::<usize, unsafe extern "C" fn(usize) -> usize>(getter)(actor) };
-    state != 0 && is_player(state)
+    state != 0 && is_player(state) == Some(true)
 }
 
 /// Whether `condition`'s participant is a player (counting and logging the refusal when it is).

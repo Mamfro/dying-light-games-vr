@@ -76,8 +76,9 @@ pub struct Config {
     pub physical_melee: Option<melee::Physical>,
     /// Room-scale following (with the hand rig; `monaka_arms::roomscale`).
     pub room_scale: Option<roomscale::Settings>,
-    /// What the hands do with the game's own throw, bow, reload and lockpick (`motion_throw`,
-    /// `motion_bow`, `manual_reload`, `motion_lockpick`, with the hand rig; `eng_chr::handwork`).
+    /// What the hands do with the game's own throw, bow, reload and lockpick (with the hand rig, part
+    /// of it: `motion_throw=0`, `motion_bow=0`, `manual_reload=0`, `motion_lockpick=0` turn one off
+    /// for a test; `eng_chr::handwork`).
     pub handwork: eng_chr::handwork::Options,
     /// Grabs never land on the player (`disable_zombie_grabs`; `eng_chr::grabs`).
     pub disable_zombie_grabs: bool,

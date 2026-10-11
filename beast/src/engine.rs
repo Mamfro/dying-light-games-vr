@@ -209,21 +209,31 @@ pub const MELEE: eng_chr::melee::Build = eng_chr::melee::Build {
 pub const GRABS: eng_chr::grabs::Build = eng_chr::grabs::Build { is_busy: 0x2160ae0, in_climb: 0x2160bc0, min_distance: 0x2160f20 };
 /// What the hands do with the game's own actions (`eng_chr::handwork`), DL2's at new addresses:
 /// - the throw controller: update vtable slot 143, state at +0x40, the release made once (+0x132),
-///   the throwing hand at +0x138;
+///   the throwing hand at +0x138; the player's parameter block (slot +0x5e0) with
+///   `ThrowParabolaEnabled` at +0x74d8;
 /// - the dropped item's launch: velocity +0x7d4, thrown +0x7ed, owner +0x850;
 /// - the player's aim part (player +0x1b0): eye slot +0x58, look slot +0x50;
 /// - the bow controller: update slot 143, the clock at slot +0x368, state at +0x40, the draw's start
 ///   at +0x68;
-/// - the gun's reload step runner.
+/// - the gun controller (`WeaponFireController`): update slot 143, the reload start (as the reload
+///   input calls it), state at +0x38; before the start the input marks the weapons that pass two
+///   checks (the controller's weapon at slot +0x4a8) at +0x289.
+///
 /// The lockpick minigame's fields are not read for this build.
 pub const HANDWORK: eng_chr::handwork::Builds = {
     use eng_chr::handwork::*;
     Builds {
-        throw: Some(throwing::Build { update: 0x1036360, velocity: 0xf5a1e0, start: 0xf53e50, release: 0x1007720, state: 0x40, released: 0x132, hand: 0x138, player_vtable: PLAYER_VTABLE }),
+        throw: Some(throwing::Build { update: 0x1036360, velocity: 0xf5a1e0, start: 0xf53e50, release: 0x1007720, state: 0x40, released: 0x132, hand: 0x138, player_vtable: PLAYER_VTABLE, parameters_slot: 0x5e0, arc: 0x74d8 }),
         weapon_throw: Some(weapon_throw::Build { launch: 0xd682c0, velocity: 0x7d4, thrown: 0x7ed, owner: 0x850, player_vtable: PLAYER_VTABLE }),
         aim: aim::Build { eye: 0x1286a30, look: 0x12867d0 },
         bow: Some(bow::Build { update: 0x1034250, arrow: 0xff8d50, full_draw: 0xf55d10, clock_slot: 0x368, state: 0x40, draw_start: 0x68, player_vtable: PLAYER_VTABLE }),
-        reload: Some(reload::Build { steps: 0x106d650, player_vtable: PLAYER_VTABLE }),
+        reload: Some(reload::Build {
+            update: 0x1034e60,
+            start: 0x10192b0,
+            state: 0x38,
+            prepare: Some(reload::Prepare { weapon_slot: 0x4a8, checks: [0x1292a80, 0x1292ac0], flag: 0x289 }),
+            player_vtable: PLAYER_VTABLE,
+        }),
         lockpick: None,
     }
 };

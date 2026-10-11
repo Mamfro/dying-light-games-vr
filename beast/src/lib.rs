@@ -225,6 +225,8 @@ fn start(session: &'static Session) -> Result<(), Rejection> {
     }
     // SAFETY: the renderer's hash was checked above.
     unsafe { crate::research::install(&mut hooks, &renderer, stereo)? };
+    // SAFETY: the game DLL's hash was checked above.
+    unsafe { crate::research::install_game(&mut hooks, gamedll.as_ref())? };
     monaka_producer::enable_hooks(&HOOKS, hooks)?;
     // The headset's eye size: publishing waits for it (the stereo channel takes the first published
     // frame's size).

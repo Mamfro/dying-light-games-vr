@@ -45,7 +45,7 @@ fn defaults_alone_make_a_plan() {
 #[test]
 fn defaults_write_the_manifests_values() {
     let dl2 = &MANIFESTS[0];
-    assert_eq!(file(dl2, &Values::default(), None), "aim=hand_rig\nworld_hud=1\nworld_markers=1\nhud_scale=0.55\nfinger_tracking=1\nroom_scale=1\nmotion_throw=1\nmotion_bow=1\nmanual_reload=1\nmotion_lockpick=1\ndisable_zombie_grabs=1\nfinger_binary=0\nmode=framegen\nlock_pitch=0\nother_builds=0");
+    assert_eq!(file(dl2, &Values::default(), None), "aim=hand_rig\nworld_hud=1\nworld_markers=1\nhud_scale=0.55\nfinger_tracking=1\nroom_scale=1\ndisable_zombie_grabs=1\nfinger_binary=0\nmode=framegen\nlock_pitch=0\nother_builds=0");
     assert_eq!(plan(&Values::default(), dl2, None).licences, ["DyingLight2VR-LICENSE.txt"]);
 }
 

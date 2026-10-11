@@ -1,8 +1,10 @@
 //! What the hands do with the game's own actions, with the hand rig (Dying Light 2 and The Beast):
 //! throwing a throwable ([`throwing`]) or the melee weapon ([`weapon_throw`]) by hand, the bow
-//! drawn and aimed by the hands ([`bow`], through the aim part [`aim`]), reloading with the left
-//! hand at the gun ([`reload`]) and lockpicking by twisting the wrists ([`lockpick`]). Each game
-//! crate supplies its build's addresses ([`Builds`]) and its options ([`Options`]).
+//! drawn and aimed by the hands ([`bow`], through the aim part [`aim`]), reloading by bringing the
+//! left hand to the gun ([`reload`]) and lockpicking by twisting the wrists ([`lockpick`]). They
+//! are part of the hand rig, not settings of their own: each option stays readable for tests
+//! only. Each game crate supplies its build's addresses ([`Builds`]) and its options
+//! ([`Options`]).
 
 pub mod aim;
 pub mod bow;
@@ -57,6 +59,13 @@ pub fn install(hooks: &mut Hooks, gamedll: &Module, builds: &Builds, options: Op
     part("bow by hand", options.bow, options.bow.then(|| builds.bow.map(|b| bow::install(hooks, gamedll, b, builds.aim))).flatten());
     part("reload by hand", options.reload, options.reload.then(|| builds.reload.map(|b| reload::install(hooks, gamedll, b))).flatten());
     part("lockpick by hand", options.lockpick, options.lockpick.then(|| builds.lockpick.map(|b| lockpick::install(hooks, gamedll, b))).flatten());
+}
+
+/// Whether the aim should stay the head's now: the hands aim a throw under way or a held bow
+/// themselves, and the game's aim (the flashlight with it) following a controller then only
+/// gets in the way.
+pub fn head_aims() -> bool {
+    throwing::throwing_now() || (bow::installed() && crate::fpp::bow_held())
 }
 
 /// The parts' tallies for the end-of-run report.

@@ -1,7 +1,8 @@
-//! The bow by hand (`motion_bow`, with the hand rig): the bow in the left hand, the string in the
-//! right (the rig holds them apart, [`crate::fpp::is_bow`]). Holding fire draws as before; how far
-//! the hands are apart sets the draw's power, and the arrow leaves from the bow hand along the line
-//! from the string hand through it, instead of from the eye along the look.
+//! The bow by hand (with the hand rig): the bow in the left hand, the string in the right (the rig
+//! holds them apart, [`crate::fpp::is_bow`]). Holding fire draws as before; how far the string hand
+//! is pulled back along the bow hand's aim sets the draw's power, and the arrow leaves from the bow
+//! hand along where the left controller points (the line its reticle sits on), instead of from the
+//! eye along the look. While a bow is held the aim stays the head's ([`super::head_aims`]).
 //!
 //! The bow controller (`WeaponBowController`) draws in one state: each update it works the power
 //! out from the time drawn (now less the draw's start) over the full draw time, through a curve.
@@ -40,10 +41,10 @@ pub struct Build {
 
 /// The draw state.
 const DRAWING: i32 = 3;
-/// The hands this far apart (metres) is no draw...
-const REST: f32 = 0.15;
+/// The string hand this far behind the bow hand along its aim (metres) is no draw...
+const REST: f32 = 0.1;
 /// ...and this far a full one.
-const FULL_DRAW: f32 = 0.6;
+const FULL_DRAW: f32 = 0.55;
 /// The hands' places must be this recent (seconds).
 const FRESH: f32 = 0.1;
 /// The arrow starts this far ahead of the bow hand (metres), past the bow.
@@ -72,14 +73,23 @@ pub fn install(hooks: &mut Hooks, gamedll: &Module, build: Build, aim_build: aim
     Ok(())
 }
 
-/// The bow hand's and the string hand's places now (world).
-fn hands_now() -> Option<([f32; 3], [f32; 3])> {
-    Some((hands::position(&hands::palm(LEFT_HAND, FRESH)?), hands::position(&hands::palm(RIGHT_HAND, FRESH)?)))
+/// The bow hand's place and aim (unit, where the left controller points) now (world).
+fn bow_now() -> Option<([f32; 3], [f32; 3])> {
+    let palm = hands::palm(LEFT_HAND, FRESH)?;
+    let aim = hands::forward(&palm);
+    let length = hands::length(aim);
+    (length > 1e-3).then(|| (hands::position(&palm), aim.map(|c| c / length)))
 }
 
-/// The draw's share (0..1) for hands `apart` metres apart.
-fn pull(apart: f32) -> f32 {
-    ((apart - REST) / (FULL_DRAW - REST)).clamp(0.0, 1.0)
+/// How far the string hand is behind the bow hand along its aim (metres).
+fn drawn(bow: [f32; 3], aim: [f32; 3]) -> Option<f32> {
+    let string = hands::position(&hands::palm(RIGHT_HAND, FRESH)?);
+    Some(hands::dot([0, 1, 2].map(|k| bow[k] - string[k]), aim))
+}
+
+/// The draw's share (0..1) for the string `back` metres behind the bow.
+fn pull(back: f32) -> f32 {
+    ((back - REST) / (FULL_DRAW - REST)).clamp(0.0, 1.0)
 }
 
 unsafe extern "C" fn update(controller: usize, dt: f32) {
@@ -87,9 +97,9 @@ unsafe extern "C" fn update(controller: usize, dt: f32) {
     if let Some(&(build, full_draw, player_vtable)) = BUILD.get()
         && mem::read::<i32>(controller + build.state) == Some(DRAWING)
         && super::throwing::players(controller, player_vtable)
-        && let Some((bow, string)) = hands_now()
+        && let Some(back) = bow_now().and_then(|(bow, aim)| drawn(bow, aim))
     {
-        let share = pull(hands::length([0, 1, 2].map(|k| bow[k] - string[k])));
+        let share = pull(back);
         let clock = mem::read::<usize>(controller).and_then(|vtable| mem::read::<usize>(vtable + build.clock_slot));
         if let Some(clock) = clock {
             // SAFETY: the controller's own clock and the full draw time, no arguments beyond it,
@@ -106,14 +116,11 @@ unsafe extern "C" fn update(controller: usize, dt: f32) {
 
 unsafe extern "C" fn arrow(controller: usize, target: usize) {
     let _flight = InFlight::enter();
-    let aimed = BUILD.get().filter(|(_, _, player_vtable)| super::throwing::players(controller, *player_vtable)).and_then(|_| hands_now()).and_then(|(bow, string)| {
-        let line = [0, 1, 2].map(|k| bow[k] - string[k]);
-        let length = hands::length(line);
-        (length > REST * 0.5).then(|| {
-            let look = line.map(|v| v / length);
-            ([0, 1, 2].map(|k| bow[k] + look[k] * AHEAD_OF_BOW), look)
-        })
-    });
+    let aimed = BUILD
+        .get()
+        .filter(|(_, _, player_vtable)| super::throwing::players(controller, *player_vtable))
+        .and_then(|_| bow_now())
+        .map(|(bow, aim)| ([0, 1, 2].map(|k| bow[k] + aim[k] * AHEAD_OF_BOW), aim));
     match aimed {
         Some((eye, look)) => {
             if ARROWS.fetch_add(1, Relaxed) < 40 {
@@ -125,6 +132,11 @@ unsafe extern "C" fn arrow(controller: usize, target: usize) {
         // SAFETY: forwards the game's own call.
         None => unsafe { ARROW_ORIGINAL.get()(controller, target) },
     }
+}
+
+/// Whether the bow by hand is on.
+pub fn installed() -> bool {
+    BUILD.get().is_some() && UPDATE_ORIGINAL.is_set()
 }
 
 pub fn report() {
@@ -139,7 +151,7 @@ mod tests {
 
     #[test]
     fn the_pull_runs_from_hands_together_to_a_full_draw() {
-        assert_eq!(pull(0.1), 0.0);
+        assert_eq!(pull(0.05), 0.0);
         assert!((pull((REST + FULL_DRAW) / 2.0) - 0.5).abs() < 1e-5);
         assert_eq!(pull(0.9), 1.0);
     }

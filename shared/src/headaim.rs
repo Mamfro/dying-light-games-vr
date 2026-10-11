@@ -9,13 +9,14 @@
 //!
 //! Hand aim: the aiming controller's direction replaces the head's; with a melee weapon or bare
 //! hands drawn and the hand rig on, the head aims; the left hand's tool aims with the left
-//! controller (`monaka_arms::aim`). A game supplies its offsets ([`Fields`]) and where it steers
+//! controller (`monaka_arms::aim`), except a throw or a bow by hand, which aim themselves
+//! ([`crate::handwork::head_aims`]). A game supplies its offsets ([`Fields`]) and where it steers
 //! from (DL2 at the player camera setter, The Beast at the arms callback); the state, the steps
 //! and the tallies are here.
 
 use monaka_arms::aim::{AimSettings, LookFields, LookSteer, TOOL, neutral_pitch, note_source};
 use monaka_core::aim::{BakedYaw, Convention, Look};
-use monaka_core::camera::{Mat34, from_back_up, level, turn};
+use monaka_core::camera::{Mat34, from_back_up, head_yaw_pitch, level, turn};
 use monaka_core::protocol::HeadPose;
 use monaka_hook::mem;
 use monaka_hook::module::Module;
@@ -166,7 +167,14 @@ impl HeadAim {
         }
         let head = head.filter(|h| h.valid != 0 && settings.head_aim && !self.releasing.load(Acquire));
         if let Some(head) = head {
-            let aim = settings.aim_at(monaka_channel::tick(), head.orientation, monaka_arms::controllers::palm);
+            let mut aim = settings.aim_at(monaka_channel::tick(), head.orientation, monaka_arms::controllers::palm);
+            // A throw or a bow by hand aims itself: the game's aim (the flashlight with it) stays
+            // the head's.
+            if settings.hand_rig && crate::handwork::head_aims() {
+                (aim.yaw, aim.pitch) = head_yaw_pitch(head.orientation);
+                aim.by_hand = false;
+                aim.tool = false;
+            }
             note_source(aim.by_hand, settings.hand_aim);
             match steer.steer(character, aim.yaw, aim.pitch) {
                 Some((written, own)) => {
