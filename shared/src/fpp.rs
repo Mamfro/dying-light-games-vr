@@ -158,10 +158,13 @@ pub fn around<S: ArmsSkeleton>(
     }
     let weapon = mem::read::<usize>(vis + layout.weapons).unwrap_or(0);
     let held = Held::of(weapon);
-    melee::update(held, options.palms, &options.melee);
+    let bow = held_bow(vis, layout).is_some();
+    // A bow (in the left hand's slot, the right's empty) swings nothing: its draw is the attack,
+    // and an empty right hand would punch, firing it.
+    melee::update(if bow { Held::Gun } else { held }, options.palms, &options.melee);
     // A bow is held apart (the bow in the left hand, the string in the right), and whatever the
     // producer says is.
-    monaka_arms::hands_apart(options.apart || held_bow(vis, layout).is_some());
+    monaka_arms::hands_apart(options.apart || bow);
     let moved = match (&skeleton, &before, camera) {
         (Some(skeleton), Some(before), Some(camera)) => pose(camera, held == Held::Gun).and_then(|pose| monaka_arms::follow(skeleton, before, &pose)),
         (_, _, None) => Err("no player camera"),

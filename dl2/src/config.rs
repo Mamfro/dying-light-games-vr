@@ -79,7 +79,7 @@ pub struct Config {
     /// What the hands do with the game's own throw, bow, reload and lockpick (`motion_throw`,
     /// `motion_bow`, `manual_reload`, `motion_lockpick`, with the hand rig; `eng_chr::handwork`).
     pub handwork: eng_chr::handwork::Options,
-    /// The biters' front grabs held off (`disable_zombie_grabs`; `eng_chr::grabs`).
+    /// Grabs never land on the player (`disable_zombie_grabs`; `eng_chr::grabs`).
     pub disable_zombie_grabs: bool,
     /// The headset's recommended eye size (`eye_size=WxH`, from the OpenXR runtime).
     pub eye_size: Option<(u32, u32)>,

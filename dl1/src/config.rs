@@ -72,6 +72,9 @@ pub struct Config {
     /// With the hand rig: tools thrown with the left hand's own throw (`throw_by_hand=0`: the
     /// game's throw along the view).
     pub throw_by_hand: bool,
+    /// With the hand rig: the grappling hook goes where the left controller points
+    /// (`grapple_by_hand=0`: where the character looks).
+    pub grapple_by_hand: bool,
     /// With the hand rig: the bow drawn by pulling the string hand back and loosed along the hands
     /// (`bow_by_hand=0`: the game's shot along the view).
     pub bow_by_hand: bool,
@@ -125,6 +128,7 @@ impl Config {
     pub fn from_options(options: &Options) -> Self {
         let shared = Shared::from_options(options, &MANIFESTS[0]);
         let arms_aim = AimSettings::from_options(options, shared.aim, true);
+        let throw_by_hand = options.switch("throw_by_hand", true);
         Self {
             shared,
             arms_aim,
@@ -150,7 +154,8 @@ impl Config {
             back_is_blunt: options.switch("back_is_blunt", true),
             disable_zombie_grabs: options.switch("disable_zombie_grabs", true),
             vr_buttons: options.switch("vr_buttons", true),
-            throw_by_hand: options.switch("throw_by_hand", true),
+            throw_by_hand,
+            grapple_by_hand: options.switch("grapple_by_hand", true),
             bow_by_hand: options.switch("bow_by_hand", true),
             lockpick_by_hand: options.switch("lockpick_by_hand", true),
             shoot_from_barrel: options.switch("shoot_from_barrel", true),

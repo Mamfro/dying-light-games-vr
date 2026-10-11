@@ -68,11 +68,18 @@ const SET_WORLD_POSITION: &str = "?SetWorldPosition@IControlObject@@QEAAXAEBVvec
 
 /// The hand speed carried into the throw.
 const GAIN: f32 = 1.6;
+/// The hand speed carried into a launched throwable (molotovs, grenades): a hand's throw in a room
+/// is slower than the game's own lob (13 m/s), so more of it.
+const LAUNCH_GAIN: f32 = 3.0;
 /// The hand that throws tools, and the one holding a melee weapon.
 const HAND: usize = hand_world::LEFT;
 const WEAPON_HAND: usize = hand_world::RIGHT;
 /// How far back a release looks for the throwing hand's swing.
 const RELEASE_WINDOW: std::time::Duration = std::time::Duration::from_millis(500);
+/// The way the hand travelled from this long before its fastest moment to this long after is the
+/// throw's direction.
+const STROKE_BEFORE: std::time::Duration = std::time::Duration::from_millis(100);
+const STROKE_AFTER: std::time::Duration = std::time::Duration::from_millis(40);
 /// A point thrown at by hand is this far per m/s of the hand's speed, and this near and far
 /// (metres); below [`STILL`] m/s the hand is at rest and what it held drops straight down.
 const REACH_PER_SPEED: f32 = 3.0;
@@ -119,6 +126,9 @@ static RELEASES: AtomicU64 = AtomicU64::new(0);
 /// When the player's throw controller left its idle state, while it is out of it.
 static THROW_STARTED: Mutex<Option<std::time::Instant>> = Mutex::new(None);
 const LONGEST_THROW: std::time::Duration = std::time::Duration::from_secs(6);
+/// When the throw controller last went back to idle.
+static THROW_ENDED: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+const AFTER_THROW: std::time::Duration = std::time::Duration::from_millis(1500);
 
 pub fn install(hooks: &mut Hooks, gamedll: &Module, engine_module: &Module) -> Result<(), Rejection> {
     let set_position = engine_module.export(SET_WORLD_POSITION).ok_or_else(|| Rejection::revision("the engine does not export IControlObject::SetWorldPosition"))?;
@@ -156,6 +166,12 @@ unsafe extern "C" fn set_state(controller: *mut c_void, state: u32) {
     }
     let busy = mem::read::<u32>(at + STATE).is_some_and(|s| s != 0);
     if let Ok(mut started) = THROW_STARTED.lock() {
+        if !busy
+            && started.is_some()
+            && let Ok(mut ended) = THROW_ENDED.lock()
+        {
+            *ended = Some(std::time::Instant::now());
+        }
         *started = match (busy, *started) {
             (false, _) => None,
             (true, Some(at)) => Some(at),
@@ -184,13 +200,24 @@ unsafe extern "C" fn set_state(controller: *mut c_void, state: u32) {
     }
 }
 
-/// The throwing hand's position and its fastest velocity lately.
+/// The throwing hand's position and its throw: as fast as its fastest lately, the way it travelled
+/// through that moment (a short flick stops before the trigger is let go: what comes after is not
+/// the throw).
 fn throwing_hand() -> Option<([f32; 3], [f32; 3])> {
-    hand_world::position(HAND).zip(hand_world::controller_fastest(HAND, RELEASE_WINDOW))
+    let fastest = hand_world::controller_fastest(HAND, RELEASE_WINDOW)?;
+    let speed = hand_world::length(fastest);
+    let direction = hand_world::controller_stroke(HAND, RELEASE_WINDOW, STROKE_BEFORE, STROKE_AFTER).unwrap_or_else(|| if speed > 0.0 { fastest.map(|c| c / speed) } else { DOWN });
+    hand_world::position(HAND).map(|position| (position, direction.map(|c| c * speed)))
 }
 
 /// The left hand's bones mirror the right's across their local x-z plane.
 const MIRROR: Mat34 = [1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+/// A tool mirrored into the left hand flips one of its own axes back (a mirror image of it cannot
+/// be drawn): across its y for most, across its z for a bottle (its y runs along it, and flipping
+/// that would hold it upside down).
+const TOOL_FLIP: Mat34 = MIRROR;
+const BOTTLE_FLIP: Mat34 = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0];
+const BOTTLE_CLASS: &str = ".?AVMolotovVis@@";
 /// A tool this near the right hand's holder is where the game put it this update (else it is still
 /// where it was moved to, and moving it again would carry it off).
 const AT_HOLDER: f32 = 0.05;
@@ -217,7 +244,8 @@ pub fn place_tool(vis: usize) {
     // The right holder against its hand, mirrored into the left hand; the tool moved as the holder.
     let (left, right, holder) = (hand_world::rigid(&left), hand_world::rigid(&right), hand_world::rigid(&holder));
     let in_hand = compose(&rigid_inverse(&right), &holder);
-    let target = compose(&left, &compose(&MIRROR, &compose(&in_hand, &MIRROR)));
+    let flip = if monaka_hook::probe::class_name(tool.id()).as_deref() == Some(BOTTLE_CLASS) { BOTTLE_FLIP } else { TOOL_FLIP };
+    let target = compose(&left, &compose(&MIRROR, &compose(&in_hand, &flip)));
     let moved = compose(&compose(&target, &rigid_inverse(&holder)), &world);
     tool.set_world(0, &moved);
     let n = TOOL_PLACED.fetch_add(1, Relaxed) + 1;
@@ -227,9 +255,12 @@ pub fn place_tool(vis: usize) {
 }
 
 /// Whether the player's throw controller is in a throw (winding up to letting go), for at most
-/// [`LONGEST_THROW`]: a throw cut short (the tool put away) may never say it ended.
+/// [`LONGEST_THROW`] (a throw cut short, the tool put away, may never say it ended), or ended
+/// less than [`AFTER_THROW`] ago: the game then poses the next tool in the right hand, held out
+/// in front, which the left hand on its controller shows instead.
 pub fn throwing_now() -> bool {
-    THROW_STARTED.lock().ok().and_then(|s| *s).is_some_and(|at| at.elapsed() < LONGEST_THROW)
+    let fresh = |at: &Mutex<Option<std::time::Instant>>, within| at.lock().ok().and_then(|s| *s).is_some_and(|at| at.elapsed() < within);
+    fresh(&THROW_STARTED, LONGEST_THROW) || fresh(&THROW_ENDED, AFTER_THROW)
 }
 
 /// The kind of the item the controller holds.
@@ -265,7 +296,7 @@ unsafe extern "C" fn throw(controller: *mut c_void) {
     if players && kind.is_some() && kind != Some(THROWN_OBJECT) {
         let release = RELEASE.lock().ok().and_then(|mut r| r.take());
         if let Ok(mut l) = LAUNCHING.lock() {
-            *l = release.map(|(position, velocity)| (position, velocity.map(|c| c * GAIN)));
+            *l = release.map(|(position, velocity)| (position, velocity.map(|c| c * LAUNCH_GAIN)));
         }
         // SAFETY: forwards the game's own call.
         unsafe { THROW_ORIGINAL.get()(controller) };

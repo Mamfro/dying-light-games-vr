@@ -51,9 +51,13 @@ const BUTTON_SLOT: usize = 0x490;
 const BUTTON: usize = 0x110fa70;
 
 /// A binding entry (0x2c bytes): the action id, then the device at +0x08 and the key at +0x10.
+/// The button event ([`BUTTON`]) runs only the bindings of device 0: the buttons this module
+/// presses itself are bound so.
 const ENTRY: usize = 0x2c;
 const ENTRY_ACTION: usize = 0x00;
+const ENTRY_DEVICE: usize = 0x08;
 const ENTRY_KEY: usize = 0x10;
+const PRESSED_DEVICE: u32 = 0;
 
 /// The pad's button codes (`data/inputenums.def`).
 const KEY_B: u32 = 0x0f01;
@@ -94,7 +98,7 @@ const RELOAD_KEY: u32 = 0x0f10;
 /// The reload gesture (`reload_gesture`, with the hand rig and a gun drawn): the left hand brought
 /// within [`RELOAD_NEAR`] of the gun hand, then taken more than [`RELOAD_AWAY`] away within
 /// [`RELOAD_WITHIN`], reloads; not again for [`RELOAD_COOLDOWN`].
-const RELOAD_NEAR: f32 = 0.12;
+const RELOAD_NEAR: f32 = 0.15;
 const RELOAD_AWAY: f32 = 0.25;
 const RELOAD_WITHIN: Duration = Duration::from_millis(1000);
 const RELOAD_COOLDOWN: Duration = Duration::from_millis(1500);
@@ -125,11 +129,12 @@ static CROUCH_WANTED: AtomicBool = AtomicBool::new(false);
 static CROUCHES: AtomicU64 = AtomicU64::new(0);
 /// When the pad's Y went down (while held), whether the heal button is down, and heals pressed.
 static Y_DOWN: Mutex<Option<Instant>> = Mutex::new(None);
-static HEAL_HELD: AtomicBool = AtomicBool::new(false);
+/// When the heal and reload buttons were pressed, while they are.
+static HEAL_HELD: Mutex<Option<Instant>> = Mutex::new(None);
 static HEALS: AtomicU64 = AtomicU64::new(0);
 /// The reload gesture: on, its button down, when the left hand last touched the gun, the last reload.
 static RELOAD_GESTURE: AtomicBool = AtomicBool::new(false);
-static RELOAD_HELD: AtomicBool = AtomicBool::new(false);
+static RELOAD_HELD: Mutex<Option<Instant>> = Mutex::new(None);
 static GESTURE: Mutex<(Option<Instant>, Option<Instant>)> = Mutex::new((None, None));
 static RELOADS: AtomicU64 = AtomicU64::new(0);
 /// The input devices seen, with whether each is a pad (by its class).
@@ -228,6 +233,13 @@ fn copy_with(entry: *const u8, action: u32, key: u32) -> [u8; ENTRY] {
     copy
 }
 
+/// [`copy_with`] for a button this module presses itself ([`press`]).
+fn pressed_copy(entry: *const u8, action: u32, key: u32) -> [u8; ENTRY] {
+    let mut copy = copy_with(entry, action, key);
+    copy[ENTRY_DEVICE..ENTRY_DEVICE + 4].copy_from_slice(&PRESSED_DEVICE.to_le_bytes());
+    copy
+}
+
 /// Each binding the game registers: the VR layout applied to it.
 unsafe extern "C" fn register(manager: *mut c_void, entry: *mut u8) {
     let _flight = InFlight::enter();
@@ -242,7 +254,7 @@ unsafe extern "C" fn register(manager: *mut c_void, entry: *mut u8) {
         // Crouching moves off B, to the button the head presses.
         (a, KEY_B) if a == DUCK_TOGGLE.2 => {
             CHANGED.fetch_add(1, Relaxed);
-            forward(copy_with(entry, DUCK.2, CROUCH_KEY).as_mut_ptr());
+            forward(pressed_copy(entry, DUCK.2, CROUCH_KEY).as_mut_ptr());
         }
         // Looking back is turning the head.
         (a, KEY_Y) if a == LOOKBACK.2 => {
@@ -257,13 +269,13 @@ unsafe extern "C" fn register(manager: *mut c_void, entry: *mut u8) {
         (a, KEY_DPAD_DOWN) if a == HEAL.2 || (a == VEHICLE_HEAL.2 && VEHICLE_HEAL_KNOWN.load(Relaxed)) => {
             CHANGED.fetch_add(1, Relaxed);
             forward(entry);
-            forward(copy_with(entry, action, HEAL_KEY).as_mut_ptr());
+            forward(pressed_copy(entry, action, HEAL_KEY).as_mut_ptr());
         }
         // Reloading, also on the gesture's button.
         (a, KEY_X) if a == RELOAD.2 && RELOAD_GESTURE.load(Relaxed) => {
             CHANGED.fetch_add(1, Relaxed);
             forward(entry);
-            forward(copy_with(entry, action, RELOAD_KEY).as_mut_ptr());
+            forward(pressed_copy(entry, action, RELOAD_KEY).as_mut_ptr());
         }
         _ => forward(entry),
     }
@@ -309,20 +321,19 @@ unsafe extern "C" fn dispatched(input: *mut c_void, pad: usize, events: *mut c_v
             CROUCHES.fetch_add(1, Relaxed);
         }
     }
-    // A heal is a press, then a let-go on a later pass.
-    if HEAL_HELD.load(Relaxed) {
+    // A heal is a press, let go [`PULSE`] later: the pass runs once per input device each update,
+    // so a let-go on the next pass would come before the game looked at the button.
+    if held_long_enough(&HEAL_HELD) {
         press(&gamedll, manager, HEAL_KEY, false);
-        HEAL_HELD.store(false, Relaxed);
-    } else if tapped && APPLYING.load(Relaxed) && press(&gamedll, manager, HEAL_KEY, true) {
-        HEAL_HELD.store(true, Relaxed);
+    } else if tapped && APPLYING.load(Relaxed) && !is_held(&HEAL_HELD) && press(&gamedll, manager, HEAL_KEY, true) {
+        hold(&HEAL_HELD);
         HEALS.fetch_add(1, Relaxed);
     }
-    // A reload is a press, then a let-go on a later pass.
-    if RELOAD_HELD.load(Relaxed) {
+    // A reload likewise.
+    if held_long_enough(&RELOAD_HELD) {
         press(&gamedll, manager, RELOAD_KEY, false);
-        RELOAD_HELD.store(false, Relaxed);
-    } else if APPLYING.load(Relaxed) && RELOAD_GESTURE.load(Relaxed) && reload_gestured() && press(&gamedll, manager, RELOAD_KEY, true) {
-        RELOAD_HELD.store(true, Relaxed);
+    } else if APPLYING.load(Relaxed) && RELOAD_GESTURE.load(Relaxed) && !is_held(&RELOAD_HELD) && reload_gestured() && press(&gamedll, manager, RELOAD_KEY, true) {
+        hold(&RELOAD_HELD);
         let n = RELOADS.fetch_add(1, Relaxed) + 1;
         if n <= 20 {
             log!("VR buttons: reload {n} by the gesture");
@@ -335,7 +346,8 @@ fn reload_gestured() -> bool {
     if monaka_arms::melee::held() != Some(monaka_arms::melee::Held::Gun) {
         return false;
     }
-    let (Some(left), Some(right)) = (hand_world::position(hand_world::LEFT), hand_world::position(hand_world::RIGHT)) else { return false };
+    // The controllers, not the arms: with a gun held two-handed the left hand rides the gun.
+    let (Some(left), Some(right)) = (hand_world::controller(hand_world::LEFT), hand_world::controller(hand_world::RIGHT)) else { return false };
     let apart = hand_world::length([0, 1, 2].map(|k| left[k] - right[k]));
     let Ok(mut gesture) = GESTURE.lock() else { return false };
     let now = Instant::now();
@@ -388,6 +400,29 @@ fn y_tapped(events: usize) -> bool {
         }
     }
     tapped
+}
+
+/// How long a pressed button is held before it is let go.
+const PULSE: Duration = Duration::from_millis(100);
+
+fn hold(held: &Mutex<Option<Instant>>) {
+    if let Ok(mut h) = held.lock() {
+        *h = Some(Instant::now());
+    }
+}
+
+fn is_held(held: &Mutex<Option<Instant>>) -> bool {
+    held.lock().is_ok_and(|h| h.is_some())
+}
+
+/// Whether the button has been held [`PULSE`]: then it is taken as let go.
+fn held_long_enough(held: &Mutex<Option<Instant>>) -> bool {
+    let Ok(mut h) = held.lock() else { return false };
+    if h.is_some_and(|at| at.elapsed() >= PULSE) {
+        *h = None;
+        return true;
+    }
+    false
 }
 
 /// Presses or lets go of `key` through the input manager's own button event; false when the

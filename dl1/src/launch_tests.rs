@@ -47,7 +47,7 @@ fn defaults_write_the_manifests_values() {
     let dl1 = &MANIFESTS[0];
     assert_eq!(
         file(dl1, &Values::default(), Some((2880, 2880))),
-        "aim=hand_rig\nworld_hud=1\nhud_scale=0.36\nhud_distance=2\nfinger_tracking=1\nroom_scale=1\nfinger_binary=0\nfsr=0\neye_separation=0.064\nother_builds=0\neye_size=2880x2880"
+        "aim=hand_rig\nworld_hud=1\nhud_scale=0.36\nhud_distance=2\nfinger_tracking=1\nroom_scale=1\ndisable_zombie_grabs=1\nvr_buttons=1\nfinger_binary=0\nfsr=0\neye_separation=0.064\nother_builds=0\neye_size=2880x2880"
     );
     assert_eq!(eye_size(&Values::default(), dl1), EyeSize::Headset);
 }

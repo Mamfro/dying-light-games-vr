@@ -124,16 +124,34 @@ pub fn fastest(side: usize, within: Duration) -> Option<[f32; 3]> {
     fastest_in(&HISTORY, side, within)
 }
 
+/// Where a controller is in the world, as of the latest arms callback ([`sample_controllers`]).
+pub fn controller(side: usize) -> Option<[f32; 3]> {
+    CONTROLLERS.lock().ok()?[side].back().map(|(_, p)| *p)
+}
+
 /// A controller's fastest velocity in the world (m/s) in the last `within` ([`sample_controllers`]).
 pub fn controller_fastest(side: usize, within: Duration) -> Option<[f32; 3]> {
     fastest_in(&CONTROLLERS, side, within)
 }
 
-fn fastest_in(history: &Mutex<[Track; 2]>, side: usize, within: Duration) -> Option<[f32; 3]> {
-    let history = history.lock().ok()?;
+/// Which way a controller travelled through its fastest moment in the last `within` (unit): from
+/// `before` that moment to `after` it (the newest sample at most). `None` when it hardly moved.
+pub fn controller_stroke(side: usize, within: Duration, before: Duration, after: Duration) -> Option<[f32; 3]> {
+    let history = CONTROLLERS.lock().ok()?;
     let list = &history[side];
+    let peak = peak_in(list, within)?.1;
+    let (peak_at, _) = list[peak];
+    let (_, from) = *list.iter().take(peak + 1).find(|(at, _)| peak_at.duration_since(*at) <= before)?;
+    let (_, to) = *list.iter().skip(peak).take_while(|(at, _)| at.duration_since(peak_at) <= after).last()?;
+    let moved = [0, 1, 2].map(|k| to[k] - from[k]);
+    let length = length(moved);
+    (length > 0.005).then(|| moved.map(|c| c / length))
+}
+
+/// The fastest velocity in `list` in the last `within`, and the sample it was measured at.
+fn peak_in(list: &Track, within: Duration) -> Option<([f32; 3], usize)> {
     let (newest_at, _) = *list.back()?;
-    let mut best: Option<[f32; 3]> = None;
+    let mut best: Option<([f32; 3], usize)> = None;
     for (i, &(at, p)) in list.iter().enumerate() {
         if newest_at.duration_since(at) > within {
             continue;
@@ -142,11 +160,16 @@ fn fastest_in(history: &Mutex<[Track; 2]>, side: usize, within: Duration) -> Opt
         let Some(&(from_at, from)) = list.iter().take(i).rev().find(|(t, _)| at.duration_since(*t) >= VELOCITY_SPAN) else { continue };
         let dt = at.duration_since(from_at).as_secs_f32();
         let v = [0, 1, 2].map(|k| (p[k] - from[k]) / dt);
-        if best.is_none_or(|b| length(v) > length(b)) {
-            best = Some(v);
+        if best.is_none_or(|(b, _)| length(v) > length(b)) {
+            best = Some((v, i));
         }
     }
     best
+}
+
+fn fastest_in(history: &Mutex<[Track; 2]>, side: usize, within: Duration) -> Option<[f32; 3]> {
+    let history = history.lock().ok()?;
+    peak_in(&history[side], within).map(|(v, _)| v)
 }
 
 /// Where the right hand holds a bowstring: between its index and middle fingers' middle joints

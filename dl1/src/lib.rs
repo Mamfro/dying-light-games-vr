@@ -234,6 +234,9 @@ fn attach(
             if config.bow_by_hand {
                 bow::install(&mut hooks, &gamedll)?;
             }
+            if config.grapple_by_hand {
+                crate::player::grapple::install(&mut hooks, &gamedll)?;
+            }
             if config.lockpick_by_hand {
                 lockpick::install(&mut hooks, &gamedll)?;
             }
@@ -292,6 +295,7 @@ fn stop() -> Result<(), Rejection> {
     grabs::report();
     throwing::report();
     bow::report();
+    crate::player::grapple::report();
     gun::report();
     lockpick::report();
     hand_world::report();

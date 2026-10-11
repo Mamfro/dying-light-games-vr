@@ -65,8 +65,15 @@ pub fn resolve(engine_module: &Module) -> Result<(), Rejection> {
         }
     };
     let _ = ELEMENTS.set(elements);
+    // The left bones mirror the right ones across their local x-z plane (measured the same every
+    // run); declared, so a run that starts with the arms posed unlike (a bow drawn) does not go
+    // without it and put the left hand on upside down.
+    monaka_arms::declare_mirror(LEFT_MIRROR);
     Ok(())
 }
+
+/// How the arms' left bones mirror the right ones (row-major 3x3).
+const LEFT_MIRROR: [f32; 9] = [1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0];
 
 /// The arms vis's vtable, once its class name has been checked.
 static VIS_VTABLE: AtomicU64 = AtomicU64::new(0);
@@ -265,13 +272,18 @@ pub unsafe extern "system" fn camera_target(vis: *mut c_void, camera: *mut c_voi
     }
     let config = stereo::config();
     let palms = [stereo::pending_palm_of(LEFT_HAND), stereo::pending_palm_of(RIGHT_HAND)];
+    let throwing = crate::player::throwing::throwing_now();
+    // The game says when it climbs (not the hands' height: a throw's wind-up raises them too).
+    if let Some(climbing) = crate::player::climbing::climbing(arms_model()) {
+        monaka_arms::traverse::report_climbing(climbing);
+    }
     let options = fpp::Options {
         rig: config.aim.rig,
         probe: crate::research::options().hands,
         melee: config.melee,
         fingers: (config.aim.rig && config.fingers.tracking).then_some(FINGER_AXES),
         palms,
-        apart: crate::player::throwing::throwing_now(),
+        apart: throwing,
     };
     let game = camera_matrix(camera);
     let pose = |game: Mat34, gun: bool| -> Result<monaka_arms::Pose, &'static str> {
@@ -295,7 +307,14 @@ pub unsafe extern "system" fn camera_target(vis: *mut c_void, camera: *mut c_voi
     let outcome = fpp::around(vis, &LAYOUT, &options, Model::of, game, original, pose);
     crate::research::arms::moved(outcome.placed.as_ref(), game);
     crate::research::arms::after(vis, camera, outcome.before.as_ref());
-    crate::player::bow::place_string(vis);
+    // Where the viewer's left reticle sits in the world: along where the left controller points.
+    let left_reticle = game.zip(palms[LEFT_HAND]).map(|(game, palm)| {
+        let m = monaka_core::camera::apply_head(&stereo::tracking_origin(&game, true, config.aim.hand), palm.orientation, palm.position);
+        let reach = monaka_core::math::WEAPON_CONVERGENCE;
+        [m[3] - m[2] * reach, m[7] - m[6] * reach, m[11] - m[10] * reach]
+    });
+    crate::player::grapple::note_reticle(left_reticle);
+    crate::player::bow::place_string(vis, left_reticle);
     crate::player::throwing::place_tool(vis);
     crate::research::bow::after(vis);
     crate::player::hand_world::sample();

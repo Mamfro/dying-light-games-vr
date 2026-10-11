@@ -39,7 +39,7 @@ pub const MANIFESTS: &[Manifest] = &[Manifest {
         opt("motion_lockpick", "Lockpick by hand", "Twist your left wrist to turn the pick around the lock and your right wrist to turn the screwdriver.", Kind::Switch { default: true })
             .on(Shown::Game)
             .only_when("aim", "hand_rig"),
-        opt("disable_zombie_grabs", "Disable zombie grabs", "Biters never grab you from the front. Off: they grab and bite until you break free, as in the game.", Kind::Switch { default: true })
+        opt("disable_zombie_grabs", "Disable zombie grabs", "Zombies never grab you. Off: they grab and bite until you break free, as in the game.", Kind::Switch { default: true })
             .on(Shown::Game),
         BINARY_FINGERS,
         opt("mode", "Rendering", "Smooth renders each eye and adds in-between frames, Sharp renders each eye, Fast draws once for both eyes (gaps beside near things).", Kind::Choice {

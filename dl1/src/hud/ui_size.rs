@@ -243,7 +243,10 @@ unsafe extern "system" fn on_screen_point(camera: usize, out: usize, x: i32, y: 
 unsafe extern "system" fn on_screen_point_f(camera: usize, out: usize, x: f32, y: f32) -> usize {
     let _flight = InFlight::enter();
     // SAFETY: forwards the game's own call.
-    as_fixed_returning(|| unsafe { ON_SCREEN_POINT_F_ORIGINAL.get()(camera, out, x, y) })
+    let point = as_fixed_returning(|| unsafe { ON_SCREEN_POINT_F_ORIGINAL.get()(camera, out, x, y) });
+    // The grappling hook's search takes the screen's centre for where to aim: the left reticle.
+    crate::player::grapple::on_screen_point(point);
+    point
 }
 
 /// Hooks the UI's readers of the screen size (each passes through while the UI is not fixed).

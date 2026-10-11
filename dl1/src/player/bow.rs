@@ -49,6 +49,8 @@ const BOW_BONE: &str = "bone_root";
 /// The arrow's line runs along the bow root's x (one way or the other: forward is away from the
 /// string hand).
 const ARROW_ALONG: [f32; 3] = [1.0, 0.0, 0.0];
+/// The bow is turned to the left controller's line only when within this of it (degrees).
+const MOST_TURN: f32 = 30.0;
 /// The string hand this far ahead of the nock means forward was taken the wrong way.
 const FLIP_BEYOND: f32 = 0.1;
 
@@ -96,6 +98,8 @@ struct Bow {
 }
 
 static BOW: Mutex<Option<Bow>> = Mutex::new(None);
+/// When the arms were last seen holding a bow.
+static HELD_AT: Mutex<Option<Instant>> = Mutex::new(None);
 static PLACED: AtomicU64 = AtomicU64::new(0);
 static ARROWS: AtomicU64 = AtomicU64::new(0);
 
@@ -153,6 +157,11 @@ unsafe extern "C" fn update(controller: *mut c_void, seconds: f32) {
     }
 }
 
+/// Whether the arms hold a bow (seen at the latest arms callbacks), with the bow by hand on.
+pub fn held() -> bool {
+    HELD_AT.lock().ok().and_then(|h| *h).is_some_and(|at| at.elapsed() < DRAW_FRESH)
+}
+
 fn drawing() -> bool {
     DRAWN_AT.lock().ok().and_then(|d| *d).is_some_and(|at| at.elapsed() < DRAW_FRESH)
 }
@@ -182,13 +191,15 @@ fn unturn(m: &[f32; 12], v: [f32; 3]) -> Option<[f32; 3]> {
 
 /// After the rig placed the arms: where the bow and its axis are; while the bow is drawn, its
 /// string and the arrow's nock on the axis, level with the right hand's fingers.
-pub fn place_string(vis: usize) {
+pub fn place_string(vis: usize, reticle: Option<[f32; 3]>) {
     if !LOOSE_ORIGINAL.is_set() {
         return;
     }
     let Some(model) = hands::held_bow(vis) else { return };
-    let Some(root) = model.world(0) else { return };
-    let grip = [root[3], root[7], root[11]];
+    if let Ok(mut at) = HELD_AT.lock() {
+        *at = Some(Instant::now());
+    }
+    let Some(mut root) = model.world(0) else { return };
     let Ok(mut known) = KNOWN.lock() else { return };
     if known.model != model.id() {
         use crate::player::hands::find_element;
@@ -208,7 +219,16 @@ pub fn place_string(vis: usize) {
     if !(length.is_finite() && length > 1e-6) {
         return;
     }
-    let bow_x = along.map(|c| c / length);
+    let mut bow_x = along.map(|c| c / length);
+    // The bow turned in the hand (about its grip) so the arrow points at the viewer's reticle: a
+    // few degrees, the same each update.
+    if let Some(turned) = reticle.and_then(|r| arrow_line(&model, &known, &root, bow_x).and_then(|(at, arrow)| aligned(&root, arrow, sub(r, at)))) {
+        model.set_world(0, &turned);
+        root = turned;
+        let along = turn(&root, ARROW_ALONG);
+        bow_x = along.map(|c| c / hand_world::length(along));
+    }
+    let grip = [root[3], root[7], root[11]];
     let drawn = drawing();
     let fingers = hand_world::string_point().filter(|p| p.iter().all(|c| c.is_finite()));
     if !drawn {
@@ -276,6 +296,38 @@ pub fn place_string(vis: usize) {
         model.set_world(e, &back(out_of_frame(&root, &local)));
     }
     PLACED.fetch_add(1, Relaxed);
+}
+
+/// Where the arrow is and which way it points (unit): the nock as the draw began (moved with the
+/// bow), else as the game has it, along its axis that lies along the bow's x.
+fn arrow_line(model: &hands::Model, known: &Known, root: &[f32; 12], bow_x: [f32; 3]) -> Option<([f32; 3], [f32; 3])> {
+    let (nock, arrow, sign) = match known.start {
+        Some(start) => (out_of_frame(root, &start.nock?), start.arrow, start.sign),
+        None => {
+            let nock = model.world(known.nock?)?;
+            let arrow = (0..3).max_by(|&a, &b| column_along(&nock, a, bow_x).abs().total_cmp(&column_along(&nock, b, bow_x).abs()))?;
+            (nock, arrow, column_along(&nock, arrow, bow_x).signum() * known.forward)
+        }
+    };
+    let column = [nock[arrow], nock[4 + arrow], nock[8 + arrow]];
+    let length = hand_world::length(column);
+    (length > 1e-6).then(|| ([nock[3], nock[7], nock[11]], column.map(|c| c * sign / length)))
+}
+
+/// `root` turned about its own position so `arrow` (unit) points along `toward`; `None` when they
+/// are further apart than [`MOST_TURN`] (the bow then is not being aimed).
+fn aligned(root: &[f32; 12], arrow: [f32; 3], toward: [f32; 3]) -> Option<[f32; 12]> {
+    let length = hand_world::length(toward);
+    if !length.is_finite() || length <= 1e-6 {
+        return None;
+    }
+    let (from, to) = (arrow, toward.map(|c| c / length));
+    if dot(from, to) < MOST_TURN.to_radians().cos() {
+        return None;
+    }
+    let column = |c: usize| projectile::turned([root[c], root[4 + c], root[8 + c]], from, to);
+    let [a, b, c] = [column(0), column(1), column(2)];
+    Some([a[0], b[0], c[0], root[3], a[1], b[1], c[1], root[7], a[2], b[2], c[2], root[11]])
 }
 
 /// How far `m`'s column `c` (made unit) runs along unit `along`.

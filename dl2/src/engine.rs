@@ -269,9 +269,9 @@ pub const MELEE: eng_chr::melee::Build = eng_chr::melee::Build {
     segment: 0x34,
     player_vtable: PLAYER_VTABLE,
 };
-/// The player's live parameter block (vtable slot +0x618) and the grab flags in it
-/// (`eng_chr::grabs`): `InfectedGrabBlocked` +0xd650, `CantBeGrabbed` +0x11d0.
-pub const GRABS: eng_chr::grabs::Build = eng_chr::grabs::Build { parameters_slot: 0x618, flags: [0xd650, 0x11d0] };
+/// The sync action conditions' checks (vtable slot 1 of `SyncActionConditionIsBusy`,
+/// `SyncActionConditionIsClimbing` and `SyncActionConditionMinDistance`, for `eng_chr::grabs`).
+pub const GRABS: eng_chr::grabs::Build = eng_chr::grabs::Build { is_busy: 0x20fb220, in_climb: 0x20fb300, min_distance: 0x20fb5d0 };
 /// What the hands do with the game's own actions (`eng_chr::handwork`):
 /// - the throw controller (`WeaponThrowController`): update vtable slot 137, state at +0x40 (2 to 4
 ///   a throw under way), the release made once (+0x12e), the throwing hand at +0x134;

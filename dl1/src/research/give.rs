@@ -29,7 +29,12 @@ const ADD_SOURCE: &str = "?add_source@fs@@YA_NPEBDW4ENUM@FFSAddSourceFlags@@@Z";
 const REM_SOURCE: &str = "?rem_source@fs@@YA_NPEBD@Z";
 const FILESYSTEM: &str = "filesystem_x64_rwdi.dll";
 const SOURCE_FLAGS: u32 = 0x4f;
-const SCRIPT: &str = "monaka_give.scr";
+/// The script's name: its own each run (the game keeps scripts it read by name, so a second run in
+/// the same game would get the first run's items, read from a folder no longer there).
+fn script_name() -> String {
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis());
+    format!("monaka_give_{stamp}.scr")
+}
 /// Frames of play before giving (the player settled in).
 const AFTER_FRAMES: u64 = 300;
 
@@ -121,7 +126,8 @@ fn give() -> Result<(), String> {
     let lines: String = items.iter().map(|(name, count)| format!("        Item(\"{name}\", {count});\n")).collect();
     let block = |chapter: u32| format!("    Chapter({chapter})\n    {{\n{lines}    }}\n");
     let script = format!("sub main()\n{{\n{}{}}}\n", block(CHAPTER), block(CHAPTER_FOLLOWING));
-    std::fs::write(folder.join(SCRIPT), script).map_err(|e| e.to_string())?;
+    let name = script_name();
+    std::fs::write(folder.join(&name), script).map_err(|e| e.to_string())?;
 
     let filesystem = Module::find(FILESYSTEM).ok_or("no file system DLL")?;
     let add_source = filesystem.export(ADD_SOURCE).ok_or("no fs::add_source")?;
@@ -135,16 +141,16 @@ fn give() -> Result<(), String> {
     // allocates with (the shared `ucrtbase.dll`; this DLL's own runtime is linked in).
     let malloc = Module::find(CRT).and_then(|m| m.export("malloc")).ok_or("no ucrtbase malloc")?;
     // SAFETY: the C runtime's `malloc`.
-    let text = unsafe { std::mem::transmute::<usize, MallocFn>(malloc)(SCRIPT.len() + 1) };
+    let text = unsafe { std::mem::transmute::<usize, MallocFn>(malloc)(name.len() + 1) };
     if text.is_null() {
         return Err("malloc failed".into());
     }
-    // SAFETY: `text` holds `SCRIPT.len() + 1` bytes.
+    // SAFETY: `text` holds `name.len() + 1` bytes.
     unsafe {
-        std::ptr::copy_nonoverlapping(SCRIPT.as_ptr(), text, SCRIPT.len());
-        *text.add(SCRIPT.len()) = 0;
+        std::ptr::copy_nonoverlapping(name.as_ptr(), text, name.len());
+        *text.add(name.len()) = 0;
     }
-    let mut path = TtlString { text: text as *const c_char, length: SCRIPT.len() as u32, capacity: SCRIPT.len() as u32 };
+    let mut path = TtlString { text: text as *const c_char, length: name.len() as u32, capacity: name.len() as u32 };
     let chapter = CHAPTER;
     log!("give: {items:?}");
     // SAFETY: the game's own setup on its live session, on the game thread, with a script path

@@ -7,6 +7,8 @@
 
 pub(crate) mod aim;
 pub(crate) mod bow;
+pub(crate) mod climbing;
+pub(crate) mod grapple;
 pub(crate) mod controls;
 pub(crate) mod grabs;
 pub(crate) mod gun;

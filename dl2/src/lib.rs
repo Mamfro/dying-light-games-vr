@@ -205,8 +205,11 @@ fn start(session: &Session) -> Result<(), Rejection> {
         {
             log!("physical melee off: {}", why.reason);
         }
-        if config.disable_zombie_grabs {
-            eng_chr::grabs::enable();
+        if config.disable_zombie_grabs
+            && let Some(gamedll) = &gamedll
+            && let Err(why) = eng_chr::grabs::install(&mut hooks, gamedll, engine::GRABS)
+        {
+            log!("zombie grabs left as they are: {}", why.reason);
         }
         if config.handwork != eng_chr::handwork::Options::default()
             && let Some(gamedll) = &gamedll

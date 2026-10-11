@@ -274,7 +274,19 @@ fn steer(fields: &LookFields, camera: usize, site: usize, forward: usize) {
     let config = stereo::config();
     let settings = config.arms_aim;
     let now = monaka_channel::tick();
-    let aim = settings.aim_at(now, pose.orientation, |side| if config.aim.rig { stereo::pending_palm_of(side) } else { stereo::pending_hand_of(side) });
+    let mut aim = settings.aim_at(now, pose.orientation, |side| if config.aim.rig { stereo::pending_palm_of(side) } else { stereo::pending_hand_of(side) });
+    // A bow drawn by hand, and a gun shooting from its barrel, aim their shots themselves: the
+    // game's aim (the flashlight with it, and the look that tips the character's head back as it
+    // pitches up) stays the head's.
+    let gun_aims_itself = config.shoot_from_barrel && config.aim.rig && monaka_arms::melee::held() == Some(monaka_arms::melee::Held::Gun);
+    // A throw by hand is aimed by the hand's motion: the left controller aims tools (the grappling
+    // hook) but not a throw, which keeps the head's (the flashlight and the body with it).
+    let thrown_by_hand = aim.tool && config.throw_by_hand && config.aim.rig && crate::player::throwing::throwing_now();
+    if crate::player::bow::held() || gun_aims_itself || thrown_by_hand {
+        (aim.yaw, aim.pitch) = head_yaw_pitch(pose.orientation);
+        aim.by_hand = false;
+        aim.tool = false;
+    }
     monaka_arms::aim::note_source(aim.by_hand, config.aim.hand);
     let (aim_yaw, aim_pitch, tool) = (aim.yaw, aim.pitch, aim.tool);
     let head_yaw = head_yaw_pitch(pose.orientation).0;

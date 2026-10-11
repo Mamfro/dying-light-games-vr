@@ -35,7 +35,7 @@ pub const MANIFESTS: &[Manifest] = &[Manifest {
         opt("manual_reload", "Reload by hand", "A gun reloads only while your left hand is at it: bring the hand to the gun to work the magazine or feed the rounds.", Kind::Switch { default: true })
             .on(Shown::Game)
             .only_when("aim", "hand_rig"),
-        opt("disable_zombie_grabs", "Disable zombie grabs", "Biters never grab you from the front. Off: they grab and bite until you break free, as in the game.", Kind::Switch { default: true })
+        opt("disable_zombie_grabs", "Disable zombie grabs", "Zombies never grab you. Off: they grab and bite until you break free, as in the game.", Kind::Switch { default: true })
             .on(Shown::Game),
         BINARY_FINGERS,
         opt("mode", "Rendering", "Smooth adds in-between frames.", choice(&[("standard", "Standard"), ("framegen", "Smooth")], "standard")).on(Shown::Engine),

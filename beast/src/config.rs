@@ -31,7 +31,7 @@ pub struct Config {
     /// What the hands do with the game's own throw, bow and reload (`motion_throw`, `motion_bow`,
     /// `manual_reload`, with the hand rig; `eng_chr::handwork`).
     pub handwork: eng_chr::handwork::Options,
-    /// The biters' front grabs held off (`disable_zombie_grabs`; `eng_chr::grabs`).
+    /// Grabs never land on the player (`disable_zombie_grabs`; `eng_chr::grabs`).
     pub disable_zombie_grabs: bool,
     /// Alternate-eye stereo on D3D12, published on the channel named in `live-channel.txt`
     /// (`stereo=0`: the probes only).
