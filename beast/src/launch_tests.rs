@@ -45,7 +45,7 @@ fn defaults_alone_make_a_plan() {
 #[test]
 fn defaults_write_the_manifests_values() {
     let beast = &MANIFESTS[0];
-    assert_eq!(file(beast, &Values::default(), Some((2160, 2160))), "aim=head\nworld_hud=1\ndisable_zombie_grabs=1\nmode=standard\nstereo=1\nlatency=2\neye_separation=0.064\nother_builds=0\neye_size=2160x2160");
+    assert_eq!(file(beast, &Values::default(), Some((2160, 2160))), "aim=hand_rig\nworld_hud=1\nfinger_tracking=1\nroom_scale=1\ndisable_zombie_grabs=1\nfinger_binary=0\nmode=standard\nstereo=1\nlatency=2\neye_separation=0.064\nother_builds=0\neye_size=2160x2160");
     assert_eq!(plan(&Values::default(), beast, Some((2160, 2160))).hints.len(), 1);
     assert_eq!(rings(beast, &["aim=hand_rig"]), ["--reticle", "right", "--reticle", "left", "--reticle-from", "palm"]);
 }

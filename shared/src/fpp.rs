@@ -162,16 +162,31 @@ pub fn around<S: ArmsSkeleton>(
     }
     let weapon = mem::read::<usize>(vis + layout.weapons).unwrap_or(0);
     let held = Held::of(weapon);
-    let bow = held_bow(vis, layout).is_some();
+    let bow_vis = held_bow(vis, layout);
+    let bow = bow_vis.is_some();
+    let swung = LAST_WEAPON.lock().map(|mut last| swung_as(held, &mut last)).unwrap_or(held);
     if let Ok(mut seen) = BOW_SEEN.lock() {
         *seen = bow.then(std::time::Instant::now);
     }
     // A bow (in the left hand's slot, the right's empty) swings nothing: its draw is the attack,
     // and an empty right hand would punch, firing it.
-    melee::update(if bow { Held::Gun } else { held }, options.palms, &options.melee);
+    // A throw by hand under way: the left hand throws, it does not punch (the game's punch would
+    // swing the view).
+    let mut swinging = options.palms;
+    if crate::handwork::throwing::throwing_now() {
+        swinging[monaka_core::protocol::LEFT_HAND] = None;
+    }
+    melee::update(if bow { Held::Gun } else { swung }, swinging, &options.melee);
     // A bow is held apart (the bow in the left hand, the string in the right), and whatever the
     // producer says is.
     monaka_arms::hands_apart(options.apart || bow);
+    let holder = if bow { skeleton.as_ref().and_then(|s| bow_holder(s)) } else { None };
+    if !bow {
+        crate::handwork::bow::note_no_bow();
+    }
+    if let Some(bow_vis) = bow_vis {
+        crate::handwork::bow::note_bow(bow_vis);
+    }
     let moved = match (&skeleton, &before, camera) {
         (Some(skeleton), Some(before), Some(camera)) => pose(camera, held == Held::Gun).and_then(|pose| monaka_arms::follow(skeleton, before, &pose)),
         (_, _, None) => Err("no player camera"),
@@ -184,12 +199,51 @@ pub fn around<S: ArmsSkeleton>(
             Outcome { before, placed: None }
         }
         Ok(placed) => {
+            if let (Some(holder), Some(skeleton)) = (holder, &skeleton)
+                && let Some(world) = skeleton.world(holder)
+            {
+                crate::handwork::bow::note_placed(&world);
+            }
+            if let Some(bow_vis) = bow_vis {
+                crate::handwork::bow::place_string(bow_vis);
+            }
             if let (Some(axes), Some(skeleton)) = (options.fingers, &skeleton) {
                 monaka_arms::fingers::place_free_hands(options.melee.aim_side, weapon != 0, |side, tracked| crate::fingers::apply(skeleton, &axes, side, tracked));
             }
             Outcome { before, placed: Some(placed) }
         }
     }
+}
+
+/// The left hand's holder, where a bow hangs (the hand itself where the skeleton has none), by
+/// name without case (Dying Light 2 spells it `L_HandHolder`); found once per skeleton.
+fn bow_holder(skeleton: &impl Skeleton) -> Option<i32> {
+    static FOUND: Mutex<Option<(usize, Option<i32>)>> = Mutex::new(None);
+    let mut found = FOUND.lock().ok()?;
+    if let Some((id, holder)) = *found
+        && id == skeleton.id()
+    {
+        return holder;
+    }
+    let named = |name: &str| (0..skeleton.count()).find(|&e| skeleton.name(e).eq_ignore_ascii_case(name));
+    let holder = named("l_handholder").or_else(|| named("l_hand"));
+    *found = Some((skeleton.id(), holder));
+    holder
+}
+
+/// The last weapon the arms held (not nothing), for [`swung_as`].
+static LAST_WEAPON: Mutex<Held> = Mutex::new(Held::Nothing);
+
+/// What the swings take the arms to hold, given what they hold (`held`) and the last weapon they
+/// held (`last`, kept up to date here): hands left empty after a gun (the game puts it away for a
+/// climb or a vault, and back a few seconds later) still hold the gun, so an empty hand's swing
+/// does not press the attack, which would draw the gun and fire it. Another weapon ends it.
+fn swung_as(held: Held, last: &mut Held) -> Held {
+    if held != Held::Nothing {
+        *last = held;
+        return held;
+    }
+    if *last == Held::Gun { Held::Gun } else { held }
 }
 
 /// Whether the rig saw the arms hold a bow lately.
@@ -332,4 +386,19 @@ pub fn report() {
     }
     crate::fingers::report();
     monaka_arms::report();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_hands_after_a_gun_still_hold_it_until_another_weapon() {
+        let mut last = Held::Nothing;
+        assert_eq!(swung_as(Held::Nothing, &mut last), Held::Nothing, "bare hands from the start punch");
+        assert_eq!(swung_as(Held::Gun, &mut last), Held::Gun);
+        assert_eq!(swung_as(Held::Nothing, &mut last), Held::Gun, "the gun put away for a climb");
+        assert_eq!(swung_as(Held::Melee, &mut last), Held::Melee);
+        assert_eq!(swung_as(Held::Nothing, &mut last), Held::Nothing, "after a melee weapon, empty hands punch");
+    }
 }

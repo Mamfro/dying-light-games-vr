@@ -78,10 +78,14 @@ pub fn install(hooks: &mut Hooks, gamedll: &Module, build: Build) -> Result<(), 
     Ok(())
 }
 
+/// The player's own classes whose RTTI name does not say "Player": the player's sync action
+/// controller (a `PlayerController`), which a grab's participants hold for the player.
+const PLAYER_CLASSES: &[&str] = &[".?AVSyncActionController@@"];
+
 /// Whether `object` (a C++ object, possibly a base in the middle of one) is a player's: its class's
 /// RTTI name says "Player" (`PlayerDI_PH` and the player's own parts; the AI's are named for the
-/// AI). None when it has no class to read (not such an object). Each class is looked up once and
-/// logged.
+/// AI) or is one of [`PLAYER_CLASSES`]. None when it has no class to read (not such an object).
+/// Each class is looked up once and logged.
 fn is_player(object: usize) -> Option<bool> {
     let vtable = mem::read::<usize>(object).filter(|&v| v != 0)?;
     let mut classes = CLASSES.lock().ok()?;
@@ -90,7 +94,7 @@ fn is_player(object: usize) -> Option<bool> {
         return known;
     }
     let name = probe::class_name(object);
-    let player = name.as_deref().map(|n| n.contains("Player"));
+    let player = name.as_deref().map(|n| n.contains("Player") || PLAYER_CLASSES.contains(&n));
     if classes.len() < 40 {
         let what = match player {
             Some(true) => "a player: refused",

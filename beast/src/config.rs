@@ -29,7 +29,7 @@ pub struct Config {
     /// Room-scale following (with the hand rig; `monaka_arms::roomscale`).
     pub room_scale: Option<roomscale::Settings>,
     /// What the hands do with the game's own throw, bow and reload (with the hand rig, part of it:
-    /// `motion_throw=0`, `motion_bow=0`, `manual_reload=0` turn one off for a test;
+    /// `motion_throw=0`, `motion_bow=0` (`bow_string=0` only the string drawn by hand), `manual_reload=0` turn one off for a test;
     /// `eng_chr::handwork`).
     pub handwork: eng_chr::handwork::Options,
     /// Grabs never land on the player (`disable_zombie_grabs`; `eng_chr::grabs`).
@@ -87,6 +87,7 @@ impl Config {
             handwork: eng_chr::handwork::Options {
                 throw: options.switch("motion_throw", true) && shared.aim.rig,
                 bow: options.switch("motion_bow", true) && shared.aim.rig,
+                bow_string: options.switch("bow_string", true),
                 reload: options.switch("manual_reload", true) && shared.aim.rig,
                 lockpick: false,
             },
@@ -119,7 +120,7 @@ mod tests {
     #[test]
     fn defaults_and_modes() {
         let config = Config::from_options(&Options::parse(""));
-        assert!(config.stereo && config.aim.head && !config.aim.rig && !config.framegen && config.hud.world, "look-based, as the manifest says");
+        assert!(config.stereo && config.aim.head && config.aim.rig && !config.framegen && config.hud.world, "motion controls, as the manifest says");
         assert_eq!(config.schedule.latency, 2);
         assert_eq!(config.eye_size, None);
         let config = Config::from_options(&Options::parse("mode=framegen\naim=hand_rig\neye_size=2160x2160\nlatency=3\nsynthetic_yaw=20\nsynthetic_pitch=5\neye_test=10"));

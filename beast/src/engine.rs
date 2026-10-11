@@ -213,8 +213,8 @@ pub const GRABS: eng_chr::grabs::Build = eng_chr::grabs::Build { is_busy: 0x2160
 ///   `ThrowParabolaEnabled` at +0x74d8;
 /// - the dropped item's launch: velocity +0x7d4, thrown +0x7ed, owner +0x850;
 /// - the player's aim part (player +0x1b0): eye slot +0x58, look slot +0x50;
-/// - the bow controller: update slot 143, the clock at slot +0x368, state at +0x40, the draw's start
-///   at +0x68;
+/// - the bow controller: update slot 143, state at +0x40, the draw's power at +0x8c and its most at
+///   +0x90;
 /// - the gun controller (`WeaponFireController`): update slot 143, the reload start (as the reload
 ///   input calls it), state at +0x38; before the start the input marks the weapons that pass two
 ///   checks (the controller's weapon at slot +0x4a8) at +0x289.
@@ -226,7 +226,7 @@ pub const HANDWORK: eng_chr::handwork::Builds = {
         throw: Some(throwing::Build { update: 0x1036360, velocity: 0xf5a1e0, start: 0xf53e50, release: 0x1007720, state: 0x40, released: 0x132, hand: 0x138, player_vtable: PLAYER_VTABLE, parameters_slot: 0x5e0, arc: 0x74d8 }),
         weapon_throw: Some(weapon_throw::Build { launch: 0xd682c0, velocity: 0x7d4, thrown: 0x7ed, owner: 0x850, player_vtable: PLAYER_VTABLE }),
         aim: aim::Build { eye: 0x1286a30, look: 0x12867d0 },
-        bow: Some(bow::Build { update: 0x1034250, arrow: 0xff8d50, full_draw: 0xf55d10, clock_slot: 0x368, state: 0x40, draw_start: 0x68, player_vtable: PLAYER_VTABLE }),
+        bow: Some(bow::Build { update: 0x1034250, arrow: 0xff8d50, state: 0x40, power: 0x8c, player_vtable: PLAYER_VTABLE }),
         reload: Some(reload::Build {
             update: 0x1034e60,
             start: 0x10192b0,

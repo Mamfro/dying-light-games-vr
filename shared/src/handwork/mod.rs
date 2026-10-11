@@ -24,6 +24,8 @@ pub struct Options {
     pub throw: bool,
     /// The bow drawn and aimed by the hands.
     pub bow: bool,
+    /// With it, the bow model's string drawn back as far as the hand is.
+    pub bow_string: bool,
     /// The reload runs with the left hand at the gun.
     pub reload: bool,
     /// Lockpicking by twisting the wrists.
@@ -56,7 +58,7 @@ pub fn install(hooks: &mut Hooks, gamedll: &Module, builds: &Builds, options: Op
     };
     part("throw by hand", options.throw, options.throw.then(|| builds.throw.map(|b| throwing::install(hooks, gamedll, b))).flatten());
     part("weapon thrown by hand", options.throw, options.throw.then(|| builds.weapon_throw.map(|b| weapon_throw::install(hooks, gamedll, b))).flatten());
-    part("bow by hand", options.bow, options.bow.then(|| builds.bow.map(|b| bow::install(hooks, gamedll, b, builds.aim))).flatten());
+    part("bow by hand", options.bow, options.bow.then(|| builds.bow.map(|b| bow::install(hooks, gamedll, b, builds.aim, options.bow_string))).flatten());
     part("reload by hand", options.reload, options.reload.then(|| builds.reload.map(|b| reload::install(hooks, gamedll, b))).flatten());
     part("lockpick by hand", options.lockpick, options.lockpick.then(|| builds.lockpick.map(|b| lockpick::install(hooks, gamedll, b))).flatten());
 }

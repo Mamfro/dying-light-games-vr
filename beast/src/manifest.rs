@@ -17,8 +17,7 @@ pub const MANIFESTS: &[Manifest] = &[Manifest {
     refused_arguments: &[],
     before: "Use DirectX 12 with the game's own Frame Generation and motion blur off. Start the game and load into gameplay first.",
     options: &[
-        // Look-based by default: motion controls here have had little testing.
-        aim(&[AIM_MOTION, AIM_LOOK, AIM_POINT, AIM_MOUSE], aims::HEAD),
+        aim(&[AIM_MOTION, AIM_LOOK, AIM_POINT, AIM_MOUSE], aims::HAND_RIG),
         AIM_HAND,
         render_size("The headset's size runs much better.").eye_size_note("Click into the game: it switches to {size} once it has focus, and VR shows it from then on."),
         WORLD_HUD,

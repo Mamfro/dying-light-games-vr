@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([switch]$NoLaunch,[ValidateRange(0,180)][int]$SettleSeconds=30,[switch]$HeadsetResolution,[switch]$GameResolution,[switch]$SameFrame,[switch]$FrameGen,[switch]$DepthStereo,[switch]$AlternateEye,[ValidateRange(0.1,1.0)][double]$HudScale=0.55,[switch]$LockPitch,[switch]$NoHeadAim,[switch]$HandAim,[switch]$HandRig,[ValidateSet('left','right')][string]$AimHand='right',[switch]$FingerBinary,[switch]$FlatHud)
+param([switch]$NoLaunch,[ValidateRange(0,180)][int]$SettleSeconds=30,[switch]$HeadsetResolution,[switch]$GameResolution,[switch]$SameFrame,[switch]$FrameGen,[switch]$DepthStereo,[switch]$AlternateEye,[ValidateRange(0.1,1.0)][double]$HudScale=0.55,[switch]$LockPitch,[ValidateSet('Hand','Controller','Head','Mouse')][string]$Aim='Hand',[switch]$HeadAim,[switch]$NoHeadAim,[switch]$HandAim,[switch]$HandRig,[ValidateSet('left','right')][string]$AimHand='right',[switch]$FingerBinary,[switch]$FlatHud)
 # Play Dying Light 2 in head-tracked stereo on the headset until the game exits, with the Rust viewer: this runs
 # monaka_play, which starts the game through Steam unless it is running (or -NoLaunch), attaches the DL2 producer
 # (dl2), shows it with monaka_viewer, and restarts both if a run ends. Run folders go to Monaka's runs folder.
@@ -18,13 +18,17 @@ param([switch]$NoLaunch,[ValidateRange(0,180)][int]$SettleSeconds=30,[switch]$He
 # -HudScale (depth stereo): size of the HUD in front of you (1 = as on the monitor).
 # In depth stereo the dynamic HUD puts the compass, objectives and health on the right and left hands (the weapon and
 # stamina too); -FlatHud keeps the whole HUD in front of you.
-# The character looks, aims and attacks where the head points: the head alone pitches it and the head's yaw adds to
-# mouse/stick turning. -NoHeadAim leaves the character on the mouse/stick only (then -LockPitch blocks mouse/stick pitch).
-# -HandAim makes the character aim where a controller points (-AimHand left|right, default right) instead of the head; the
-# view still follows the head and a ring in the headset marks the aim. With that controller off or untracked, the head aims.
-# -HandRig (implies -HandAim) also puts the first-person arms on the controllers, and swinging a melee weapon attacks;
-# a free hand's fingers follow the headset's finger tracking (-FingerBinary: each finger either open or a fist).
-# Hand aim and the arms need head aim, so -NoHeadAim turns them off.
+# -Aim picks what aims (one of four, as the launcher's Aim):
+#   Hand        (default) motion controls: the first-person arms and the weapon on the controllers, the weapon aiming
+#               where it points (-AimHand right, or left); swing a melee weapon to hit, throw, draw the bow and reload
+#               by hand. With that controller off or untracked, the head aims.
+#   Controller  the controller aims (a ring in the headset marks where); the game animates the arms.
+#   Head        the head aims: the character looks, aims and attacks where you look; the game animates the arms.
+#   Mouse       the mouse and stick aim and turn as on a monitor; the head only moves the view.
+# The older switches still work: -NoHeadAim is -Aim Mouse, -HeadAim -Aim Head, -HandAim -Aim Controller (-HandRig is the
+# default anyway).
+# With the hands on the controllers, a free hand's fingers follow the headset's finger tracking (-FingerBinary: each
+# finger either open or a fist). With -Aim Mouse, -LockPitch blocks mouse/stick pitch.
 # The game renders at the headset's eye size while VR runs (default; -GameResolution keeps the game's own size). The
 # game applies the switch only while it has focus: click into it once VR starts.
 # The session itself is monaka_launch (crates\launch): this script only turns its parameters into monaka_play options,
@@ -39,8 +43,9 @@ if (-not (Test-Path -LiteralPath $play)) { throw "Build first: cargo build --rel
 $invariant=[Globalization.CultureInfo]::InvariantCulture
 # -FrameGen wins over -SameFrame, both over -DepthStereo and -AlternateEye; with none, frame generation (auto).
 $mode=if ($FrameGen) { 'framegen' } elseif ($SameFrame) { 'same' } elseif ($DepthStereo) { 'depth' } elseif ($AlternateEye) { 'alternate' } else { 'auto' }
-# Head aim carries hand aim and the arms, so -NoHeadAim wins; -HandRig implies -HandAim.
-$aim=if ($NoHeadAim) { 'off' } elseif ($HandRig) { 'hand_rig' } elseif ($HandAim) { 'controller' } else { 'head' }
+# The older switches, strongest first (-NoHeadAim: no head aim, so no hand aim or hands either).
+if ($NoHeadAim) { $Aim='Mouse' } elseif ($HeadAim) { $Aim='Head' } elseif ($HandAim) { $Aim='Controller' } elseif ($HandRig) { $Aim='Hand' }
+$aim=@{ Hand='hand_rig'; Controller='controller'; Head='head'; Mouse='off' }[$Aim]
 & $play dl2 "mode=$mode" "aim=$aim" "aim_hand=$AimHand" "render_size=$(if ($HeadsetResolution -or -not $GameResolution) { 'headset' } else { 'game' })" `
     "world_hud=$(OnOff (-not $FlatHud))" "hud_scale=$($HudScale.ToString($invariant))" "lock_pitch=$(OnOff $LockPitch)" "finger_binary=$(OnOff $FingerBinary)" `
     'extra=' "launch=$(OnOff (-not $NoLaunch))" "settle_seconds=$SettleSeconds"
