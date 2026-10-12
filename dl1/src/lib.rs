@@ -48,7 +48,7 @@ use monaka_core::options::Options;
 use monaka_core::situation::Situation;
 use monaka_hook::module::{self, Module};
 use monaka_hook::{Hooks, mem, slot};
-use monaka_producer::game::{Adapter, Component, Game, Lack, On, Run, Start};
+use monaka_producer::game::{Adapter, Component, Game, Lack, Missing, On, OrMissing, Run, Start, Switch};
 use monaka_producer::{Rejection, Session, log, require_build};
 use monaka_stereo::feature::{Graphics, Loop, Presents};
 use output::{hybrid, upscale, video};
@@ -231,14 +231,10 @@ fn install_eyes(start: &mut Start<'_, Dl1>) -> Result<(), Lack> {
     // SAFETY: the export is `void IBaseCamera::SetInvCameraMatrix(const mtx34&)` on x64.
     let camera = CameraWriter(unsafe { std::mem::transmute::<usize, SetInverseFn>(set_inverse) });
     stereo::install(stereo::Setup { config, camera }, hands);
-    // SAFETY: each target is checked against its exact prologue; each detour has its signature.
-    unsafe {
-        start.hooks.inline(&stereo::VIEW_SETUP_ORIGINAL, "view setup", engine_module.at(engine::VIEW_SETUP), &engine::VIEW_SETUP_PROLOGUE, stereo::view_setup)?;
-        // The field-of-view widening serves both the live-camera turn and head aim.
-        if config.headset_fov && config.widen_game_fov {
-            let set_fov = engine_module.export(engine::SET_FOV).ok_or_else(|| Rejection::revision("the engine does not export SetFOV"))?;
-            start.hooks.inline(&stereo::SET_FOV_ORIGINAL, "SetFOV", set_fov, &engine::SET_FOV_PROLOGUE, stereo::set_fov)?;
-        }
+    start.hooks.site(&stereo::VIEW_SETUP_ORIGINAL, engine_module, &engine::VIEW_SETUP, stereo::view_setup)?;
+    // The field-of-view widening serves both the live-camera turn and head aim.
+    if config.headset_fov && config.widen_game_fov {
+        start.hooks.site(&stereo::SET_FOV_ORIGINAL, engine_module, &engine::SET_FOV, stereo::set_fov)?;
     }
     Ok(())
 }
@@ -277,12 +273,10 @@ pub const UPSCALE: Component<Dl1> = Component {
 
 fn install_upscale(start: &mut Start<'_, Dl1>) -> Result<(), Lack> {
     let config = config(start);
-    let (Some(fsr), Some(display)) = (config.upscaled(), config.eye_size) else {
-        return Err(Lack::Missing("FSR needs the headset's eye size and does not combine with hybrid".to_owned()));
-    };
+    let (fsr, display) = config.upscaled().zip(config.eye_size).or_missing("FSR needs the headset's eye size and does not combine with hybrid")?;
     let dlls = start.options.text("fsr_dlls").map_or_else(|| start.session.dir().to_path_buf(), std::path::PathBuf::from);
     let (_, device, _, render) = swapchain_parts(&start.build.renderer)?;
-    log!("{}", upscale::install(&device, fsr, render, display, &dlls).map_err(Lack::Missing)?);
+    log!("{}", upscale::install(&device, fsr, render, display, &dlls).missing()?);
     Ok(())
 }
 
@@ -291,11 +285,11 @@ fn install_upscale(start: &mut Start<'_, Dl1>) -> Result<(), Lack> {
 pub const HYBRID: Component<Dl1> = Component {
     name: "hybrid",
     needs: &[&EYES],
-    on: |run| On::when(run.options.switch("hybrid", false), "alternate eyes without depth"),
+    switch: Some(Switch::new("hybrid", false, "alternate eyes without depth")),
     install: |start| {
         let hud = start.shared.hud.shown;
         let (_, device, _, _) = swapchain_parts(&start.build.renderer)?;
-        hybrid::install(&device, start.channel()?.clone(), hud).map_err(Lack::Missing)?;
+        hybrid::install(&device, start.channel()?.clone(), hud).missing()?;
         log!("alternate-eye with depth: a pair every frame; HUD layer {hud}");
         Ok(())
     },
@@ -407,16 +401,13 @@ fn install_look(start: &mut Start<'_, Dl1>) -> Result<(), Lack> {
     hook_from_forward(start.hooks, engine_module)?;
     aim::look_actions_match(gamedll).map_err(Rejection::revision)?;
     aim::resolve(engine_module)?;
-    // SAFETY: the converter's exact prologue is checked; the detour has its signature.
-    unsafe { start.hooks.inline(&aim::INPUT_ACTION_ORIGINAL, "input actions", gamedll.at(engine::INPUT_ACTION), &engine::INPUT_ACTION_PROLOGUE, aim::input_action)? };
+    start.hooks.site(&aim::INPUT_ACTION_ORIGINAL, gamedll, &engine::INPUT_ACTION, aim::input_action)?;
     Ok(())
 }
 
 /// The player camera's setter, where head aim steers (and its probe watches).
 fn hook_from_forward(hooks: &mut Hooks, engine_module: &Module) -> Result<(), Lack> {
-    let target = engine_module.export(engine::FROM_FORWARD).ok_or_else(|| Rejection::revision("the engine does not export FromForwardUpPos"))?;
-    // SAFETY: the export, checked against its exact prologue; the detour has its signature.
-    unsafe { hooks.inline(&aim::FROM_FORWARD_ORIGINAL, "FromForwardUpPos", target, &engine::FROM_FORWARD_PROLOGUE, aim::from_forward)? };
+    hooks.site(&aim::FROM_FORWARD_ORIGINAL, engine_module, &engine::FROM_FORWARD, aim::from_forward)?;
     Ok(())
 }
 
@@ -440,8 +431,7 @@ pub const ARMS: Component<Dl1> = Component {
 /// The arms visual's camera-target callback (the rig, and its probes).
 fn hook_arms(hooks: &mut Hooks, engine_module: &Module, gamedll: &Module) -> Result<(), Lack> {
     hands::resolve(engine_module)?;
-    // SAFETY: the callback's exact prologue is checked; the detour has its signature.
-    unsafe { hooks.inline(&hands::CAMERA_TARGET_ORIGINAL, "arms camera target", gamedll.at(engine::FPP_CAMERA_TARGET), &engine::FPP_CAMERA_TARGET_PROLOGUE, hands::camera_target)? };
+    hooks.site(&hands::CAMERA_TARGET_ORIGINAL, gamedll, &engine::FPP_CAMERA_TARGET, hands::camera_target)?;
     Ok(())
 }
 
@@ -482,7 +472,7 @@ pub const THROW: Component<Dl1> = Component {
     name: "throw",
     features: &[Feature::Throw],
     needs: &[&ARMS],
-    on: |run| On::when(run.options.switch("throw_by_hand", true), "the game's throw"),
+    switch: Some(Switch::new("throw_by_hand", true, "the game's throw")),
     install: |start| Ok(throwing::install(start.hooks, &start.build.gamedll, &start.build.engine)?),
     release: throwing::report,
     ..Component::NONE
@@ -494,7 +484,7 @@ pub const BOW: Component<Dl1> = Component {
     name: "bow",
     features: &[Feature::Bow],
     needs: &[&ARMS],
-    on: |run| On::when(run.options.switch("bow_by_hand", true), "the game's bow"),
+    switch: Some(Switch::new("bow_by_hand", true, "the game's bow")),
     install: |start| Ok(bow::install(start.hooks, &start.build.gamedll)?),
     release: bow::report,
     ..Component::NONE
@@ -505,7 +495,7 @@ pub const BOW: Component<Dl1> = Component {
 pub const GRAPPLE: Component<Dl1> = Component {
     name: "grapple",
     needs: &[&ARMS],
-    on: |run| On::when(run.options.switch("grapple_by_hand", true), "the game's grapple"),
+    switch: Some(Switch::new("grapple_by_hand", true, "the game's grapple")),
     install: |start| Ok(player::grapple::install(start.hooks, &start.build.gamedll)?),
     release: player::grapple::report,
     ..Component::NONE
@@ -516,7 +506,7 @@ pub const LOCKPICK: Component<Dl1> = Component {
     name: "lockpick",
     features: &[Feature::Lockpick],
     needs: &[&ARMS],
-    on: |run| On::when(run.options.switch("lockpick_by_hand", true), "the game's lockpick"),
+    switch: Some(Switch::new("lockpick_by_hand", true, "the game's lockpick")),
     install: |start| Ok(lockpick::install(start.hooks, &start.build.gamedll)?),
     release: lockpick::report,
     ..Component::NONE
@@ -527,7 +517,7 @@ pub const LOCKPICK: Component<Dl1> = Component {
 pub const GUN: Component<Dl1> = Component {
     name: "gun",
     needs: &[&ARMS],
-    on: |run| On::when(run.options.switch("shoot_from_barrel", true), "shots from the eye"),
+    switch: Some(Switch::new("shoot_from_barrel", true, "shots from the eye")),
     install: |start| Ok(gun::install(start.hooks, &start.build.gamedll)?),
     release: gun::report,
     ..Component::NONE
@@ -564,10 +554,8 @@ pub const CONTROLS: Component<Dl1> = Component {
     name: "controls",
     features: &[Feature::Duck, Feature::Reload],
     options: &[VR_BUTTONS],
-    settings: |options, _| {
-        options.switch("vr_buttons", true);
-    },
-    on: |run| On::when(run.options.switch("vr_buttons", true) && flat_kept(), "the game's own buttons"),
+    switch: Some(Switch::new("vr_buttons", true, "the game's own buttons")),
+    on: |_| On::when(flat_kept(), "flat: the game's own buttons"),
     install: |start| {
         let config = config(start);
         let reload = config.reload_gesture && config.aim.rig && start.is_on(&ARMS);
@@ -582,10 +570,8 @@ pub const CONTROLS: Component<Dl1> = Component {
 pub const GRABS: Component<Dl1> = Component {
     name: "grabs",
     options: &[DISABLE_ZOMBIE_GRABS],
-    settings: |options, _| {
-        options.switch("disable_zombie_grabs", true);
-    },
-    on: |run| On::when(run.options.switch("disable_zombie_grabs", true) && flat_kept(), "zombies grab as in the game"),
+    switch: Some(eng_chr::feature::GRABS_SWITCH),
+    on: |_| On::when(flat_kept(), "flat: zombies grab as in the game"),
     install: |start| Ok(grabs::install(start.hooks, &start.build.gamedll)?),
     release: grabs::report,
     ..Component::NONE

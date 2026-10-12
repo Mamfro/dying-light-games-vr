@@ -2,7 +2,15 @@
 //! addresses with their exact first instructions, globals and structure offsets. Some addresses
 //! are from farmerarmor/DyingLight2VR (MIT); every prologue is the shipped DLL's own.
 
-use monaka_hook::Instruction;
+use monaka_hook::{Instruction, Site};
+
+/// A hook site of this build at `rva` in its module.
+const fn site<F>(name: &'static str, rva: usize, prologue: &'static [Instruction]) -> Site<F> {
+    // SAFETY: every site this file declares is the start of a function of the type it is declared
+    // with, in the build its module's fingerprint names, its prologue that function's first
+    // instructions; the bytes are checked again before a hook goes in.
+    unsafe { Site::new(name, rva, prologue) }
+}
 
 pub use eng_chr::{ENGINE, GAMEDLL};
 pub const ENGINE_SHA256: &str = "A06519EE1FD79DE1D665215F38E6B89F2B074BF9745912C64A6F0684617ADB63";
@@ -53,8 +61,6 @@ pub const VISIBILITY_CAMERA_CALLER: usize = 0xb493e5;
 pub const BASE_CAMERA_COPY_CALLER: usize = 0xb39ad8;
 pub const MAIN_VISIBILITY_CALLER: usize = 0xb3a0e7;
 pub const WORLD_VISIBILITY_CALLER: usize = 0xb39ec5;
-/// `IBaseCamera::FromForwardUpPos`, and its RVA (checked).
-pub const FROM_FORWARD_EXPORT: &str = "?FromForwardUpPos@IBaseCamera@@UEAAXAEBVvec3@@00@Z";
 
 // Engine functions the stereo pair calls directly (with their first bytes, checked before use).
 pub const COMPONENT_SET: (usize, &[u8]) = (0x111fd20, &[0x40, 0x53, 0x48, 0x83, 0xec, 0x20, 0x48, 0x8b, 0xc2, 0x48, 0x8b, 0xd9]);
@@ -108,8 +114,12 @@ pub type QueuePhaseFn = unsafe extern "system" fn(phase: u32, data: usize) -> us
 pub const QUEUE_PHASE: Target = (0x118f910, &[Instruction::plain(&[0x44, 0x8b, 0xc9]), Instruction::plain(&[0x4c, 0x8b, 0xc2])]);
 pub type FromForwardFn = unsafe extern "system" fn(camera: usize, forward: *const f32, up: *const f32, position: *const f32);
 /// The export loads its state and jumps on: the jump comes along (relocated) into the trampoline.
-pub const FROM_FORWARD_UP_POS: Target =
-    (0x41daa0, &[Instruction::plain(&[0x48, 0x8b, 0x49, 0x38]), Instruction::rip_relative(&[0xe9, 0x87, 0x21, 0xd0, 0x00], 1)]);
+/// `IBaseCamera::FromForwardUpPos`, exported by the engine (engine RVA 0x41daa0).
+pub const FROM_FORWARD_UP_POS: Site<FromForwardFn> = {
+    const PROLOGUE: &[Instruction] = &[Instruction::plain(&[0x48, 0x8b, 0x49, 0x38]), Instruction::rip_relative(&[0xe9, 0x87, 0x21, 0xd0, 0x00], 1)];
+    // SAFETY: as [`site`]'s, for the function the export names.
+    unsafe { Site::exported("FromForwardUpPos", "?FromForwardUpPos@IBaseCamera@@UEAAXAEBVvec3@@00@Z", PROLOGUE) }
+};
 
 /// Eye-independent render-script commands the right eye skips (vtable RVA, execute RVA, name).
 pub const ONCE_COMMANDS: [(usize, usize, &str); 14] = [
@@ -149,7 +159,7 @@ pub const CAMERA_WRITER_RETURNS: [usize; 7] = [0x11161b6, 0x11161e4, 0x1116243, 
 
 // --- Game DLL ---------------------------------------------------------------------------------------
 pub type InputActionFn = unsafe extern "system" fn(binding: usize, receivers: usize, value: f32, source: bool, repeat: bool);
-pub const INPUT_ACTION: Target = (0x1ec1700, &[Instruction::plain(&[0x48, 0x89, 0x5c, 0x24, 0x10])]);
+pub const INPUT_ACTION: Site<InputActionFn> = site("input action", 0x1ec1700, &[Instruction::plain(&[0x48, 0x89, 0x5c, 0x24, 0x10])]);
 /// The vertical look actions, checked against the engine's action names: (instruction RVA in the
 /// engine that loads the id, name RVA, id, name).
 pub const PITCH_ACTIONS: [(usize, usize, u32, &str); 4] = [
@@ -207,11 +217,11 @@ pub const BONE_AXES: monaka_arms::BoneAxes = monaka_arms::BoneAxes::DYING_LIGHT_
 pub const FINGER_AXES: eng_chr::fingers::Axes = eng_chr::fingers::Axes::DYING_LIGHT_2;
 // --- D3D11 renderer -----------------------------------------------------------------------------------
 pub type PacketFn = unsafe extern "system" fn(packet: usize) -> usize;
-pub const DLSS_EVALUATE_11: Target = (0x37300, &[Instruction::plain(&[0x48, 0x89, 0x5c, 0x24, 0x18])]);
-pub const DLSS_CONSTANTS_11: Target =
-    (0x57b20, &[Instruction::plain(&[0x48, 0x8b, 0xc4]), Instruction::plain(&[0x55]), Instruction::plain(&[0x53])]);
+pub const DLSS_EVALUATE_11: Site<PacketFn> = site("DLSS evaluate", 0x37300, &[Instruction::plain(&[0x48, 0x89, 0x5c, 0x24, 0x18])]);
+pub const DLSS_CONSTANTS_11: Site<PacketFn> =
+    site("DLSS constants", 0x57b20, &[Instruction::plain(&[0x48, 0x8b, 0xc4]), Instruction::plain(&[0x55]), Instruction::plain(&[0x53])]);
 pub type CommandsFn = unsafe extern "system" fn(object: usize) -> usize;
-pub const COMMANDS_11: Target = (0x428d0, &[Instruction::plain(&[0x4c, 0x8b, 0xdc]), Instruction::plain(&[0x49, 0x89, 0x4b, 0x08])]);
+pub const COMMANDS_11: Site<CommandsFn> = site("command dispatcher", 0x428d0, &[Instruction::plain(&[0x4c, 0x8b, 0xdc]), Instruction::plain(&[0x49, 0x89, 0x4b, 0x08])]);
 /// The queue drain (dispatches queued GPU work) and the driver vtable slot that must name it.
 pub const DRAIN_11: (usize, &[u8]) = (0x552e0, &[0x40, 0x53, 0x57, 0x48, 0x83, 0xec, 0x38, 0x32, 0xdb, 0x85, 0xd2, 0x0f, 0x84, 0xe8, 0x02, 0x00]);
 pub const DRIVER_VTABLE_11: usize = 0x8ea88;
@@ -221,11 +231,11 @@ pub const DLSS_VIEWPORT_11: usize = 0xea5218;
 
 // --- D3D12 renderer -----------------------------------------------------------------------------------
 pub use eng_chr::rd3d12::PresentRequestFn as PresentRequest12Fn;
-pub const PRESENT_REQUEST_12: Target =
-    (0x6ab40, &[Instruction::plain(&[0x48, 0x8b, 0xc4]), Instruction::plain(&[0x55]), Instruction::plain(&[0x53])]);
+pub const PRESENT_REQUEST_12: Site<PresentRequest12Fn> =
+    site("rd3d12 present request", 0x6ab40, &[Instruction::plain(&[0x48, 0x8b, 0xc4]), Instruction::plain(&[0x55]), Instruction::plain(&[0x53])]);
 pub type Packet12Fn = unsafe extern "system" fn(state: usize, packet: usize) -> usize;
-pub const DLSS_EVALUATE_12: Target = (0x3a560, &[Instruction::plain(&[0x48, 0x8b, 0xc4]), Instruction::plain(&[0x48, 0x89, 0x58, 0x08])]);
-pub const DLSS_CONSTANTS_12: Target = (0x77f20, &[Instruction::plain(&[0x48, 0x8b, 0xc4]), Instruction::plain(&[0x48, 0x89, 0x58, 0x08])]);
+pub const DLSS_EVALUATE_12: Site<Packet12Fn> = site("DLSS evaluate (D3D12)", 0x3a560, &[Instruction::plain(&[0x48, 0x8b, 0xc4]), Instruction::plain(&[0x48, 0x89, 0x58, 0x08])]);
+pub const DLSS_CONSTANTS_12: Site<Packet12Fn> = site("DLSS constants (D3D12)", 0x77f20, &[Instruction::plain(&[0x48, 0x8b, 0xc4]), Instruction::plain(&[0x48, 0x89, 0x58, 0x08])]);
 /// The present request object (swapchain at +0x60, a non-zero flag at +0x50 when it presents) and
 /// the game's direct queue (a Streamline proxy), through a holder pointer.
 pub const RD3D12: eng_chr::rd3d12::Layout = eng_chr::rd3d12::Layout { request_active: 0x50, request_swapchain: 0x60, queue_holder: 0x164b50 };

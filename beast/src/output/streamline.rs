@@ -44,7 +44,7 @@ unsafe extern "system" fn set_constants(constants: *const u8, frame: usize, view
     let n = CONSTANT_CALLS.fetch_add(1, Relaxed) + 1;
     crate::research::streamline::constants(constants);
     // The camera this frame is rendered with labels it (its eye and pose) for the present.
-    let eye = (!constants.is_null()).then(|| mem::read::<[f32; 3]>(constants as usize + at::POSITION)).flatten().and_then(crate::view::stereo::label_frame);
+    let eye = (!constants.is_null()).then(|| mem::read::<[f32; 3]>(constants as usize + at::POSITION)).flatten().and_then(|at| monaka_stereo::feature::DRIVER.label_frame(at));
     crate::output::framegen::at_constants(constants, eye);
     if !constants.is_null()
         && let Some((ours, eye_viewport)) = crate::output::dlss::constants(constants, viewport, eye)

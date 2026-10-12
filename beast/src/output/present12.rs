@@ -1,6 +1,7 @@
 //! The D3D12 present request: how often the game presents, on its first present the swapchain and
-//! the game's queue checked by interface queries (the swapchain may be a Streamline proxy), and
-//! with stereo on, the hand-over to [`crate::view::stereo`] around each present.
+//! the game's queue checked by interface queries (the swapchain may be a Streamline proxy), the HUD
+//! layer's work, and each present made inside Monaka's present loop (`monaka_stereo::feature`'s
+//! `DRIVER`: the eye kept or its pair published before it, the next eye chosen after it).
 
 use crate::engine::{self, PresentRequest12Fn};
 use monaka_hook::{InFlight, Original};
@@ -9,7 +10,7 @@ use eng_chr::rd3d12::query;
 use std::sync::atomic::Ordering::{AcqRel, Relaxed};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize};
 use windows::Win32::Graphics::Direct3D12::{D3D12_RESOURCE_STATE_PRESENT, ID3D12CommandQueue, ID3D12Resource};
-use windows::Win32::Graphics::Dxgi::IDXGISwapChain3;
+use windows::Win32::Graphics::Dxgi::{IDXGISwapChain, IDXGISwapChain3};
 use windows::core::Interface;
 
 pub static PRESENT_REQUEST: Original<PresentRequest12Fn> = Original::new();
@@ -23,13 +24,17 @@ pub fn set_renderer(base: usize) {
     RENDERER_12.store(base, Relaxed);
 }
 
-/// The present request: counted, and with stereo on, this frame's eye kept or its pair published
-/// before the game presents it, and the next eye chosen after.
+/// The present request: counted, the HUD layer's work done, and the present made inside the
+/// present loop.
 pub unsafe extern "system" fn present_request(object: usize) -> usize {
     let _flight = InFlight::enter();
     REQUESTS.fetch_add(1, Relaxed);
-    let mut n = None;
-    if engine::RD3D12.active(object) {
+    // SAFETY: the original, with the game's argument.
+    let call = || unsafe { PRESENT_REQUEST.get()(object) };
+    if !engine::RD3D12.active(object) {
+        return call();
+    }
+    {
         PRESENTS.fetch_add(1, Relaxed);
         if !DESCRIBED.swap(true, AcqRel) {
             describe(object);
@@ -67,19 +72,16 @@ pub unsafe extern "system" fn present_request(object: usize) -> usize {
         }
         // From the next frame's draws on: a menu's go to the frame.
         eng_chr::hudlayer::let_through(menu);
-        n = swap.and_then(|swap| crate::view::stereo::before_present(&swap, queue.clone()));
         drop(layer);
         if let Some(queue) = &queue {
             eng_chr::hudlayer::return_layer(queue);
         }
         eng_chr::hudlayer::frame_end();
+        match swap.and_then(|swap| swap.cast::<IDXGISwapChain>().ok()) {
+            Some(chain) => monaka_stereo::feature::DRIVER.around_present(&chain, call),
+            None => call(),
+        }
     }
-    // SAFETY: the original, with the game's argument.
-    let result = unsafe { PRESENT_REQUEST.get()(object) };
-    if let Some(n) = n {
-        crate::view::stereo::after_present(n);
-    }
-    result
 }
 
 /// The game's direct queue (a Streamline proxy when Streamline is loaded).

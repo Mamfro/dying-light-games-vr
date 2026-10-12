@@ -32,25 +32,20 @@ static SKIPPED: AtomicU64 = AtomicU64::new(0);
 /// # Safety
 /// `renderer` is the inspected build of the renderer the game loaded (`d3d11`: rd3d11).
 pub unsafe fn install(hooks: &mut Hooks, renderer: &Module, d3d11: bool, channel: &ChannelName) -> Result<(), Rejection> {
-    let at = |target: &engine::Target| renderer.at(target.0);
-    // SAFETY: every target is checked against its exact prologue (or is decoded, for system and
-    // Streamline code); every detour has its target's type.
-    unsafe {
-        streamline::install(hooks, renderer);
-        if d3d11 {
-            use engine::{COMMANDS_11, DLSS_CONSTANTS_11, DLSS_EVALUATE_11};
-            hooks.inline(&render11::DLSS_EVALUATE, "DLSS evaluate", at(&DLSS_EVALUATE_11), DLSS_EVALUATE_11.1, render11::dlss_evaluate as engine::PacketFn)?;
-            hooks.inline(&render11::DLSS_CONSTANTS, "DLSS constants", at(&DLSS_CONSTANTS_11), DLSS_CONSTANTS_11.1, render11::dlss_constants as engine::PacketFn)?;
-            hooks.inline(&render11::COMMANDS, "command dispatcher", at(&COMMANDS_11), COMMANDS_11.1, render11::commands as engine::CommandsFn)?;
-            render11::install_present(hooks)?;
-            render11::set_channel(channel.clone());
-        } else {
-            use engine::{DLSS_CONSTANTS_12, DLSS_EVALUATE_12, PRESENT_REQUEST_12};
-            hooks.inline(&render12::PRESENT_REQUEST, "rd3d12 present request", at(&PRESENT_REQUEST_12), PRESENT_REQUEST_12.1, render12::present_request as engine::PresentRequest12Fn)?;
-            hooks.inline(&render12::DLSS_EVALUATE, "DLSS evaluate (D3D12)", at(&DLSS_EVALUATE_12), DLSS_EVALUATE_12.1, render12::dlss_evaluate as engine::Packet12Fn)?;
-            hooks.inline(&render12::DLSS_CONSTANTS, "DLSS constants (D3D12)", at(&DLSS_CONSTANTS_12), DLSS_CONSTANTS_12.1, render12::dlss_constants as engine::Packet12Fn)?;
-            render12::set_channel(channel.clone());
-        }
+    // SAFETY: the caller's guarantee (Streamline's imports are decoded, not assumed).
+    unsafe { streamline::install(hooks, renderer) };
+    if d3d11 {
+        hooks.site(&render11::DLSS_EVALUATE, renderer, &engine::DLSS_EVALUATE_11, render11::dlss_evaluate)?;
+        hooks.site(&render11::DLSS_CONSTANTS, renderer, &engine::DLSS_CONSTANTS_11, render11::dlss_constants)?;
+        hooks.site(&render11::COMMANDS, renderer, &engine::COMMANDS_11, render11::commands)?;
+        // SAFETY: DXGI's Present, found on a probe swapchain.
+        unsafe { render11::install_present(hooks)? };
+        render11::set_channel(channel.clone());
+    } else {
+        hooks.site(&render12::PRESENT_REQUEST, renderer, &engine::PRESENT_REQUEST_12, render12::present_request)?;
+        hooks.site(&render12::DLSS_EVALUATE, renderer, &engine::DLSS_EVALUATE_12, render12::dlss_evaluate)?;
+        hooks.site(&render12::DLSS_CONSTANTS, renderer, &engine::DLSS_CONSTANTS_12, render12::dlss_constants)?;
+        render12::set_channel(channel.clone());
     }
     Ok(())
 }

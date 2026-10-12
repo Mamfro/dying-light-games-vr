@@ -12,8 +12,8 @@ use monaka_core::manifest::{
 };
 use monaka_core::options::{Options, Shared};
 use monaka_hook::module::Module;
-use monaka_producer::game::{Component, Game, Lack, On, Run, Start};
-use monaka_producer::{Rejection, log};
+use monaka_producer::game::{Component, Game, Lack, Missing, On, OrMissing, Run, Start, Switch};
+use monaka_producer::log;
 use std::sync::atomic::{AtomicBool, Ordering::*};
 use windows::Win32::Graphics::Direct3D12::ID3D12CommandQueue;
 
@@ -53,17 +53,13 @@ pub struct Facts {
 }
 
 /// The game DLL a component hooks, or why it stays off.
-fn gamedll<'a, G: Chrome>(start: &Start<'a, G>) -> Result<&'a Module, Lack> {
-    G::gamedll(start.build).ok_or_else(|| Lack::Missing("the game DLL is not the inspected build".to_owned()))
+pub fn gamedll<'a, G: Chrome>(start: &Start<'a, G>) -> Result<&'a Module, Lack> {
+    G::gamedll(start.build).or_missing("the game DLL is not the inspected build")
 }
 
 /// A fact of this build, or why the component needing it stays off.
 fn fact<T>(fact: Option<T>, what: &str) -> Result<T, Lack> {
-    fact.ok_or_else(|| Lack::Missing(format!("{what} is not read for this build")))
-}
-
-fn missing(why: Rejection) -> Lack {
-    Lack::Missing(why.reason)
+    fact.or_missing(&format!("{what} is not read for this build"))
 }
 
 // ---- Look and the arms ----
@@ -97,15 +93,13 @@ pub const fn arms<G: Chrome>() -> Component<G> {
 /// head bob held at zero while head aim steers the character (`view_bob`, held at each of its
 /// updates), so a game lists it on top of its look.
 pub const fn view_bob<G: Chrome>() -> Component<G> {
-    Component { name: "view bob", options: &[DISABLE_VIEW_BOBBING], settings: read_view_bob, on: view_bob_on::<G>, install: install_view_bob::<G>, ..Component::NONE }
-}
-
-fn read_view_bob(options: &Options, _: &Manifest) {
-    options.switch("disable_view_bobbing", true);
-}
-
-fn view_bob_on<G: Chrome>(run: &Run<'_, G>) -> On {
-    On::when(run.options.switch("disable_view_bobbing", true), "the view bobs as in the game")
+    Component {
+        name: "view bob",
+        options: &[DISABLE_VIEW_BOBBING],
+        switch: Some(Switch::new("disable_view_bobbing", true, "the view bobs as in the game")),
+        install: install_view_bob::<G>,
+        ..Component::NONE
+    }
 }
 
 fn install_view_bob<G: Chrome>(start: &mut Start<'_, G>) -> Result<(), Lack> {
@@ -121,20 +115,22 @@ pub const DISABLE_ZOMBIE_GRABS: Opt =
 
 /// Grabs never land on the player (`grabs`).
 pub const fn grabs<G: Chrome>() -> Component<G> {
-    Component { name: "grabs", options: &[DISABLE_ZOMBIE_GRABS], settings: read_grabs, on: grabs_on::<G>, install: install_grabs::<G>, release: grabs::report, ..Component::NONE }
+    Component {
+        name: "grabs",
+        options: &[DISABLE_ZOMBIE_GRABS],
+        switch: Some(GRABS_SWITCH),
+        install: install_grabs::<G>,
+        release: grabs::report,
+        ..Component::NONE
+    }
 }
 
-fn read_grabs(options: &Options, _: &Manifest) {
-    options.switch("disable_zombie_grabs", true);
-}
-
-fn grabs_on<G: Chrome>(run: &Run<'_, G>) -> On {
-    On::when(run.options.switch("disable_zombie_grabs", true), "zombies grab as in the game")
-}
+/// Zombies' grabs left as they are (`disable_zombie_grabs=0`).
+pub const GRABS_SWITCH: Switch = Switch::new("disable_zombie_grabs", true, "zombies grab as in the game");
 
 fn install_grabs<G: Chrome>(start: &mut Start<'_, G>) -> Result<(), Lack> {
     let gamedll = gamedll(start)?;
-    grabs::install(start.hooks, gamedll, fact(G::FACTS.grabs, "the grab conditions")?).map_err(missing)
+    grabs::install(start.hooks, gamedll, fact(G::FACTS.grabs, "the grab conditions")?).missing()
 }
 
 // ---- Room-scale ----
@@ -166,7 +162,7 @@ fn room_scale_on<G: Chrome>(run: &Run<'_, G>) -> On {
 fn install_room_scale<G: Chrome>(start: &mut Start<'_, G>) -> Result<(), Lack> {
     let settings = fact(roomscale::Settings::from_options(start.options, start.shared), "room-scale movement")?;
     let gamedll = gamedll(start)?;
-    walk::install(start.hooks, G::engine(start.build), gamedll, fact(G::FACTS.walk, "the movement step")?).map_err(missing)?;
+    walk::install(start.hooks, G::engine(start.build), gamedll, fact(G::FACTS.walk, "the movement step")?).missing()?;
     roomscale::install(settings);
     Ok(())
 }
@@ -192,7 +188,7 @@ fn melee_on<G: Chrome>(run: &Run<'_, G>) -> On {
 fn install_melee<G: Chrome>(start: &mut Start<'_, G>) -> Result<(), Lack> {
     let physical = fact(physical::<G>(start.options, start.shared), "physical melee")?;
     let gamedll = gamedll(start)?;
-    melee::install(start.hooks, gamedll, fact(G::FACTS.melee, "the melee code")?, physical).map_err(missing)?;
+    melee::install(start.hooks, gamedll, fact(G::FACTS.melee, "the melee code")?, physical).missing()?;
     if let Some(reach) = G::FACTS.melee_reach
         && start.options.switch("melee_on_reach", true)
         && let Err(why) = melee_reach::install(G::engine(start.build), gamedll, reach)
@@ -267,13 +263,13 @@ fn hud_on<G: Chrome>(run: &Run<'_, G>) -> On {
 }
 
 fn install_hud<G: Chrome>(start: &mut Start<'_, G>) -> Result<(), Lack> {
-    let queue = G::game_queue().ok_or_else(|| Lack::Missing("the game queue is not known (D3D11, or no present yet)".to_owned()))?;
+    let queue = G::game_queue().or_missing("the game queue is not known (D3D11, or no present yet)")?;
     let hud = start.shared.hud;
     // Kept out of the frame where it is laid back over the eyes; drawn in too where only its
     // pieces are taken out.
     let redirect = hud.shown || !G::FACTS.hud_over_eyes;
     // SAFETY: the game's live direct queue.
-    unsafe { hudlayer::install(start.hooks, &queue, redirect, start.options.switch("probe_hud", false), start.channel().ok().cloned()) }.map_err(|e| Lack::Missing(format!("{e}")))?;
+    unsafe { hudlayer::install(start.hooks, &queue, redirect, start.options.switch("probe_hud", false), start.channel().ok().cloned()) }.missing()?;
     let probe_gui = start.options.switch("probe_gui", false);
     let gui = match G::FACTS.gui {
         Some(build) => gui::install(start.hooks, G::engine(start.build), &build).map_err(|why| why.reason),
@@ -316,9 +312,7 @@ pub const fn panels<G: Chrome>() -> Component<G> {
 }
 
 fn install_panels<G: Chrome>(start: &mut Start<'_, G>) -> Result<(), Lack> {
-    if !GUI.load(Acquire) {
-        return Err(Lack::Missing("no gui tree to read the pieces from".to_owned()));
-    }
+    GUI.load(Acquire).then_some(()).or_missing("no gui tree to read the pieces from")?;
     gui::configure(start.options.switch("probe_gui", false), G::FACTS.pieces, G::showing);
     Ok(())
 }

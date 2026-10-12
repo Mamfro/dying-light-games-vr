@@ -54,7 +54,7 @@ unsafe extern "system" fn camera_target(target: usize, camera: usize) {
     // SAFETY: forwards the game's own call.
     let original = || unsafe { CAMERA_TARGET.get()(target, camera) };
     let active = crate::view::stereo::running();
-    let head = crate::view::stereo::HEAD.current();
+    let head = monaka_stereo::feature::DRIVER.head().current();
     // Head aim steers here: this callback has the arms visual, and so the character. Once stereo
     // stops, with no head, it hands the head's share back.
     if aim::AIM.is_arms_target(target) {

@@ -153,17 +153,7 @@ fn set_matrix_detour() -> SetMatrixFn {
 /// `renderer` is the fingerprinted renderer.
 pub unsafe fn install(hooks: &mut Hooks, renderer: &Module) -> Result<(), Rejection> {
     merge_cameras_called_from(renderer);
-    // SAFETY: the named export (checked) of type SetMatrixFn, its prologue checked byte for byte
-    // before anything is written.
-    unsafe {
-        hooks.inline(
-            &SET_MATRIX_ORIGINAL,
-            "CCamera::SetView(mtx34)",
-            crate::view::cameras::export(renderer, engine::SET_VIEW_MATRIX)?,
-            engine::SET_VIEW_MATRIX.2,
-            set_matrix_detour(),
-        )?;
-    }
+    hooks.site(&SET_MATRIX_ORIGINAL, renderer, &engine::SET_VIEW_MATRIX, set_matrix_detour())?;
     Ok(())
 }
 

@@ -1,44 +1,35 @@
-//! Alternate-eye stereo on D3D12: after each present `n` the next eye and the head pose are chosen
-//! ([`after_present`]); the game's player camera update then sets the camera to that eye
-//! ([`eye_vectors`], in the `SetView(vec3)` detour), and the frame shows `latency` presents later,
-//! where `monaka_stereo::alternate12` keeps it and publishes it with its partner eye.
+//! Alternate-eye stereo on D3D12, on Monaka's present loop (`monaka_stereo::feature`, its
+//! `DRIVER`, entered from the present request: `output::present12`): after each present the loop
+//! chooses the next eye; the game's player camera update takes the choices in turn and sets the
+//! camera to that eye ([`eye_vectors`], in the `SetView(vec3)` detour), and the renderer labels
+//! each frame with its eye when DLSS gets its camera (`output::streamline`), so the frame goes out
+//! as that eye with its pose, whatever the timing.
 //!
 //! The camera written is the game's live player camera (there is no separate render copy to move,
 //! as in DL1), so culling, shadows and the renderer's own camera copies all follow the eye. The
 //! game rebuilds the camera from the character's look angles every update, so nothing stacks.
-//! The field of view stays the game's; each eye's pose goes out with it, and the viewer places the
-//! image accordingly.
+//! Each eye is rendered with the headset's field of view, centred ([`before_frustum`]), or the
+//! game's; its pose goes out with the one it was rendered with ([`report`]).
 
 use crate::engine;
 use monaka_channel::ChannelName;
-use monaka_channel::pose::{HeadSource, PoseChannel, Synthetic};
-use monaka_core::alternate::Schedule;
 use monaka_core::camera::{self, Frustum, Mat34};
 use monaka_core::hud::{Placement, Rect};
 use monaka_core::protocol::HeadPose;
+use monaka_core::sync::Locked;
 use monaka_hook::{AtomicF32, mem};
 use monaka_producer::log;
-use monaka_stereo::alternate12::{AlternatePublisher12, Step};
+use monaka_stereo::driver::Driver;
+use monaka_stereo::feature::DRIVER;
 use std::sync::Mutex;
-use std::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release};
+use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, AtomicUsize};
-use windows::Win32::Graphics::Direct3D12::ID3D12CommandQueue;
-use windows::Win32::Graphics::Dxgi::IDXGISwapChain3;
-use monaka_core::sync::Locked;
+use windows::Win32::Graphics::Dxgi::{IDXGISwapChain, IDXGISwapChain3};
+use windows::core::Interface;
 
-pub static HEAD: HeadSource = HeadSource::new();
-static PUBLISHER: Mutex<Option<AlternatePublisher12>> = Mutex::new(None);
-static ENABLED: AtomicBool = AtomicBool::new(false);
-/// Presents seen since stereo started (the next one is `n`).
-static PRESENTS: AtomicU64 = AtomicU64::new(0);
-/// 0 once a present has been seen since stereo started (-1: leave the camera alone).
-static EYE: AtomicI32 = AtomicI32::new(-1);
-/// The eye the last player camera update was given (-1: none).
+/// The eye the last player camera update was given (-1: none), and the pose it was drawn from.
 static CURRENT_EYE: AtomicI32 = AtomicI32::new(-1);
-/// Eye choices made, one per present; the camera updates take them in turn ([`Sequencer`]).
-static CHOICES: AtomicU64 = AtomicU64::new(0);
 static PENDING: Mutex<HeadPose> = Mutex::new(HeadPose::EMPTY);
-static PAIR_POSE: Mutex<HeadPose> = Mutex::new(HeadPose::EMPTY);
 /// Eye separation (metres) when the headset reports no plausible IPD.
 static SEPARATION: AtomicF32 = AtomicF32::new(0.064);
 /// PC check of the eye order: eye 0 turned this far left, eye 1 as far right (radians).
@@ -67,57 +58,16 @@ struct FovState {
     restored: bool,
 }
 
-
-struct Counters {
-    eye_writes: AtomicU64,
-    eye_refusals: AtomicU64,
-    /// Camera updates that came before the present making their choice, or after the next one.
-    repeated: AtomicU64,
-    skipped: AtomicU64,
-    /// Times the sequence of choices was moved back into step with the presents.
-    resynced: AtomicU64,
-    /// Frames recognised by their camera, cameras not recognised, presents without a label once
-    /// labelling works, and labels that differed from the timing-based guess.
-    labelled: AtomicU64,
-    label_unmatched: AtomicU64,
-    unlabelled: AtomicU64,
-    label_disagreed: AtomicU64,
-    /// Presents held back while waiting for the headset eye size.
-    size_waits: AtomicU64,
-    frusta: AtomicU64,
-    left: AtomicU64,
-    published: AtomicU64,
-    unpaired: AtomicU64,
-    failed: AtomicU64,
-    no_queue: AtomicU64,
-    /// Frames of a menu, published flat.
-    menu: AtomicU64,
-}
-static COUNTERS: Counters = Counters {
-    eye_writes: AtomicU64::new(0),
-    eye_refusals: AtomicU64::new(0),
-    repeated: AtomicU64::new(0),
-    skipped: AtomicU64::new(0),
-    resynced: AtomicU64::new(0),
-    labelled: AtomicU64::new(0),
-    label_unmatched: AtomicU64::new(0),
-    unlabelled: AtomicU64::new(0),
-    label_disagreed: AtomicU64::new(0),
-    size_waits: AtomicU64::new(0),
-    frusta: AtomicU64::new(0),
-    left: AtomicU64::new(0),
-    published: AtomicU64::new(0),
-    unpaired: AtomicU64::new(0),
-    failed: AtomicU64::new(0),
-    no_queue: AtomicU64::new(0),
-    menu: AtomicU64::new(0),
-};
+/// Eye cameras written (the loop's rate line), refused, frames held for the eye size, headset
+/// frusta written.
+pub static EYE_WRITES: AtomicU64 = AtomicU64::new(0);
+static EYE_REFUSALS: AtomicU64 = AtomicU64::new(0);
+static SIZE_WAITS: AtomicU64 = AtomicU64::new(0);
+static FRUSTA: AtomicU64 = AtomicU64::new(0);
 
 pub struct Settings {
     pub channel: ChannelName,
-    pub schedule: Schedule,
     pub separation: f32,
-    pub synthetic: Option<Synthetic>,
     pub eye_test_degrees: f32,
     pub latency_test_degrees: f32,
     pub headset_fov: bool,
@@ -133,12 +83,9 @@ pub fn channel() -> Option<ChannelName> {
     CHANNEL.lock().ok().and_then(|c| c.clone())
 }
 
-/// Makes the publisher and opens the head; eye cameras are written once [`arm`]ed.
+/// The run's eye settings (the loop itself is the present component's).
 pub fn install(settings: Settings) {
     *CHANNEL.locked() = Some(settings.channel.clone());
-    let poses = PoseChannel::open(&settings.channel).inspect_err(|e| log!("no pose channel ({e}): no head pose records")).ok();
-    let synthetic = settings.synthetic.is_some();
-    HEAD.open(poses, settings.synthetic);
     SEPARATION.store(settings.separation);
     EYE_TEST.store(settings.eye_test_degrees.to_radians());
     LATENCY_TEST.store(settings.latency_test_degrees.to_radians());
@@ -147,35 +94,24 @@ pub fn install(settings: Settings) {
     *HUD.locked() = settings.hud;
     let test = |name: &str, degrees: f32| if degrees != 0.0 { format!(", {name} test {degrees} degrees") } else { String::new() };
     log!(
-        "alternate-eye stereo on {} (latency {}, eye separation {} m, {} field of view{}{}{})",
-        settings.channel.as_str(),
-        settings.schedule.latency,
+        "alternate-eye stereo (eye separation {} m, {} field of view{}{})",
         settings.separation,
         if settings.headset_fov { "headset" } else { "game" },
-        if synthetic { ", synthetic head" } else { "" },
         test("eye", settings.eye_test_degrees),
         test("latency", settings.latency_test_degrees),
     );
-    *PUBLISHER.locked() = Some(AlternatePublisher12::new(settings.channel, settings.schedule));
-    PRESENTS.store(0, Relaxed);
-    CHOICES.store(0, Relaxed);
-    *SEQUENCER.locked() = None;
-    *WRITTEN.locked() = ([None; WRITTEN_KEPT], 0);
-    *LABEL.locked() = None;
-    LABELLING.store(false, Relaxed);
 }
 
 /// Every hook is in (and the eye size asked for): stereo starts with the next present.
 pub fn arm() {
-    ENABLED.store(true, Release);
+    DRIVER.start();
 }
 
 /// Stops writing eye cameras (the next update is the game's own again) and has the next projection
 /// rebuild put the game's extents back. Hooks must still be in; returns once the extents are back
 /// (or after `wait_ms`, logged).
 pub fn quiet(wait_ms: u64) {
-    ENABLED.store(false, Release);
-    EYE.store(-1, Release);
+    DRIVER.retire(wait_ms);
     CURRENT_EYE.store(-1, Release);
     let pending = {
         let mut fov = FOV.locked();
@@ -188,133 +124,76 @@ pub fn quiet(wait_ms: u64) {
     HEADSET_FOV.store(false, Release);
 }
 
-/// After the hooks are out: lets go of the channel and the head.
 pub fn release() {
-    if let Some(mut publisher) = PUBLISHER.locked().take() {
-        log!("{} pairs published, {} failures", publisher.pairs(), publisher.failures());
-        publisher.close();
-    }
-    HEAD.close();
-}
-
-/// Before the game's present: this frame's eye is kept or its pair published. Returns the present
-/// number for [`after_present`].
-pub fn before_present(swap: &IDXGISwapChain3, queue: Option<ID3D12CommandQueue>) -> Option<u64> {
-    if !ENABLED.load(Acquire) {
-        return None;
-    }
-    let n = PRESENTS.fetch_add(1, Relaxed);
-    if !crate::output::video::ready() {
-        // Waiting for the headset eye size: nothing is published (the channel takes the first
-        // published frame's size).
-        LABEL.locked().take();
-        COUNTERS.size_waits.fetch_add(1, Relaxed);
-        return Some(n);
-    }
-    let Some(queue) = queue else {
-        COUNTERS.no_queue.fetch_add(1, Relaxed);
-        return Some(n);
-    };
-    let separation = SEPARATION.load();
-    // Each eye goes out with the field of view it was rendered with: its own centred, or the game's.
-    let report = |used: &mut HeadPose| {
-        used.ipd = used.ipd_or(separation);
-        let pose = *used;
-        for (eye, fov) in used.fov.iter_mut().enumerate() {
-            if let Some(frustum) = eye_frustum(&pose, eye) {
-                *fov = frustum.fov();
-            }
-        }
-    };
-    let label = LABEL.locked().take();
-    let mut publisher = PUBLISHER.locked();
-    if let Some(publisher) = publisher.as_mut() {
-        let scheduled = publisher.schedule().shown_eye(n);
-        if let Some(shown) = label.map(|l| l.eye).or(scheduled) {
-            crate::research::history::shown(shown);
-        }
-        let menu = !crate::output::framegen::enabled() && eng_chr::gui::menu_open();
-        let step = match label {
-            // A menu (the game's whole screen): flat to both eyes, on the viewer's screen.
-            _ if menu => {
-                COUNTERS.menu.fetch_add(1, Relaxed);
-                publisher.show_flat(swap, &queue)
-            }
-            // Frame generation makes and publishes the pairs itself, from labelled frames.
-            Some(label) if crate::output::framegen::enabled() => crate::output::framegen::present(swap, &queue, label.eye, label.pose, &HEAD, report),
-            // No eye camera drew it (a menu, the pause screen): flat to both eyes.
-            None if crate::output::framegen::enabled() => {
-                COUNTERS.unlabelled.fetch_add(1, Relaxed);
-                crate::output::framegen::present_unlabelled(swap, &queue, &HEAD, report)
-            }
-            // The frame's own label: its eye and pose exactly, whatever the timing.
-            Some(label) => {
-                if scheduled.is_some_and(|s| s != label.eye) {
-                    COUNTERS.label_disagreed.fetch_add(1, Relaxed);
-                }
-                publisher.show_labelled(swap, &queue, label.eye, label.pose, &HEAD, report)
-            }
-            // Labelled before but not this frame (no DLSS camera seen for it): its eye is unknown.
-            None if LABELLING.load(Relaxed) => {
-                COUNTERS.unlabelled.fetch_add(1, Relaxed);
-                Step::Waiting
-            }
-            None => publisher.before_present(swap, &queue, n, &HEAD, report),
-        };
-        let counter = match step {
-            Step::Waiting => None,
-            Step::Left => Some(&COUNTERS.left),
-            Step::Published => Some(&COUNTERS.published),
-            Step::Unpaired => Some(&COUNTERS.unpaired),
-            Step::Failed => Some(&COUNTERS.failed),
-        };
-        if let Some(counter) = counter {
-            counter.fetch_add(1, Relaxed);
-        }
-        if step == Step::Published
-            && LATENCY_TEST.load() != 0.0
-            && let Some((sequence, eyes)) = publisher.last_pair()
-        {
-            // To match against the probe's saved pairs: which head each pair's record says.
-            monaka_producer::log_first!(600, "pair {sequence}: record head yaw {:.1} degrees", monaka_core::math::yaw(eyes[0].orientation).to_degrees());
-        }
-    }
-    Some(n)
-}
-
-/// An eye camera as written, to recognise the frame rendered from it.
-#[derive(Clone, Copy)]
-struct Written {
-    position: [f32; 3],
-    eye: usize,
-    pose: HeadPose,
-}
-
-/// The frame being rendered, recognised by its camera: its eye and the pose it was drawn with.
-#[derive(Clone, Copy)]
-struct Label {
-    eye: usize,
-    pose: HeadPose,
-}
-
-const WRITTEN_KEPT: usize = 8;
-/// A rendered camera this close (world units, metres) to a written one is that one.
-const SAME_CAMERA: f32 = 0.005;
-static WRITTEN: Mutex<([Option<Written>; WRITTEN_KEPT], usize)> = Mutex::new(([None; WRITTEN_KEPT], 0));
-static LABEL: Mutex<Option<Label>> = Mutex::new(None);
-/// Frames have been labelled this run, so a frame without a label is not guessed.
-static LABELLING: AtomicBool = AtomicBool::new(false);
-
-fn remember_written(written: Written) {
-    let mut ring = WRITTEN.locked();
-    let slot = ring.1 % WRITTEN_KEPT;
-    ring.0[slot] = Some(written);
-    ring.1 += 1;
+    CHANNEL.locked().take();
 }
 
 /// Whether stereo runs (eye cameras are written).
 pub fn running() -> bool {
-    EYE.load(Acquire) >= 0
+    DRIVER.running()
+}
+
+/// The eye of the frame the renderer is working on now (the one the next present shows), while
+/// stereo runs.
+pub fn rendering_eye() -> Option<usize> {
+    DRIVER.schedule()?.shown_eye(DRIVER.drawing_present()?)
+}
+
+/// Before the loop publishes present `n`: held while the game is not yet at the headset's eye
+/// size (the channel takes the first published frame's size); with frame generation, its own
+/// pairs from the labelled frames. True when the loop is to publish nothing itself.
+pub fn before_present(driver: &Driver, chain: &IDXGISwapChain, n: u64) -> bool {
+    if !crate::output::video::ready() {
+        driver.take_label();
+        SIZE_WAITS.fetch_add(1, Relaxed);
+        return true;
+    }
+    let label = driver.peek_label();
+    if let Some(shown) = label.map(|l| l.eye).or_else(|| driver.schedule().and_then(|s| s.shown_eye(n))) {
+        crate::research::history::shown(shown);
+    }
+    if !crate::output::framegen::enabled() {
+        return false;
+    }
+    // Frame generation makes and publishes the pairs itself, from labelled frames (an unlabelled
+    // frame, a menu or the pause screen, flat to both eyes).
+    let (Ok(swap), Some(queue)) = (chain.cast::<IDXGISwapChain3>(), crate::output::present12::game_queue()) else { return true };
+    let report = |pose: &mut HeadPose| report(driver, pose);
+    match driver.take_label() {
+        Some(label) => crate::output::framegen::present(&swap, &queue, label.eye, label.pose, driver.head(), report),
+        None => crate::output::framegen::present_unlabelled(&swap, &queue, driver.head(), report),
+    };
+    true
+}
+
+/// After present `n`: with the latency check, which head each pair's record says (to match against
+/// the probe's saved pairs).
+pub fn after_present(driver: &Driver, _: u64, _: &HeadPose) {
+    if LATENCY_TEST.load() != 0.0
+        && let Some((sequence, eyes)) = driver.last_pair()
+    {
+        monaka_producer::log_first!(600, "pair {sequence}: record head yaw {:.1} degrees", monaka_core::math::yaw(eyes[0].orientation).to_degrees());
+    }
+}
+
+/// The latency check: every other pair's head turned left, so its images must show the turn its
+/// record says.
+pub fn latency_test(n: u64, pose: &mut HeadPose) {
+    let test = LATENCY_TEST.load();
+    if test != 0.0 && pose.valid != 0 && (n / 2).is_multiple_of(2) {
+        pose.orientation = monaka_core::math::yaw_rotation(test);
+    }
+}
+
+/// Each eye goes out with the field of view it was rendered with: its own centred, or the game's.
+pub fn report(_: &Driver, used: &mut HeadPose) {
+    used.ipd = used.ipd_or(SEPARATION.load());
+    let pose = *used;
+    for (eye, fov) in used.fov.iter_mut().enumerate() {
+        if let Some(frustum) = eye_frustum(&pose, eye) {
+            *fov = frustum.fov();
+        }
+    }
 }
 
 /// How the HUD layer goes over the frame about to present (`size` its pixels): in its eye's place
@@ -323,14 +202,13 @@ pub fn running() -> bool {
 /// layout then).
 pub fn hud_over(size: (u32, u32)) -> Option<eng_chr::hudover::Params> {
     let (scale, distance) = (*HUD.lock().ok()?)?;
-    if !ENABLED.load(Acquire) {
+    if !DRIVER.capturing() {
         return None;
     }
     // A wheel held open is shown smaller than the HUD (the HUD with it, while it is open).
     let scale = if wheel_open() { scale.min(WHEEL_SCALE) } else { scale };
-    let label = LABEL.lock().ok().and_then(|l| l.as_ref().map(|l| (l.eye, l.pose)));
-    let (frustum, eye, ipd) = match label {
-        Some((eye, pose)) => (eye_frustum(&pose, eye).or_else(game_frustum)?, eye, pose.ipd_or(SEPARATION.load())),
+    let (frustum, eye, ipd) = match DRIVER.peek_label() {
+        Some(label) => (eye_frustum(&label.pose, label.eye).or_else(game_frustum)?, label.eye, label.pose.ipd_or(SEPARATION.load())),
         None => (game_frustum()?, 0, 0.0),
     };
     let image = Rect::sized(size.0 as f32, size.1 as f32);
@@ -365,7 +243,7 @@ fn wheel_open() -> bool {
 /// The frustum eye `eye` of `pose` was rendered with: the headset's, centred, or the game's (also
 /// for a pose without a field of view).
 fn eye_frustum(pose: &HeadPose, eye: usize) -> Option<Frustum> {
-    let headset_fov = HEADSET_FOV.load(Acquire) && COUNTERS.frusta.load(Relaxed) > 0;
+    let headset_fov = HEADSET_FOV.load(Acquire) && FRUSTA.load(Relaxed) > 0;
     if headset_fov { Frustum::from_fov(pose.fov[eye]).map(|f| f.symmetric()) } else { game_frustum() }
 }
 
@@ -374,139 +252,12 @@ fn game_frustum() -> Option<Frustum> {
     Frustum::centred([1.0 / GAME_SCALE[0].load(), 1.0 / GAME_SCALE[1].load()])
 }
 
-/// The renderer reports the camera position it renders the coming frame with (DLSS's camera
-/// constants, on the render thread before that frame's present): the frame's eye and pose are those
-/// of the eye camera written at that position. Returns the eye, if recognised.
-pub fn label_frame(position: [f32; 3]) -> Option<usize> {
-    if !ENABLED.load(Acquire) || !position.iter().all(|v| v.is_finite()) {
-        return None;
-    }
-    let found = {
-        let ring = WRITTEN.locked();
-        let distance = |w: &Written| (0..3).map(|i| (w.position[i] - position[i]).abs()).fold(0.0, f32::max);
-        ring.0.iter().flatten().filter(|w| distance(w) < SAME_CAMERA).min_by(|a, b| distance(a).total_cmp(&distance(b))).copied()
-    };
-    match found {
-        Some(written) => {
-            *LABEL.locked() = Some(Label { eye: written.eye, pose: written.pose });
-            LABELLING.store(true, Relaxed);
-            COUNTERS.labelled.fetch_add(1, Relaxed);
-            Some(written.eye)
-        }
-        None => {
-            COUNTERS.label_unmatched.fetch_add(1, Relaxed);
-            None
-        }
-    }
-}
-
-/// The eye of the frame the renderer is working on now (the one the next present shows), while
-/// stereo runs.
-pub fn rendering_eye() -> Option<usize> {
-    if !ENABLED.load(Acquire) {
-        return None;
-    }
-    let schedule = PUBLISHER.lock().ok()?.as_ref()?.schedule();
-    schedule.shown_eye(PRESENTS.load(Relaxed))
-}
-
-/// After present `n`: one more eye choice is due (the camera written after present `n` is eye
-/// `Schedule::camera_eye(n)`); the camera updates take them in turn ([`Sequencer`]).
-pub fn after_present(_n: u64) {
-    if !ENABLED.load(Acquire) {
-        return;
-    }
-    CHOICES.fetch_add(1, AcqRel);
-    EYE.store(0, Release);
-}
-
-/// Hands eye choices to the player camera updates strictly in turn. The game thread's updates and
-/// the presents match one to one, but which comes first wobbles: an update can arrive before the
-/// present that makes its choice, or after the next one. Taking the choice after the last one used,
-/// rather than the newest made, keeps every frame on its own eye through that wobble; only a
-/// lasting offset (an update or a present that had no partner) moves it back into step.
-#[derive(Default)]
-struct Sequencer {
-    used: u64,
-    run: u32,
-    run_sign: i64,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-enum Taken {
-    InStep,
-    Early,
-    Late,
-    Resynced,
-}
-
-impl Sequencer {
-    /// Updates in a row offset the same way before the sequence follows the presents again.
-    const RESYNC_AFTER: u32 = 8;
-
-    /// The choice (1-based) for the next camera update, `made` choices having been made so far.
-    fn next(&mut self, made: u64) -> (u64, Taken) {
-        if self.used == 0 {
-            self.used = made;
-            return (made, Taken::InStep);
-        }
-        let choice = self.used + 1;
-        let offset = (made as i64 - choice as i64).signum();
-        if offset != 0 && offset == self.run_sign {
-            self.run += 1;
-        } else {
-            self.run = u32::from(offset != 0);
-            self.run_sign = offset;
-        }
-        if self.run >= Self::RESYNC_AFTER {
-            *self = Self { used: made, run: 0, run_sign: 0 };
-            return (made, Taken::Resynced);
-        }
-        self.used = choice;
-        (choice, if offset < 0 { Taken::Early } else if offset > 0 { Taken::Late } else { Taken::InStep })
-    }
-}
-
-static SEQUENCER: Mutex<Option<Sequencer>> = Mutex::new(None);
-
 /// The player camera update is about to set `camera` from the game's backward axis, up and
 /// position: the eye camera to set instead, as (back, up, position), or `None` to leave it.
 pub fn eye_vectors(camera: usize, back: usize, up: usize, position: usize, baked: Option<f32>) -> Option<[crate::view::camera_update::Vec3; 3]> {
-    if EYE.load(Acquire) < 0 {
-        return None;
-    }
+    let taken = DRIVER.take_in_turn()?;
     PLAYER_CAMERA.store(camera, Relaxed);
-    let (choice, taken) = SEQUENCER.locked().get_or_insert_default().next(CHOICES.load(Acquire));
-    let counter = match taken {
-        Taken::InStep => None,
-        Taken::Early => Some(&COUNTERS.repeated),
-        Taken::Late => Some(&COUNTERS.skipped),
-        Taken::Resynced => Some(&COUNTERS.resynced),
-    };
-    if let Some(counter) = counter {
-        counter.fetch_add(1, Relaxed);
-    }
-    // The camera written for choice `choice` is the one "written after present n".
-    let n = choice - 1;
-    let eye = Schedule::camera_eye(n);
-    // Both eyes of a pair are drawn from one head pose, sampled for its left-eye frame.
-    let pose = {
-        let mut pair = PAIR_POSE.locked();
-        // With frame generation each frame takes the newest pose: a generated eye stands for the
-        // moment of the other eye's frame, which must be drawn from that moment's head.
-        if Schedule::starts_pair(n) || crate::output::framegen::enabled() {
-            *pair = HEAD.current().unwrap_or_default();
-            let test = LATENCY_TEST.load();
-            if test != 0.0 && pair.valid != 0 && (n / 2).is_multiple_of(2) {
-                // Every other pair's head turned left: its images must show the turn its record says.
-                pair.orientation = monaka_core::math::yaw_rotation(test);
-            }
-        }
-        *pair
-    };
-    if let Some(publisher) = PUBLISHER.locked().as_mut() {
-        publisher.record_pose(n, pose);
-    }
+    let (eye, pose) = (taken.eye, taken.pose);
     *PENDING.locked() = pose;
     CURRENT_EYE.store(eye as i32, Release);
     if let Some(scale) = mem::read::<[f32; 6]>(camera + engine::CAMERA_PROJECTION) {
@@ -519,12 +270,13 @@ pub fn eye_vectors(camera: usize, back: usize, up: usize, position: usize, baked
     let separation = pose.ipd_or(SEPARATION.load());
     let made = eye_camera(mem::read(back)?, mem::read(up)?, mem::read(position)?, &pose, eye, separation, EYE_TEST.load(), baked);
     let Some(m) = made else {
-        COUNTERS.eye_refusals.fetch_add(1, Relaxed);
+        EYE_REFUSALS.fetch_add(1, Relaxed);
         return None;
     };
-    COUNTERS.eye_writes.fetch_add(1, Relaxed);
-    crate::research::history::eye_written(eye, [m[3], m[7], m[11]]);
-    remember_written(Written { position: [m[3], m[7], m[11]], eye, pose });
+    EYE_WRITES.fetch_add(1, Relaxed);
+    let at = [m[3], m[7], m[11]];
+    crate::research::history::eye_written(eye, at);
+    DRIVER.camera_written(at, eye, pose);
     let column = |c: usize| crate::view::camera_update::Vec3([m[c], m[4 + c], m[8 + c], 0.0]);
     Some([column(2), column(1), column(3)])
 }
@@ -567,7 +319,7 @@ pub fn before_frustum(camera: usize) {
     let wanted = frustum.symmetric().extents(near);
     if mem::write(extents, wanted) {
         fov.written = wanted;
-        COUNTERS.frusta.fetch_add(1, Relaxed);
+        FRUSTA.fetch_add(1, Relaxed);
     }
 }
 
@@ -602,31 +354,18 @@ pub fn eye_camera(back: [f32; 3], up: [f32; 3], position: [f32; 3], pose: &HeadP
     Some(if test != 0.0 { camera::turn(&m, if eye == 0 { test } else { -test }) } else { m })
 }
 
-pub fn report(seconds: f64) {
-    static LAST: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
-    let now = [&COUNTERS.published, &COUNTERS.left, &COUNTERS.eye_writes, &COUNTERS.failed].map(|c| c.load(Relaxed));
-    let rate = monaka_producer::rates(now, &LAST, seconds);
+/// The eye cameras' counts since the last report (`seconds` ago), with the loop's own.
+pub fn report_rates(seconds: f64) {
+    static LAST: [AtomicU64; 1] = [AtomicU64::new(0)];
+    let rate = monaka_producer::rates([EYE_WRITES.load(Relaxed)], &LAST, seconds);
     log!(
-        "stereo: pairs {:.1}/s, left eyes {:.1}/s, eye cameras {:.1}/s, failures {:.1}/s (unpaired {}, refused {}, no queue {}, head {}); \
-         camera updates early {}, late {}, resynced {}; frames labelled {}, unmatched {}, unlabelled {}, label differed from timing {}; held back for the eye size {}; headset frusta {}; menu frames flat {}",
+        "stereo: eye cameras {:.1}/s (refused {}), held back for the eye size {}, headset frusta {}, head {}; {}",
         rate[0],
-        rate[1],
-        rate[2],
-        rate[3],
-        COUNTERS.unpaired.load(Relaxed),
-        COUNTERS.eye_refusals.load(Relaxed),
-        COUNTERS.no_queue.load(Relaxed),
-        if HEAD.current().is_some() { "tracked" } else { "none" },
-        COUNTERS.repeated.load(Relaxed),
-        COUNTERS.skipped.load(Relaxed),
-        COUNTERS.resynced.load(Relaxed),
-        COUNTERS.labelled.load(Relaxed),
-        COUNTERS.label_unmatched.load(Relaxed),
-        COUNTERS.unlabelled.load(Relaxed),
-        COUNTERS.label_disagreed.load(Relaxed),
-        COUNTERS.size_waits.load(Relaxed),
-        COUNTERS.frusta.load(Relaxed),
-        COUNTERS.menu.load(Relaxed),
+        EYE_REFUSALS.load(Relaxed),
+        SIZE_WAITS.load(Relaxed),
+        FRUSTA.load(Relaxed),
+        if DRIVER.head().current().is_some() { "tracked" } else { "none" },
+        DRIVER.summary(),
     );
 }
 
@@ -659,34 +398,6 @@ mod tests {
     }
 
     #[test]
-    fn updates_take_choices_in_turn_through_the_wobble() {
-        let mut s = Sequencer::default();
-        assert_eq!(s.next(1), (1, Taken::InStep));
-        assert_eq!(s.next(2), (2, Taken::InStep));
-        // Early: a second update before the present making choice 3.
-        assert_eq!(s.next(2), (3, Taken::Early));
-        // Late: two presents before this update; it still takes the next choice, not the newest.
-        assert_eq!(s.next(4), (4, Taken::InStep));
-        assert_eq!(s.next(6), (5, Taken::Late));
-        assert_eq!(s.next(6), (6, Taken::InStep));
-    }
-
-    #[test]
-    fn a_lasting_offset_is_followed() {
-        let mut s = Sequencer::default();
-        assert_eq!(s.next(1).0, 1);
-        // A present had no camera update: from here every update is one late.
-        let mut made = 2;
-        let mut last = (0, Taken::InStep);
-        for _ in 0..Sequencer::RESYNC_AFTER {
-            made += 1;
-            last = s.next(made);
-        }
-        assert_eq!(last, (made, Taken::Resynced));
-        assert_eq!(s.next(made + 1), (made + 1, Taken::InStep));
-    }
-
-    #[test]
     fn head_aim_levels_the_camera_and_turns_its_head_yaw_out() {
         // A game camera turned 30 degrees left (head aim baked that in) and pitched down: with the
         // head level and ahead, the eyes look level along the yaw the game had before head aim.
@@ -700,6 +411,7 @@ mod tests {
     }
 
     #[test]
-    fn a_skewed_camera_is_refused() {        assert!(eye_camera([0.0, 0.0, 1.0], [0.0, 0.5, 0.5], [0.0; 3], &level_pose(), 0, 0.064, 0.0, None).is_none());
+    fn a_skewed_camera_is_refused() {
+        assert!(eye_camera([0.0, 0.0, 1.0], [0.0, 0.5, 0.5], [0.0; 3], &level_pose(), 0, 0.064, 0.0, None).is_none());
     }
 }

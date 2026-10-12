@@ -4,7 +4,8 @@
 //! The adapter ([`Beast::ADAPTER`]), in the order its components start:
 //!
 //! - [`CAMERAS`]: the renderer camera's two exported setters, where the player camera update is
-//!   taken over (`view::cameras`); [`PRESENT`]: the D3D12 present request every frame goes through;
+//!   taken over (`view::cameras`); [`PRESENT_REQUEST`]: the D3D12 present request every frame goes
+//!   through; [`PRESENT`]: Monaka's present loop, entered there (`view::stereo`);
 //! - [`EYE_SIZE`]: the game rendering at the headset's eye size; [`EYES`]: stereo by alternate eyes,
 //!   the player camera set to each eye in turn, each frame labelled by its camera;
 //! - [`LOOK`]: head aim on the character, steered at the arms visual's callback; [`ARMS`]: the arms
@@ -33,8 +34,10 @@ use monaka_core::manifest::{
 use monaka_core::options::Options;
 use monaka_core::sync::Locked;
 use monaka_hook::module::Module;
-use monaka_producer::game::{Adapter, Component, Game, Lack, On, Start, on, place};
+use eng_chr::feature::gamedll;
+use monaka_producer::game::{Adapter, Component, Game, Lack, Missing, On, OrMissing, Start, Switch, on, place};
 use monaka_producer::{Rejection, Session, log, require_build};
+use monaka_stereo::feature::{Entry, Graphics, Loop, Presents};
 use output::{dlss, framegen, present12, streamline, video};
 use player::{aim, flashlight, hands};
 use std::sync::Mutex;
@@ -63,6 +66,7 @@ impl Game for Beast {
     const ADAPTER: Adapter<Beast> = Adapter {
         components: &[
             &CAMERAS,
+            &PRESENT_REQUEST,
             &PRESENT,
             &EYE_SIZE,
             &EYES,
@@ -156,13 +160,8 @@ fn turn_yaw(options: &Options) -> Option<f32> {
     options.angle("turn_yaw", 90.0).filter(|&yaw| yaw != 0.0)
 }
 
-/// The game DLL, which every component on the character needs (there with stereo).
-fn gamedll<'a>(start: &Start<'a, Beast>) -> Result<&'a Module, Lack> {
-    start.build.gamedll.as_ref().ok_or_else(|| Lack::Missing("the game DLL is not hooked without stereo".to_owned()))
-}
-
 /// The components' places, for the report to ask whether each is on.
-const PRESENT_AT: usize = place::<Beast>(&PRESENT);
+const PRESENT_AT: usize = place::<Beast>(&PRESENT_REQUEST);
 const EYES_AT: usize = place::<Beast>(&EYES);
 const STREAMLINE_AT: usize = place::<Beast>(&STREAMLINE);
 
@@ -179,29 +178,49 @@ fn install_cameras(start: &mut Start<'_, Beast>) -> Result<(), Lack> {
     if let Some(gamedll) = gamedll {
         camera_update::set_player_update(gamedll.at(engine::PLAYER_CAMERA_UPDATE));
     }
-    let (vectors, frustum) = (engine::SET_VIEW_VECTORS, engine::COMPUTE_FRUSTUM);
-    // SAFETY: each target is the named export (checked) of the function type its original holds,
-    // and its prologue is checked byte for byte before anything is written.
-    unsafe {
-        start.hooks.inline(&cameras::SET_VECTORS_ORIGINAL, "CCamera::SetView(vec3)", cameras::export(renderer, vectors)?, vectors.2, cameras::set_vectors as engine::SetVectorsFn)?;
-        start.hooks.inline(&cameras::COMPUTE_FRUSTUM_ORIGINAL, "CCamera::ComputeFrustumMatrix", cameras::export(renderer, frustum)?, frustum.2, cameras::compute_frustum_detour())?;
-    }
+    start.hooks.site(&cameras::SET_VECTORS_ORIGINAL, renderer, &engine::SET_VIEW_VECTORS, cameras::set_vectors)?;
+    start.hooks.site(&cameras::COMPUTE_FRUSTUM_ORIGINAL, renderer, &engine::COMPUTE_FRUSTUM, cameras::compute_frustum_detour())?;
     if let Some(yaw) = turn_yaw(start.options) {
         camera_update::enable_turn(yaw);
     }
     Ok(())
 }
 
-/// The D3D12 present request: every frame's eye kept or its pair published, the HUD laid over it,
-/// the next eye chosen (`output::present12`).
-pub const PRESENT: Component<Beast> = Component { name: "present", install: install_present, ..Component::NONE };
+/// The D3D12 present request: the HUD laid over each frame, the present made inside the present
+/// loop (`output::present12`).
+pub const PRESENT_REQUEST: Component<Beast> = Component { name: "present request", install: install_present, ..Component::NONE };
+
+/// Monaka's present loop, entered from the present request; it starts with the eyes, once the eye
+/// size is asked for (`view::stereo`).
+pub const PRESENT: Component<Beast> = Component {
+    needs: &[&PRESENT_REQUEST],
+    switch: Some(Switch::new("stereo", true, "stereo is off: the probes only")),
+    arm: || {},
+    ..monaka_stereo::feature::present()
+};
+
+/// The loop's steps for The Beast: frames labelled by their camera as DLSS gets it, the camera
+/// updates taking the eye choices in turn, a menu flat, publishing held for the eye size, frame
+/// generation's own pairs (`view::stereo`).
+impl Presents for Beast {
+    const LOOP: Loop<Self> = Loop {
+        entry: Entry::Game,
+        queue: Some(|_| present12::game_queue()),
+        report: Some(stereo::report),
+        before: Some(stereo::before_present),
+        after: Some(stereo::after_present),
+        adjust_pose: Some(stereo::latency_test),
+        menu: Some(eng_chr::gui::menu_open),
+        in_turn: true,
+        pose_each_frame: Some(framegen::enabled),
+        ..Loop::new(|_| Graphics::D3D12, ("eye cameras", &stereo::EYE_WRITES))
+    };
+}
 
 fn install_present(start: &mut Start<'_, Beast>) -> Result<(), Lack> {
-    let Some(r12) = &start.build.renderer_12 else { return Err(Lack::Missing("the game is not on D3D12".to_owned())) };
+    let r12 = start.build.renderer_12.as_ref().or_missing("the game is not on D3D12")?;
     present12::set_renderer(r12.base());
-    let (rva, prologue) = engine::PRESENT_REQUEST_12;
-    // SAFETY: the present request (prologue checked byte for byte) takes the request object.
-    unsafe { start.hooks.inline(&present12::PRESENT_REQUEST, "present request", r12.at(rva), prologue, present12::present_request as engine::PresentRequest12Fn)? };
+    start.hooks.site(&present12::PRESENT_REQUEST, r12, &engine::PRESENT_REQUEST_12, present12::present_request)?;
     Ok(())
 }
 
@@ -219,7 +238,7 @@ pub const EYE_SIZE: Component<Beast> = Component {
         EYE_SIZE_OF_YOUR_OWN,
     ],
     needs: &[&PRESENT],
-    on: |run| On::when(stereo_on(run.options) && run.options.size("eye_size").is_some(), "the game renders at its own size"),
+    on: |run| On::when(run.options.size("eye_size").is_some(), "the game renders at its own size"),
     install: install_eye_size,
     arm: video::switch,
     give_back: video::restore,
@@ -227,7 +246,7 @@ pub const EYE_SIZE: Component<Beast> = Component {
 };
 
 fn install_eye_size(start: &mut Start<'_, Beast>) -> Result<(), Lack> {
-    let eye = start.options.size("eye_size").ok_or_else(|| Lack::Missing("no eye size".to_owned()))?;
+    let eye = start.options.size("eye_size").or_missing("no eye size")?;
     // SAFETY: the fingerprinted game DLL imports GetGameTimeDelta with this type.
     unsafe { eng_chr::game::hook(start.hooks, gamedll(start)?)? };
     video::want(start.build.renderer, eye);
@@ -254,10 +273,8 @@ pub const EYES: Component<Beast> = Component {
     needs: &[&PRESENT],
     needs_channel: true,
     settings: |options, _| {
-        stereo_on(options);
         framegen_on(options);
     },
-    on: |run| On::when(stereo_on(run.options), "stereo is off: the probes only"),
     install: install_eyes,
     arm: stereo::arm,
     quiet: || stereo::quiet(1000),
@@ -282,9 +299,7 @@ fn install_eyes(start: &mut Start<'_, Beast>) -> Result<(), Lack> {
     }
     stereo::install(stereo::Settings {
         channel: channel.clone(),
-        schedule: shared.schedule,
         separation: shared.eye_separation,
-        synthetic: shared.synthetic_head().map(|pose| Box::new(move || pose) as monaka_channel::pose::Synthetic),
         eye_test_degrees: options.angle("eye_test", 30.0).unwrap_or(0.0),
         latency_test_degrees: options.angle("latency_test", 30.0).unwrap_or(0.0),
         headset_fov: shared.headset_fov,
@@ -316,15 +331,11 @@ fn install_look(start: &mut Start<'_, Beast>) -> Result<(), Lack> {
     aim::configure(settings, gamedll.base());
     log!("{settings:?}");
     match aim::pitch_actions_match(&start.build.engine) {
-        // SAFETY: the converter's exact prologue is checked by the hooker; the detour has its type.
-        Ok(()) => unsafe {
-            let (rva, prologue) = engine::INPUT_ACTION;
-            start.hooks.inline(&aim::INPUT_ACTION, "input action", gamedll.at(rva), prologue, aim::input_action as engine::InputActionFn)?;
-        },
+        Ok(()) => start.hooks.site(&aim::INPUT_ACTION, gamedll, &engine::INPUT_ACTION, aim::input_action)?,
         Err(why) => log!("vertical look not locked: {why}"),
     }
     // SAFETY: the game DLL's hash was checked.
-    unsafe { hands::hook(start.hooks, gamedll) }.map_err(|why| Lack::Missing(format!("arms callback: {}", why.reason)))?;
+    unsafe { hands::hook(start.hooks, gamedll) }.missing()?;
     if settings.hand_aim {
         monaka_arms::controllers::open(start.channel()?);
     }
@@ -335,7 +346,7 @@ fn install_look(start: &mut Start<'_, Beast>) -> Result<(), Lack> {
 /// weapon or a fist attacking (`swing_attack`, `swing_speed`).
 pub const ARMS: Component<Beast> = Component {
     needs: &[&LOOK],
-    install: |start| hands::configure(&start.build.engine, hands_settings(start, true)).map_err(|why| Lack::Missing(why.reason)),
+    install: |start| hands::configure(&start.build.engine, hands_settings(start, true)).missing(),
     ..eng_chr::feature::arms()
 };
 
@@ -361,7 +372,7 @@ pub const FLASHLIGHT: Component<Beast> = Component {
     name: "flashlight",
     needs: &[&EYES],
     on: |run| On::when(flashlight::Settings::from_options(run.options).any(), "the flashlight as in the game"),
-    install: |start| flashlight::install(start.hooks, &start.build.engine, flashlight::Settings::from_options(start.options)).map_err(|why| Lack::Missing(why.reason)),
+    install: |start| flashlight::install(start.hooks, &start.build.engine, flashlight::Settings::from_options(start.options)).missing(),
     release: flashlight::report,
     ..Component::NONE
 };
@@ -407,15 +418,13 @@ pub const STREAMLINE: Component<Beast> = Component {
 };
 
 fn install_streamline(start: &mut Start<'_, Beast>) -> Result<(), Lack> {
-    let Some(r12) = &start.build.renderer_12 else { return Err(Lack::Missing("the game is not on D3D12".to_owned())) };
+    let r12 = start.build.renderer_12.as_ref().or_missing("the game is not on D3D12")?;
     let options = start.options;
     let reset = options.switch("dlss_reset", false);
     let per_eye = stereo_on(options) && options.switch("dlss_per_eye", false);
     dlss::FIX_MOTION.store(options.switch("dlss_fix_motion", true), Ordering::Relaxed);
     if per_eye && options.switch("dlss_jitter_per_eye", true) {
-        let jitter = engine::FRAME_JITTER;
-        // SAFETY: the named export (checked) of type FrameJitterFn, prologue checked byte for byte.
-        unsafe { start.hooks.inline(&dlss::FRAME_JITTER, "CShaderCamera::GetFrameJitter", cameras::export(&start.build.renderer, jitter)?, jitter.2, dlss::frame_jitter as engine::FrameJitterFn)? };
+        start.hooks.site(&dlss::FRAME_JITTER, &start.build.renderer, &engine::FRAME_JITTER, dlss::frame_jitter)?;
         dlss::JITTER_PER_EYE.store(true, Ordering::Relaxed);
     }
     // SAFETY: rd3d12 is the game's D3D12 renderer DLL.
@@ -477,7 +486,7 @@ fn start_reporter() {
                 present12::report(seconds);
             }
             if on::<Beast>(EYES_AT) {
-                stereo::report(seconds);
+                stereo::report_rates(seconds);
             }
             if on::<Beast>(STREAMLINE_AT) {
                 streamline::report(seconds);

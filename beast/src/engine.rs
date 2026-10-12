@@ -4,7 +4,21 @@
 //! `CCamera` by name; the engine's `IBaseCamera` exports are thunks into it
 //! (`mov rcx, [rcx+0x38]; jmp [import]`). Every prologue is the shipped DLL's own.
 
-use monaka_hook::Instruction;
+use monaka_hook::{Instruction, Site};
+
+/// A hook site of this build at `rva` in its module.
+const fn site<F>(name: &'static str, rva: usize, prologue: &'static [Instruction]) -> Site<F> {
+    // SAFETY: every site this file declares is the start of a function of the type it is declared
+    // with, in the build its module's fingerprint names, its prologue that function's first
+    // instructions; the bytes are checked again before a hook goes in.
+    unsafe { Site::new(name, rva, prologue) }
+}
+
+/// A hook site of this build found by the name its module exports it by.
+const fn exported<F>(name: &'static str, export: &'static str, prologue: &'static [Instruction]) -> Site<F> {
+    // SAFETY: as [`site`]'s.
+    unsafe { Site::exported(name, export, prologue) }
+}
 
 pub const RENDERER: &str = "renderer_x64_rwdi.dll";
 pub const RENDERER_SHA256: &str = "139ED6DD8B5BFC6A4E1D32722880F7A6557AFCA14083F0331C2A49507EC2059A";
@@ -18,37 +32,36 @@ pub const GAMEDLL_SHA256: &str = "DDB68C8F87BA2AFD0E561B2D1ADB9235467C29069FB1CD
 pub const PLAYER_CAMERA_UPDATE: usize = 0x1510617;
 pub const PLAYER_CAMERA_CALL: (usize, &[u8]) = (0x1510611, &[0xff, 0x90, 0xe8, 0x05, 0x00, 0x00]);
 
-/// A hook target: its export name, RVA (checked against the export) and first instructions.
-pub type Target = (&'static str, usize, &'static [Instruction]);
-
-/// `CCamera::SetView(const mtx34& cameraToWorld, bool)`, DL2's camera component setter.
+/// `CCamera::SetView(const mtx34& cameraToWorld, bool)`, DL2's camera component setter (renderer
+/// RVA 0x7620).
 pub type SetMatrixFn = unsafe extern "system" fn(camera: usize, matrix: usize, flag: usize);
-pub const SET_VIEW_MATRIX: Target = (
+pub const SET_VIEW_MATRIX: Site<SetMatrixFn> = exported(
+    "CCamera::SetView(mtx34)",
     "?SetView@CCamera@@UEAAXAEBVmtx34@@_N@Z",
-    0x7620,
     &[Instruction::plain(&[0x48, 0x81, 0xec, 0x88, 0x00, 0x00, 0x00])], // sub rsp, 0x88
 );
 /// `CCamera::SetView(const vec3& forward, const vec3& up, const vec3& position)`, behind the
-/// engine's `IBaseCamera::FromForwardUpPos`.
+/// engine's `IBaseCamera::FromForwardUpPos` (renderer RVA 0x7210).
 pub type SetVectorsFn = unsafe extern "system" fn(camera: usize, forward: usize, up: usize, position: usize);
-pub const SET_VIEW_VECTORS: Target = (
+pub const SET_VIEW_VECTORS: Site<SetVectorsFn> = exported(
+    "CCamera::SetView(vec3)",
     "?SetView@CCamera@@QEAAXAEBVvec3@@00@Z",
-    0x7210,
     &[Instruction::plain(&[0x48, 0x8b, 0xc4]), Instruction::plain(&[0x48, 0x89, 0x58, 0x08])], // mov rax, rsp; mov [rax+8], rbx
 );
 /// `CShaderCamera::GetFrameJitter(frame)`, static, returning the sub-pixel jitter through a hidden
-/// pointer: every jitter use goes through it (the projection's `TaaJitter` and the DLSS packet).
+/// pointer: every jitter use goes through it (the projection's `TaaJitter` and the DLSS packet;
+/// renderer RVA 0x61a0).
 pub type FrameJitterFn = unsafe extern "system" fn(out: *mut [f32; 2], frame: u64) -> *mut [f32; 2];
-pub const FRAME_JITTER: Target = (
+pub const FRAME_JITTER: Site<FrameJitterFn> = exported(
+    "CShaderCamera::GetFrameJitter",
     "?GetFrameJitter@CShaderCamera@@SA?BVvec2@@_K@Z",
-    0x61a0,
     &[Instruction::plain(&[0x48, 0x89, 0x5c, 0x24, 0x08])], // mov [rsp+8], rbx
 );
-/// `CCamera::ComputeFrustumMatrix(bool)`, DL2's projection rebuild.
+/// `CCamera::ComputeFrustumMatrix(bool)`, DL2's projection rebuild (renderer RVA 0x51d0).
 pub type ComputeFrustumFn = unsafe extern "system" fn(camera: usize, flag: usize);
-pub const COMPUTE_FRUSTUM: Target = (
+pub const COMPUTE_FRUSTUM: Site<ComputeFrustumFn> = exported(
+    "CCamera::ComputeFrustumMatrix",
     "?ComputeFrustumMatrix@CCamera@@IEAAX_N@Z",
-    0x51d0,
     &[Instruction::plain(&[0x4c, 0x8b, 0xdc]), Instruction::plain(&[0x49, 0x89, 0x4b, 0x08])], // mov r11, rsp; mov [r11+8], rcx
 );
 
@@ -58,7 +71,8 @@ pub const RENDERER_12_SHA256: &str = "68BCDE0658BA0E93F5CA448C40AB10C1165A3B748C
 /// The present request (DL2's `PRESENT_REQUEST_12`; the function that reports
 /// `"hr = m_SwapChain4->Present1(interval, flags, &params)"`).
 pub use eng_chr::rd3d12::PresentRequestFn as PresentRequest12Fn;
-pub const PRESENT_REQUEST_12: (usize, &[Instruction]) = (
+pub const PRESENT_REQUEST_12: Site<PresentRequest12Fn> = site(
+    "present request",
     0x76450,
     &[Instruction::plain(&[0x40, 0x53]), Instruction::plain(&[0x48, 0x81, 0xec, 0x70, 0x08, 0x00, 0x00])], // push rbx; sub rsp, 0x870
 );
@@ -138,7 +152,7 @@ pub const TARGET_PITCH: usize = 0xbbc;
 /// The game's input-action converter `(binding, receivers, value, source, repeat)`, DL2's: action
 /// id at binding+0, flags at +0x10 (0x10: inverted, neutral 1).
 pub type InputActionFn = unsafe extern "system" fn(binding: usize, receivers: usize, value: f32, source: bool, repeat: bool);
-pub const INPUT_ACTION: (usize, &[Instruction]) = (0x1fae0b0, &[Instruction::plain(&[0x48, 0x89, 0x5c, 0x24, 0x10])]);
+pub const INPUT_ACTION: Site<InputActionFn> = site("input action", 0x1fae0b0, &[Instruction::plain(&[0x48, 0x89, 0x5c, 0x24, 0x10])]);
 /// The vertical look actions, checked in the engine's action table: (RVA of `mov edx, id`, name
 /// RVA, id, name). The ids moved from DL2's (0x5e, 0x5f, 0x89, 0x8a).
 pub const PITCH_ACTIONS: [(usize, usize, u32, &str); 4] = [

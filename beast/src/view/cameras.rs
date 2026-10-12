@@ -5,22 +5,12 @@
 //!
 //! Its probe (`probe`, which also hooks `SetView(mtx34)`) is in `research::cameras`.
 
-use crate::engine::{self, ComputeFrustumFn, SetVectorsFn};
-use monaka_hook::module::Module;
+use crate::engine::{ComputeFrustumFn, SetVectorsFn};
 use monaka_hook::{InFlight, Original, mem, probe};
-use monaka_producer::Rejection;
 
 pub static SET_VECTORS_ORIGINAL: Original<SetVectorsFn> = Original::new();
 pub static COMPUTE_FRUSTUM_ORIGINAL: Original<ComputeFrustumFn> = Original::new();
 
-/// The address of `target`'s export in `renderer`, checked against the RVA it was inspected at.
-pub(crate) fn export(renderer: &Module, (export, rva, _): engine::Target) -> Result<usize, Rejection> {
-    let address = renderer.at(rva);
-    match renderer.export(export) {
-        Some(found) if found == address => Ok(address),
-        found => Err(Rejection::revision(format!("{export} is at {found:?}, not {address:#x}"))),
-    }
-}
 
 /// Four arguments, so no shim: the caller comes from a stack walk. The player camera update's
 /// call may pass on an eye camera (`stereo`) or turned vectors (`camera_update`).

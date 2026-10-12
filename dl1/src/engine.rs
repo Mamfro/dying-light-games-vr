@@ -2,7 +2,21 @@
 
 use monaka_core::camera::{Mat34, Mat44};
 use monaka_core::convention::{CameraConvention, ProjectionConvention};
-use monaka_hook::{Instruction, mem};
+use monaka_hook::{Instruction, Site, mem};
+
+/// A hook site of this build at `rva` in its module.
+const fn site<F>(name: &'static str, rva: usize, prologue: &'static [Instruction]) -> Site<F> {
+    // SAFETY: every site this file declares is the start of a function of the type it is declared
+    // with, in the build its module's fingerprint names, its prologue that function's first
+    // instructions; the bytes are checked again before a hook goes in.
+    unsafe { Site::new(name, rva, prologue) }
+}
+
+/// A hook site of this build found by the name its module exports it by.
+const fn exported<F>(name: &'static str, export: &'static str, prologue: &'static [Instruction]) -> Site<F> {
+    // SAFETY: as [`site`]'s.
+    unsafe { Site::exported(name, export, prologue) }
+}
 
 /// How this engine stores cameras and projections: already the shared code's canonical form,
 /// so these convert nothing, but every read and write goes through them as in any engine.
@@ -19,22 +33,27 @@ pub const SWAPCHAIN_GLOBAL: usize = 0x7BC50;
 
 /// The view setup stage `(level, view)`: it reads the view's cached render camera, so the eye
 /// camera is written there just before it runs.
-pub const VIEW_SETUP: usize = 0x2B4EF0;
-pub const VIEW_SETUP_PROLOGUE: [Instruction; 1] = [Instruction::plain(&[0x48, 0x89, 0x5c, 0x24, 0x08])]; // mov [rsp+8], rbx
+pub const VIEW_SETUP: Site<ViewStageFn> = site("view setup", 0x2B4EF0, &[Instruction::plain(&[0x48, 0x89, 0x5c, 0x24, 0x08])]); // mov [rsp+8], rbx
 
 pub const SET_INVERSE_CAMERA: &str = "?SetInvCameraMatrix@IBaseCamera@@QEAAXAEBVmtx34@@@Z";
 /// The game calls `SetFOV` on the player camera every update.
-pub const SET_FOV: &str = "?SetFOV@IBaseCamera@@QEAAXM@Z";
-pub const SET_FOV_PROLOGUE: [Instruction; 2] = [
-    Instruction::plain(&[0x48, 0x8b, 0x49, 0x08]),                                    // mov rcx, [rcx+8]
-    Instruction::rip_relative(&[0xf3, 0x0f, 0x59, 0x0d, 0x60, 0xc7, 0x79, 0x00], 4), // mulss xmm1, [rip+...]
-];
+pub const SET_FOV: Site<SetFovFn> = exported(
+    "SetFOV",
+    "?SetFOV@IBaseCamera@@QEAAXM@Z",
+    &[
+        Instruction::plain(&[0x48, 0x8b, 0x49, 0x08]),                                    // mov rcx, [rcx+8]
+        Instruction::rip_relative(&[0xf3, 0x0f, 0x59, 0x0d, 0x60, 0xc7, 0x79, 0x00], 4), // mulss xmm1, [rip+...]
+    ],
+);
 /// The game sets the player camera from a direction every update (the head-aim probe's hook).
-pub const FROM_FORWARD: &str = "?FromForwardUpPos@IBaseCamera@@UEAAXAEBVvec3@@00@Z";
-pub const FROM_FORWARD_PROLOGUE: [Instruction; 2] = [
-    Instruction::plain(&[0x48, 0x83, 0xec, 0x28]), // sub rsp, 0x28
-    Instruction::plain(&[0x4c, 0x8b, 0x59, 0x08]), // mov r11, [rcx+8]
-];
+pub const FROM_FORWARD: Site<FromForwardFn> = exported(
+    "FromForwardUpPos",
+    "?FromForwardUpPos@IBaseCamera@@UEAAXAEBVvec3@@00@Z",
+    &[
+        Instruction::plain(&[0x48, 0x83, 0xec, 0x28]), // sub rsp, 0x28
+        Instruction::plain(&[0x4c, 0x8b, 0x59, 0x08]), // mov r11, [rcx+8]
+    ],
+);
 /// Head aim: the game sets the player camera
 /// (`CameraFPPDI`) from `gamedll+0x343339`, once per update. The camera points at +0x50 into its
 /// `PlayerFppVis` (a subobject; RTTI gives the complete object), whose +0x50 is the character,
@@ -48,8 +67,7 @@ pub const GAMEDLL_SHA256: &str = "76F20D27C45C0B807D2F099022AD0ABC42CA90A8ADE7F7
 /// the binding holds the action id at +0 and flags at +0x10, flag 0x10 meaning the converter
 /// applies `1 - value` (so the neutral value is 1). The action table entries (name pointer, two
 /// lengths, id at +0x10) are checked by name before the ids are trusted.
-pub const INPUT_ACTION: usize = 0x11928d0;
-pub const INPUT_ACTION_PROLOGUE: [Instruction; 1] = [Instruction::plain(&[0x48, 0x89, 0x5c, 0x24, 0x18])]; // mov [rsp+0x18], rbx
+pub const INPUT_ACTION: Site<InputActionFn> = site("input actions", 0x11928d0, &[Instruction::plain(&[0x48, 0x89, 0x5c, 0x24, 0x18])]); // mov [rsp+0x18], rbx
 pub const LOOK_ACTIONS: [(usize, &str, u32); 4] = [
     (0x1cde7e8, "_ACTION_LOOK_UP", 0x00),
     (0x1cde800, "_ACTION_LOOK_DOWN", 0x01),
@@ -164,8 +182,7 @@ pub const GAME_LEVEL_COUNT: usize = 0xE8;
 /// few element (bone) world matrices against that camera: the root scaled toward the camera, and
 /// for some weapon kinds two elements given a field-of-view correction. The arms model comes from
 /// the `FakeModelObject` base at +0x40 (its virtual +0x10, as the game calls it there).
-pub const FPP_CAMERA_TARGET: usize = 0xc24160;
-pub const FPP_CAMERA_TARGET_PROLOGUE: [Instruction; 1] = [Instruction::plain(&[0x48, 0x89, 0x5c, 0x24, 0x18])]; // mov [rsp+0x18], rbx
+pub const FPP_CAMERA_TARGET: Site<CameraTargetFn> = site("arms camera target", 0xc24160, &[Instruction::plain(&[0x48, 0x89, 0x5c, 0x24, 0x18])]); // mov [rsp+0x18], rbx
 pub const FPP_VIS_CLASS: &str = ".?AVPlayerFppVis@@";
 pub const FPP_VIS_MODEL_HOLDER: usize = 0x40;
 pub const MODEL_HOLDER_GET_MODEL: usize = 0x10;

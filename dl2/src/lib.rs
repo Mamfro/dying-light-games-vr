@@ -51,7 +51,8 @@ use monaka_core::manifest::{
 use monaka_core::options::Options;
 use monaka_hook::InFlight;
 use monaka_hook::module::Module;
-use monaka_producer::game::{Adapter, Component, Game, Lack, On, Start};
+use eng_chr::feature::gamedll;
+use monaka_producer::game::{Adapter, Component, Game, Lack, Missing, On, Start};
 use monaka_producer::{Rejection, Session, log, require_build};
 use output::{framegen, render11, render12, video};
 use player::{aim, hands};
@@ -193,11 +194,6 @@ fn engine_function<F: Copy>(engine: &Module, (rva, bytes): (usize, &[u8]), name:
     Ok(unsafe { std::mem::transmute_copy(&address) })
 }
 
-/// The game DLL, which every component on the character needs.
-fn gamedll<'a>(start: &Start<'a, Dl2>) -> Result<&'a Module, Lack> {
-    start.build.gamedll.as_ref().ok_or_else(|| Lack::Missing("the game DLL is not the inspected build".to_owned()))
-}
-
 // ---- Stereo ----
 
 const MODE: Opt = opt("mode", "Rendering", "Smooth renders each eye and adds in-between frames, Sharp renders each eye, Fast draws once for both eyes (gaps beside near things).", Kind::Choice {
@@ -288,11 +284,7 @@ fn install_look(start: &mut Start<'_, Dl2>) -> Result<(), Lack> {
     let engine_module = &start.build.engine;
     let settings = AimSettings::from_options(start.options, start.shared.aim, true);
     aim::AIM.configure(settings, gamedll.base());
-    let Some(target) = engine_module.export(engine::FROM_FORWARD_EXPORT).filter(|&t| t == engine_module.at(engine::FROM_FORWARD_UP_POS.0)) else {
-        return Err(Lack::Missing("the player camera setter is not where it was inspected".to_owned()));
-    };
-    // SAFETY: the export, checked against its exact prologue; the detour has its type.
-    unsafe { start.hooks.inline(&aim::FROM_FORWARD, "FromForwardUpPos", target, engine::FROM_FORWARD_UP_POS.1, aim::from_forward as engine::FromForwardFn)? };
+    start.hooks.site(&aim::FROM_FORWARD, engine_module, &engine::FROM_FORWARD_UP_POS, aim::from_forward)?;
     if settings.hand_aim {
         monaka_arms::controllers::open(start.channel()?);
     }
@@ -317,9 +309,8 @@ pub const PITCH: Component<Dl2> = Component {
 
 fn install_pitch(start: &mut Start<'_, Dl2>) -> Result<(), Lack> {
     let gamedll = gamedll(start)?;
-    aim::pitch_actions_match(&start.build.engine).map_err(Lack::Missing)?;
-    // SAFETY: the converter's exact prologue is checked by the hooker; the detour has its type.
-    unsafe { start.hooks.inline(&aim::INPUT_ACTION, "input action", gamedll.at(engine::INPUT_ACTION.0), engine::INPUT_ACTION.1, aim::input_action as engine::InputActionFn)? };
+    aim::pitch_actions_match(&start.build.engine).missing()?;
+    start.hooks.site(&aim::INPUT_ACTION, gamedll, &engine::INPUT_ACTION, aim::input_action)?;
     Ok(())
 }
 
@@ -333,7 +324,7 @@ fn install_hands(start: &mut Start<'_, Dl2>, rig: bool) -> Result<(), Lack> {
     let gamedll = gamedll(start)?;
     let options = eng_chr::rig::Options::read(start.options, start.shared, rig, research::options().hands);
     // SAFETY: the game DLL's hash was checked.
-    unsafe { hands::install(start.hooks, &start.build.engine, gamedll, options) }.map_err(|why| Lack::Missing(why.reason))
+    unsafe { hands::install(start.hooks, &start.build.engine, gamedll, options) }.missing()
 }
 
 /// A free hand's fingers on the tracked fingers (`eng_chr::fingers`, at the arms' pose).
@@ -371,7 +362,7 @@ pub const MARKERS: Component<Dl2> = Component {
     on: |run| On::when(run.shared.hud.markers, "markers stay in the flat HUD"),
     install: |start| {
         // SAFETY: the game DLL's hash was checked.
-        unsafe { markers::install(start.hooks, gamedll(start)?) }.map_err(|why| Lack::Missing(why.reason))
+        unsafe { markers::install(start.hooks, gamedll(start)?) }.missing()
     },
     arm: || markers::enable(true),
     quiet: || markers::enable(false),
