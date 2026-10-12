@@ -28,8 +28,7 @@ use eng_chr::feature::{Chrome, Facts as ChromeFacts};
 use monaka_arms::aim::AimSettings;
 use monaka_core::feature::Feature;
 use monaka_core::manifest::{
-    AIM_HAND, AIM_LOOK, AIM_MOTION, AIM_MOUSE, AIM_POINT, CONTROLLER_PAD, CONTROLLER_PROXY, EYE_SEPARATION, Kind, LATENCY, Manifest, Opt, Shown, aim,
-    aims, choice, dpad_hold, line, opt, render_size,
+    CONTROLLER_PAD, CONTROLLER_PROXY, EYE_SEPARATION, Kind, LATENCY, Manifest, Opt, Shown, choice, dpad_hold, line, opt, render_size,
 };
 use monaka_core::options::Options;
 use monaka_core::sync::Locked;
@@ -301,19 +300,14 @@ fn install_eyes(start: &mut Start<'_, Beast>) -> Result<(), Lack> {
 /// input action converter). With pointing aim the controllers come in. Handed back at the next
 /// camera update.
 pub const LOOK: Component<Beast> = Component {
-    name: "look",
-    features: &[Feature::Look],
-    options: &[aim(&[AIM_MOTION, AIM_LOOK, AIM_POINT, AIM_MOUSE], aims::HAND_RIG), AIM_HAND],
     needs: &[&EYES],
-    needs_channel: true,
-    on: |run| On::when(run.shared.aim.head, "aim is mouse and stick only"),
     install: install_look,
     give_back: || aim::release(500),
     release: || {
         hands::report();
         monaka_arms::controllers::close();
     },
-    ..Component::NONE
+    ..eng_chr::feature::look()
 };
 
 fn install_look(start: &mut Start<'_, Beast>) -> Result<(), Lack> {
@@ -340,22 +334,13 @@ fn install_look(start: &mut Start<'_, Beast>) -> Result<(), Lack> {
 /// The arms on the controllers at the arms visual's callback (`eng_chr::rig`), a swing of a held
 /// weapon or a fist attacking (`swing_attack`, `swing_speed`).
 pub const ARMS: Component<Beast> = Component {
-    name: "arms",
-    features: &[Feature::HandRig],
     needs: &[&LOOK],
-    on: |run| On::when(run.shared.aim.rig, "aim is not motion controls"),
     install: |start| hands::configure(&start.build.engine, hands_settings(start, true)).map_err(|why| Lack::Missing(why.reason)),
-    ..Component::NONE
+    ..eng_chr::feature::arms()
 };
 
 fn hands_settings(start: &Start<'_, Beast>, rig: bool) -> hands::Settings {
-    let shared = start.shared;
-    hands::Settings {
-        rig,
-        probe: research::options().hands,
-        melee: monaka_arms::melee::Settings::from_options(start.options, shared.aim.side),
-        fingers: rig && shared.fingers.tracking,
-    }
+    hands::Settings::read(start.options, start.shared, rig, research::options().hands)
 }
 
 /// A free hand's fingers on the tracked fingers (`eng_chr::fingers`, at the arms' pose).

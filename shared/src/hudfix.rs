@@ -5,15 +5,11 @@
 //! the rectangles are copied out, fixed into a scratch texture and copied back, on the game queue
 //! before the eye is taken.
 
-use monaka_channel::d3d12::compute::{self, DescriptorHeap, Table, srv_desc, uav_desc};
-use monaka_channel::d3d12::{self, Recorder, barrier, subresource};
-use monaka_producer::log;
+use crate::framepass::{FramePass, Lazy};
+use monaka_channel::d3d12::{barrier, subresource};
 use std::ffi::c_void;
-use std::sync::Mutex;
 use windows::Win32::Graphics::Direct3D12::*;
-use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT;
 use windows::core::s;
-use monaka_core::sync::Locked;
 
 const SOURCE: &str = include_str!("hudfix12.hlsl");
 
@@ -29,56 +25,10 @@ struct Constants {
     pad: [u32; 2],
 }
 
-struct Fix {
-    device: ID3D12Device,
-    root: ID3D12RootSignature,
-    pipeline: ID3D12PipelineState,
-    heap: DescriptorHeap,
-    recorder: Recorder,
-    /// A copy of the frame's rectangles (read) and the fixed rectangles (written), the frame's size and format.
-    source: Option<ID3D12Resource>,
-    fixed: Option<ID3D12Resource>,
-    size: (u32, u32),
-    format: DXGI_FORMAT,
-    viewed: Option<(ID3D12Resource, ID3D12Resource, ID3D12Resource)>,
-}
+static FIX: Lazy<FramePass> = Lazy::new();
 
-static FIX: Mutex<Option<Fix>> = Mutex::new(None);
-static FAILED: Mutex<bool> = Mutex::new(false);
-
-impl Fix {
-    fn new(device: &ID3D12Device) -> Result<Self, String> {
-        let root = compute::root_signature(device, (size_of::<Constants>() / 4) as u32, &[Table { srvs: 2, uavs: 0 }, Table { srvs: 0, uavs: 1 }])?;
-        let pipeline = compute::shader_pipeline(device, &root, &monaka_core::hud::with_hlsl(SOURCE), "hudfix12.hlsl", s!("Fix"))?;
-        let heap = DescriptorHeap::new(device, 3)?;
-        let recorder = Recorder::new(device, 4).map_err(|e| format!("command lists: {e}"))?;
-        Ok(Self { device: device.clone(), root, pipeline, heap, recorder, source: None, fixed: None, size: (0, 0), format: DXGI_FORMAT(0), viewed: None })
-    }
-
-    fn ensure(&mut self, desc: &D3D12_RESOURCE_DESC) -> Result<(), String> {
-        let size = (desc.Width as u32, desc.Height);
-        if self.source.is_some() && self.size == size && self.format == desc.Format {
-            return Ok(());
-        }
-        let source = d3d12::texture(&self.device, size.0, size.1, desc.Format, D3D12_RESOURCE_FLAG_NONE).map_err(|e| format!("frame copy: {e}"))?;
-        let fixed = d3d12::texture(&self.device, size.0, size.1, desc.Format, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS).map_err(|e| format!("fixed copy: {e}"))?;
-        (self.source, self.fixed, self.size, self.format, self.viewed) = (Some(source), Some(fixed), size, desc.Format, None);
-        Ok(())
-    }
-
-    fn view(&mut self, ui: &ID3D12Resource) {
-        let (Some(source), Some(fixed)) = (self.source.clone(), self.fixed.clone()) else { return };
-        if self.viewed.as_ref().is_some_and(|(u, s, f)| u == ui && *s == source && *f == fixed) {
-            return;
-        }
-        // SAFETY: views of live textures into our own heap.
-        unsafe {
-            self.device.CreateShaderResourceView(ui, Some(&srv_desc(windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_R8G8B8A8_UNORM)), self.heap.cpu(0));
-            self.device.CreateShaderResourceView(&source, Some(&srv_desc(self.format)), self.heap.cpu(1));
-            self.device.CreateUnorderedAccessView(&fixed, None, Some(&uav_desc(self.format)), self.heap.cpu(2));
-        }
-        self.viewed = Some((ui.clone(), source, fixed));
-    }
+fn make(device: &ID3D12Device) -> Result<FramePass, String> {
+    FramePass::new(device, (size_of::<Constants>() / 4) as u32, SOURCE, "hudfix12.hlsl", s!("Fix"), false)
 }
 
 /// A rectangle (x, y, width, height) clamped to the frame and whole pixels.
@@ -93,21 +43,13 @@ fn clamp(rect: [f32; 4], size: (u32, u32)) -> Option<D3D12_BOX> {
 /// Takes the pieces `rects` (x, y, width, height in frame pixels) out of `frame` (in `state`,
 /// a back buffer) using the UI layer `ui` (in COMMON), on `queue`. Returns whether it was recorded.
 pub fn take_out(queue: &ID3D12CommandQueue, frame: &ID3D12Resource, state: D3D12_RESOURCE_STATES, ui: &ID3D12Resource, rects: &[[f32; 4]]) -> bool {
-    if rects.is_empty() || *FAILED.locked() {
+    if rects.is_empty() {
         return false;
     }
-    let mut slot = FIX.locked();
-    if slot.is_none() {
-        match d3d12::device_of(queue).map_err(|e| e.to_string()).and_then(|device| Fix::new(&device)) {
-            Ok(fix) => *slot = Some(fix),
-            Err(why) => {
-                log!("dynamic HUD: pieces stay in the eyes: {why}");
-                *FAILED.locked() = true;
-                return false;
-            }
-        }
-    }
-    let fix = slot.as_mut().expect("made above");
+    FIX.with(queue, make, "dynamic HUD: pieces stay in the eyes", |fix| take_out_with(fix, queue, frame, state, ui, rects)).unwrap_or(false)
+}
+
+fn take_out_with(fix: &mut FramePass, queue: &ID3D12CommandQueue, frame: &ID3D12Resource, state: D3D12_RESOURCE_STATES, ui: &ID3D12Resource, rects: &[[f32; 4]]) -> bool {
     // SAFETY: reads a resource descriptor.
     let desc = unsafe { frame.GetDesc() };
     if let Err(why) = fix.ensure(&desc) {
@@ -115,7 +57,7 @@ pub fn take_out(queue: &ID3D12CommandQueue, frame: &ID3D12Resource, state: D3D12
         return false;
     }
     fix.view(ui);
-    let (Some(source), Some(fixed)) = (fix.source.clone(), fix.fixed.clone()) else { return false };
+    let (Some(source), Some(fixed)) = (fix.source.clone(), fix.out.clone()) else { return false };
     let Ok(Some(list)) = fix.recorder.begin() else { return false };
     let boxes: Vec<D3D12_BOX> = rects.iter().filter_map(|r| clamp(*r, fix.size)).collect();
     if boxes.is_empty() {
@@ -134,11 +76,7 @@ pub fn take_out(queue: &ID3D12CommandQueue, frame: &ID3D12Resource, state: D3D12
         barrier(&list, &source, D3D12_RESOURCE_STATE_COPY_DEST, SRV);
         barrier(&list, ui, D3D12_RESOURCE_STATE_COMMON, SRV);
         barrier(&list, &fixed, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-        list.SetDescriptorHeaps(&[Some(fix.heap.heap().clone())]);
-        list.SetComputeRootSignature(&fix.root);
-        list.SetPipelineState(&fix.pipeline);
-        list.SetComputeRootDescriptorTable(1, fix.heap.gpu(0));
-        list.SetComputeRootDescriptorTable(2, fix.heap.gpu(2));
+        fix.bind(&list);
         for b in &boxes {
             let c = Constants { width: fix.size.0, height: fix.size.1, x: b.left, y: b.top, rect_width: b.right - b.left, rect_height: b.bottom - b.top, pad: [0; 2] };
             list.SetComputeRoot32BitConstants(0, 8, &c as *const Constants as *const c_void, 0);
@@ -165,8 +103,8 @@ pub fn take_out(queue: &ID3D12CommandQueue, frame: &ID3D12Resource, state: D3D12
 
 /// The end of a run: waits for the GPU and lets the textures go.
 pub fn close() {
-    if let Some(fix) = FIX.locked().take() {
-        fix.recorder.idle(2000);
+    if let Some(fix) = FIX.take() {
+        fix.close();
     }
 }
 
@@ -177,11 +115,10 @@ mod tests {
 
     #[test]
     fn the_shader_compiles_and_the_fix_initialises() {
-        compute::compile(&monaka_core::hud::with_hlsl(SOURCE), "hudfix12.hlsl", s!("Fix")).unwrap();
         let mut device: Option<ID3D12Device> = None;
         // SAFETY: creates a device on the default adapter.
         unsafe { D3D12CreateDevice(None::<&windows::core::IUnknown>, D3D_FEATURE_LEVEL_11_0, &mut device) }.unwrap();
-        Fix::new(&device.unwrap()).unwrap();
+        make(&device.unwrap()).unwrap();
         assert_eq!(clamp([10.4, 5.6, 20.0, 10.0], (100, 100)).map(|b| (b.left, b.top, b.right, b.bottom)), Some((10, 5, 31, 16)));
         assert!(clamp([-50.0, 0.0, 10.0, 10.0], (100, 100)).is_none());
     }

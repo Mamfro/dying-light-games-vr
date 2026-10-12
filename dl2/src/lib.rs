@@ -46,8 +46,7 @@ use monaka_arms::aim::AimSettings;
 use monaka_channel::pose::PoseChannel;
 use monaka_core::feature::Feature;
 use monaka_core::manifest::{
-    AIM_HAND, AIM_LOOK, AIM_MOTION, AIM_MOUSE, AIM_POINT, CONTROLLER_PAD, CONTROLLER_PROXY, HUD_SIZE, Kind, Manifest, Opt, Shown, aim, aims, line, opt,
-    render_size,
+    CONTROLLER_PAD, CONTROLLER_PROXY, HUD_SIZE, Kind, Manifest, Opt, Shown, line, opt, render_size,
 };
 use monaka_core::options::Options;
 use monaka_hook::InFlight;
@@ -282,18 +281,7 @@ fn start_publishing() {
 
 /// Head aim on the character (`player::aim`), steered at the player camera update
 /// (`FromForwardUpPos`); with pointing aim the controllers come in. Handed back at the next update.
-pub const LOOK: Component<Dl2> = Component {
-    name: "look",
-    features: &[Feature::Look],
-    options: &[aim(&[AIM_MOTION, AIM_LOOK, AIM_POINT, AIM_MOUSE], aims::HAND_RIG), AIM_HAND],
-    needs: &[&EYES],
-    needs_channel: true,
-    on: |run| On::when(run.shared.aim.head, "aim is mouse and stick only"),
-    install: install_look,
-    give_back: || aim::release(500),
-    release: monaka_arms::controllers::close,
-    ..Component::NONE
-};
+pub const LOOK: Component<Dl2> = Component { needs: &[&EYES], install: install_look, give_back: || aim::release(500), ..eng_chr::feature::look() };
 
 fn install_look(start: &mut Start<'_, Dl2>) -> Result<(), Lack> {
     let gamedll = gamedll(start)?;
@@ -339,25 +327,11 @@ fn install_pitch(start: &mut Start<'_, Dl2>) -> Result<(), Lack> {
 
 /// The arms on the controllers at the arms visual's camera-target callback (`player::hands`,
 /// `eng_chr::rig`), a swing of a held weapon or a fist attacking (`swing_attack`, `swing_speed`).
-pub const ARMS: Component<Dl2> = Component {
-    name: "arms",
-    features: &[Feature::HandRig],
-    needs: &[&LOOK],
-    on: |run| On::when(run.shared.aim.rig, "aim is not motion controls"),
-    install: |start| install_hands(start, true),
-    release: hands::report,
-    ..Component::NONE
-};
+pub const ARMS: Component<Dl2> = Component { needs: &[&LOOK], install: |start| install_hands(start, true), release: hands::report, ..eng_chr::feature::arms() };
 
 fn install_hands(start: &mut Start<'_, Dl2>, rig: bool) -> Result<(), Lack> {
     let gamedll = gamedll(start)?;
-    let shared = start.shared;
-    let options = eng_chr::rig::Options {
-        rig,
-        probe: research::options().hands,
-        melee: monaka_arms::melee::Settings::from_options(start.options, shared.aim.side),
-        fingers: rig && shared.fingers.tracking,
-    };
+    let options = eng_chr::rig::Options::read(start.options, start.shared, rig, research::options().hands);
     // SAFETY: the game DLL's hash was checked.
     unsafe { hands::install(start.hooks, &start.build.engine, gamedll, options) }.map_err(|why| Lack::Missing(why.reason))
 }

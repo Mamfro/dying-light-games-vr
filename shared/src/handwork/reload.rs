@@ -9,6 +9,7 @@
 //! gesture makes that same call; the reload then runs as the game's.
 
 use crate::hands;
+use monaka_core::math;
 use monaka_core::gesture::{TouchAway, TouchAwayRules};
 use monaka_core::protocol::{LEFT_HAND, RIGHT_HAND};
 use monaka_hook::module::Module;
@@ -75,7 +76,7 @@ pub fn install(hooks: &mut Hooks, gamedll: &Module, build: Build) -> Result<(), 
 fn gestured() -> bool {
     let (Some(left), Some(right)) = (hands::palm(LEFT_HAND, FRESH), hands::palm(RIGHT_HAND, FRESH)) else { return false };
     let (left, right) = (hands::position(&left), hands::position(&right));
-    let apart = hands::length([0, 1, 2].map(|k| left[k] - right[k]));
+    let apart = math::length([0, 1, 2].map(|k| left[k] - right[k]));
     GESTURE.lock().is_ok_and(|mut gesture| gesture.feed(hands::now(), apart, &TOUCH))
 }
 

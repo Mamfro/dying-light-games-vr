@@ -45,6 +45,15 @@ pub struct Options {
     pub fingers: bool,
 }
 
+impl Options {
+    /// The run's: the arms on the controllers (`rig`) or only probed (`probe`); swings attack as
+    /// `swing_attack` and `swing_speed` say, the weapon in the aiming hand; the fingers with finger
+    /// tracking.
+    pub fn read(options: &monaka_core::options::Options, shared: &monaka_core::options::Shared, rig: bool, probe: bool) -> Self {
+        Self { rig, probe, melee: melee::Settings::from_options(options, shared.aim.side), fingers: rig && shared.fingers.tracking }
+    }
+}
+
 pub struct Rig {
     facts: Facts,
     options: Mutex<Option<Options>>,

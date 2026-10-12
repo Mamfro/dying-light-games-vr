@@ -215,21 +215,15 @@ pub fn before_present(swap: &IDXGISwapChain3, queue: Option<ID3D12CommandQueue>)
         COUNTERS.no_queue.fetch_add(1, Relaxed);
         return Some(n);
     };
-    let scale = [GAME_SCALE[0].load(), GAME_SCALE[1].load()];
     let separation = SEPARATION.load();
-    let headset_fov = HEADSET_FOV.load(Acquire) && COUNTERS.frusta.load(Relaxed) > 0;
     // Each eye goes out with the field of view it was rendered with: its own centred, or the game's.
     let report = |used: &mut HeadPose| {
         used.ipd = used.ipd_or(separation);
-        if headset_fov {
-            for fov in &mut used.fov {
-                if let Some(frustum) = Frustum::from_fov(*fov) {
-                    *fov = frustum.symmetric().fov();
-                }
+        let pose = *used;
+        for (eye, fov) in used.fov.iter_mut().enumerate() {
+            if let Some(frustum) = eye_frustum(&pose, eye) {
+                *fov = frustum.fov();
             }
-        } else if scale.iter().all(|s| s.is_finite() && *s > 0.0) {
-            let (x, y) = (1.0 / scale[0], 1.0 / scale[1]);
-            used.fov = [Frustum { left: -x, right: x, up: y, down: -y }.fov(); 2];
         }
     };
     let label = LABEL.locked().take();
@@ -341,11 +335,9 @@ pub fn hud_over(size: (u32, u32)) -> Option<eng_chr::hudover::Params> {
     };
     let image = Rect::sized(size.0 as f32, size.1 as f32);
     let rect = Placement::new(frustum, eye, ipd, distance).rect(image, image.aspect(), scale).array();
-    Some(eng_chr::hudover::Params { rect, cross_radius: CROSS_RADIUS * size.1 as f32, ..Default::default() })
+    Some(eng_chr::hudover::Params { rect, cross_radius: eng_chr::hudover::CROSS_RADIUS * size.1 as f32, ..Default::default() })
 }
 
-/// The share of the frame's height around the HUD's centre drawn at the aim point (the crosshair).
-const CROSS_RADIUS: f32 = 0.03;
 /// The HUD's size (of the eye's vertical field) while a wheel is held open.
 const WHEEL_SCALE: f32 = 0.25;
 /// The game opens a wheel on a d-pad press held past a tap (a tap cycles the item instead).
@@ -379,11 +371,7 @@ fn eye_frustum(pose: &HeadPose, eye: usize) -> Option<Frustum> {
 
 /// The game camera's own frustum (from its projection's scales).
 fn game_frustum() -> Option<Frustum> {
-    let scale = [GAME_SCALE[0].load(), GAME_SCALE[1].load()];
-    scale.iter().all(|s| s.is_finite() && *s > 0.0).then(|| {
-        let (x, y) = (1.0 / scale[0], 1.0 / scale[1]);
-        Frustum { left: -x, right: x, up: y, down: -y }
-    })
+    Frustum::centred([1.0 / GAME_SCALE[0].load(), 1.0 / GAME_SCALE[1].load()])
 }
 
 /// The renderer reports the camera position it renders the coming frame with (DLSS's camera

@@ -13,6 +13,7 @@
 pub mod coskeleton;
 pub mod feature;
 pub mod fingers;
+pub mod framepass;
 pub mod fpp;
 pub mod game;
 pub mod grabs;

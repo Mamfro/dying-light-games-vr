@@ -26,6 +26,7 @@
 //! throw's animation brings the left hand to the right), and the aim stays the head's.
 
 use crate::hands;
+use monaka_core::math;
 use monaka_core::protocol::LEFT_HAND;
 use monaka_hook::module::Module;
 use monaka_hook::{Hooks, InFlight, Original, mem};
@@ -88,6 +89,57 @@ const FRESH: f32 = 0.1;
 const LONGEST_THROW: Duration = Duration::from_secs(6);
 const AFTER_THROW: Duration = Duration::from_millis(1500);
 
+/// When a player's throw controller left idle (while it is out of it) and when it last went back
+/// to it: whether a throw is under way, for any game's throw hooks.
+pub struct ThrowSpan {
+    started: Mutex<Option<Instant>>,
+    ended: Mutex<Option<Instant>>,
+}
+
+impl ThrowSpan {
+    pub const fn new() -> Self {
+        Self { started: Mutex::new(None), ended: Mutex::new(None) }
+    }
+
+    /// The controller is out of idle (`busy`), or back in it.
+    pub fn note(&self, busy: bool) {
+        let Ok(mut started) = self.started.lock() else { return };
+        if !busy
+            && started.is_some()
+            && let Ok(mut ended) = self.ended.lock()
+        {
+            *ended = Some(Instant::now());
+        }
+        *started = match (busy, *started) {
+            (false, _) => None,
+            (true, Some(at)) => Some(at),
+            (true, None) => Some(Instant::now()),
+        };
+    }
+
+    /// Under way (winding up to recovering, for at most [`LONGEST_THROW`]), or ended less than
+    /// [`AFTER_THROW`] ago.
+    pub fn now(&self) -> bool {
+        let fresh = |at: &Mutex<Option<Instant>>, within: Duration| at.lock().ok().and_then(|s| *s).is_some_and(|at| at.elapsed() < within);
+        fresh(&self.started, LONGEST_THROW) || fresh(&self.ended, AFTER_THROW)
+    }
+}
+
+impl Default for ThrowSpan {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// A throw's velocity from the throwing hand: as fast as its `fastest` lately, the way it
+/// travelled through that moment (its `stroke`: a short flick stops before the trigger is let go,
+/// and what comes after is not the throw), else the way of its fastest, else down.
+pub fn throw_velocity(fastest: [f32; 3], stroke: Option<[f32; 3]>) -> [f32; 3] {
+    let speed = math::length(fastest);
+    let way = stroke.unwrap_or(if speed > 0.0 { fastest.map(|c| c / speed) } else { DOWN });
+    way.map(|c| c * speed)
+}
+
 type UpdateFn = unsafe extern "C" fn(usize, f32);
 type VectorFn = unsafe extern "C" fn(usize, *mut [f32; 3]) -> *mut [f32; 3];
 type ReleaseFn = unsafe extern "C" fn(usize);
@@ -100,9 +152,7 @@ static START_ORIGINAL: Original<VectorFn> = Original::new();
 static BUILD: OnceLock<(Build, usize, usize)> = OnceLock::new();
 static THROWS: AtomicU64 = AtomicU64::new(0);
 static DROPS: AtomicU64 = AtomicU64::new(0);
-/// When the player's throw controller left idle (while it is out of it), and when it last went back.
-static STARTED: Mutex<Option<Instant>> = Mutex::new(None);
-static ENDED: Mutex<Option<Instant>> = Mutex::new(None);
+static SPAN: ThrowSpan = ThrowSpan::new();
 
 thread_local! {
     /// The throw being released by us now: the hand's start point and velocity (world).
@@ -130,24 +180,7 @@ pub(crate) fn players(controller: usize, player_vtable: usize) -> bool {
 /// Whether the player's throw is under way (winding up to recovering), or ended less than
 /// [`AFTER_THROW`] ago.
 pub fn throwing_now() -> bool {
-    let fresh = |at: &Mutex<Option<Instant>>, within: Duration| at.lock().ok().and_then(|s| *s).is_some_and(|at| at.elapsed() < within);
-    BUILD.get().is_some() && (fresh(&STARTED, LONGEST_THROW) || fresh(&ENDED, AFTER_THROW))
-}
-
-/// Notes whether the player's throw controller is out of idle.
-fn note_busy(busy: bool) {
-    let Ok(mut started) = STARTED.lock() else { return };
-    if !busy
-        && started.is_some()
-        && let Ok(mut ended) = ENDED.lock()
-    {
-        *ended = Some(Instant::now());
-    }
-    *started = match (busy, *started) {
-        (false, _) => None,
-        (true, Some(at)) => Some(at),
-        (true, None) => Some(Instant::now()),
-    };
+    BUILD.get().is_some() && SPAN.now()
 }
 
 /// The left hand's throw now: where it is and its velocity (world), as fast as its fastest lately,
@@ -155,9 +188,7 @@ fn note_busy(busy: bool) {
 fn throwing_hand() -> Option<([f32; 3], [f32; 3])> {
     let at = hands::position(&hands::palm(LEFT_HAND, FRESH)?);
     let fastest = hands::fastest(LEFT_HAND, RELEASE_WINDOW).unwrap_or([0.0; 3]);
-    let speed = hands::length(fastest);
-    let way = hands::stroke(LEFT_HAND, RELEASE_WINDOW, STROKE_BEFORE, STROKE_AFTER).unwrap_or(if speed > 0.0 { fastest.map(|c| c / speed) } else { DOWN });
-    Some((at, way.map(|c| c * speed)))
+    Some((at, throw_velocity(fastest, hands::stroke(LEFT_HAND, RELEASE_WINDOW, STROKE_BEFORE, STROKE_AFTER))))
 }
 
 /// The player's `ThrowParabolaEnabled` flag (its address) behind `controller`, the player's.
@@ -191,7 +222,7 @@ unsafe extern "C" fn update(controller: usize, dt: f32) {
         mem::write::<u8>(flag, was);
     }
     let state = mem::read::<i32>(controller + build.state).unwrap_or(IDLE);
-    note_busy(state != IDLE);
+    SPAN.note(state != IDLE);
     let released = mem::read::<u8>(controller + build.released).unwrap_or(1) != 0;
     if !THROWING.contains(&state) || released {
         return;
@@ -199,7 +230,7 @@ unsafe extern "C" fn update(controller: usize, dt: f32) {
     let Some((at, velocity)) = throwing_hand() else { return };
     if THROWS.load(Relaxed) + DROPS.load(Relaxed) < 40 {
         let game_hand = if mem::read::<u32>(controller + build.hand) == Some(1) { "left" } else { "right" };
-        log!("throw by hand: released from the left hand (the game's throwing hand: the {game_hand}), {:.1} m/s", hands::length(velocity));
+        log!("throw by hand: released from the left hand (the game's throwing hand: the {game_hand}), {:.1} m/s", math::length(velocity));
     }
     RELEASING.with(|r| r.set(Some((at, velocity))));
     // SAFETY: the game's own release on the controller whose update just ran, on the thread that
@@ -211,7 +242,7 @@ unsafe extern "C" fn update(controller: usize, dt: f32) {
 /// `hand` (m/s) as a throw at the item's own `full` speed (m/s): the hand's direction, the speed's
 /// share by how hard the hand moved; a hand at rest drops it. None for an item with no speed.
 pub(crate) fn thrown(hand: [f32; 3], full: f32) -> Option<[f32; 3]> {
-    let speed = hands::length(hand);
+    let speed = math::length(hand);
     if !(full.is_finite() && full > 1e-3 && speed.is_finite()) {
         return None;
     }
@@ -229,15 +260,15 @@ unsafe extern "C" fn velocity(controller: usize, out: *mut [f32; 3]) -> *mut [f3
     let Some((_, hand)) = RELEASING.with(Cell::get) else { return result };
     // SAFETY: the caller's out vector, just written by the original.
     let Some(game) = (unsafe { result.as_mut() }) else { return result };
-    let full = hands::length(*game);
+    let full = math::length(*game);
     let Some(throw) = thrown(hand, full) else { return result };
-    let still = hands::length(hand) < STILL;
+    let still = math::length(hand) < STILL;
     let n = if still { DROPS.fetch_add(1, Relaxed) } else { THROWS.fetch_add(1, Relaxed) };
     if n < 40 {
         if still {
             log!("throw by hand: the hand at rest: dropped");
         } else {
-            log!("throw by hand: the hand at {:.1} m/s, the item's {full:.1} m/s, thrown at {:.1} m/s along {:.2?}", hands::length(hand), hands::length(throw), throw.map(|c| c / hands::length(throw)));
+            log!("throw by hand: the hand at {:.1} m/s, the item's {full:.1} m/s, thrown at {:.1} m/s along {:.2?}", math::length(hand), math::length(throw), throw.map(|c| c / math::length(throw)));
         }
     }
     *game = throw;
@@ -251,7 +282,7 @@ unsafe extern "C" fn start(controller: usize, out: *mut [f32; 3]) -> *mut [f32; 
     let Some((at, hand)) = RELEASING.with(Cell::get) else { return result };
     // SAFETY: the caller's out vector, just written by the original.
     let Some(point) = (unsafe { result.as_mut() }) else { return result };
-    let speed = hands::length(hand);
+    let speed = math::length(hand);
     let ahead = if speed >= STILL { hand.map(|v| v / speed * AHEAD_OF_HAND) } else { [0.0; 3] };
     *point = [0, 1, 2].map(|k| at[k] + ahead[k]);
     result

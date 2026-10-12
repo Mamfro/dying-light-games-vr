@@ -20,11 +20,10 @@ use monaka_channel::d3d12::{self, Recorder, barrier};
 use monaka_channel::fence::FenceProducer;
 use monaka_producer::log;
 use std::ffi::c_void;
-use std::sync::Mutex;
 use windows::Win32::Graphics::Direct3D12::*;
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_R8G8B8A8_UNORM;
 use windows::core::s;
-use monaka_core::sync::Locked;
+use crate::framepass::Lazy;
 
 const SOURCE: &str = include_str!("panels12.hlsl");
 /// A piece's box grown by this share of its larger side on each side for its panel (small: the
@@ -67,8 +66,7 @@ struct Panels {
     published: u64,
 }
 
-static PANELS: Mutex<Option<Panels>> = Mutex::new(None);
-static FAILED: Mutex<bool> = Mutex::new(false);
+static PANELS: Lazy<Panels> = Lazy::new();
 
 impl Panels {
     fn new(device: &ID3D12Device) -> Result<Self, String> {
@@ -176,24 +174,15 @@ impl Panels {
 /// COMMON), published on `channel`'s panel channels. Returns the shown pieces' rectangles of the
 /// layer (x, y, width, height), for the warp to leave out of the eyes.
 pub fn publish(queue: &ID3D12CommandQueue, ui: &ID3D12Resource, channel: &ChannelName, tick: u64) -> Vec<[f32; 4]> {
-    if *FAILED.locked() {
-        return Vec::new();
-    }
-    let mut panels = PANELS.locked();
-    if panels.is_none() {
-        match d3d12::device_of(queue).map_err(|e| e.to_string()).and_then(|device| Panels::new(&device)) {
-            Ok(made) => {
-                log!("dynamic HUD: panels ready ({} pieces)", made.pieces.len());
-                *panels = Some(made);
-            }
-            Err(why) => {
-                log!("dynamic HUD off: {why}");
-                *FAILED.locked() = true;
-                return Vec::new();
-            }
-        }
-    }
-    let Some(panels) = panels.as_mut() else { return Vec::new() };
+    let make = |device: &ID3D12Device| {
+        let made = Panels::new(device)?;
+        log!("dynamic HUD: panels ready ({} pieces)", made.pieces.len());
+        Ok(made)
+    };
+    PANELS.with(queue, make, "dynamic HUD off", |panels| publish_with(panels, queue, ui, channel, tick)).unwrap_or_default()
+}
+
+fn publish_with(panels: &mut Panels, queue: &ID3D12CommandQueue, ui: &ID3D12Resource, channel: &ChannelName, tick: u64) -> Vec<[f32; 4]> {
     // SAFETY: reads a resource descriptor.
     let desc = unsafe { ui.GetDesc() };
     let ui_size = (desc.Width as u32, desc.Height);
@@ -253,8 +242,7 @@ pub fn publish(queue: &ID3D12CommandQueue, ui: &ID3D12Resource, channel: &Channe
 
 /// The end of a run: the channels go away with the producers, once the GPU is done with the panels.
 pub fn close() {
-    let mut panels = PANELS.locked();
-    if let Some(made) = panels.take() {
+    if let Some(made) = PANELS.take() {
         made.recorder.idle(2000);
         log!("dynamic HUD: {} panels published", made.published);
     }

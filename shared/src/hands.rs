@@ -84,11 +84,3 @@ pub fn stroke(side: usize, within: f32, before: f32, after: f32) -> Option<[f32;
     let hands = HANDS.lock().ok()?;
     hands.get(side)?.trail.stroke(f64::from(within), VELOCITY_SPAN, f64::from(before), f64::from(after))
 }
-
-pub fn length(v: [f32; 3]) -> f32 {
-    (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt()
-}
-
-pub fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}

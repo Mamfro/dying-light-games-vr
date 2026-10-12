@@ -16,6 +16,7 @@ use crate::model::Model;
 use monaka_arms::Skeleton;
 use monaka_arms::melee::Held;
 use monaka_core::camera::Mat34;
+use monaka_core::math::unit;
 use monaka_hook::mem;
 use monaka_hook::module::Module;
 use monaka_hook::probe::class_name;
@@ -103,12 +104,7 @@ impl Found {
 static FOUND: Mutex<Found> = Mutex::new(Found { header: 0, slot: 0 });
 /// The blade's hand end and tip at a look, and when.
 type Blade = ([f32; 3], [f32; 3], Instant);
-/// The blade at the previous look.
-static LAST_BLADE: Mutex<Option<Blade>> = Mutex::new(None);
-/// When the last look ran, and when it last found the blade about to reach something (ticks).
-static LOOKED: AtomicU64 = AtomicU64::new(0);
-static REACHED: AtomicU64 = AtomicU64::new(0);
-static LOOKS: AtomicU64 = AtomicU64::new(0);
+static LOOK: ReachLook = ReachLook::new();
 static DESCRIBED: AtomicU64 = AtomicU64::new(0);
 /// The skeleton whose hand holder is known, and that element.
 static HAND_OF: Mutex<Option<(usize, Option<i32>)>> = Mutex::new(None);
@@ -136,16 +132,104 @@ pub fn install(engine: &Module, gamedll: &Module, build: Build) -> Result<(), Re
     Ok(())
 }
 
-/// Whether the blade was about to reach something at the latest look (or the look is not running).
 fn reaches() -> bool {
-    let now = monaka_channel::tick();
-    now.saturating_sub(LOOKED.load(Relaxed)) > STALE_MS || now.saturating_sub(REACHED.load(Relaxed)) <= REACH_FRESH_MS
+    LOOK.reaches()
 }
 
-fn unit(v: [f32; 3]) -> Option<[f32; 3]> {
-    let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
-    (l.is_finite() && l > 1e-6).then(|| v.map(|c| c / l))
+/// A reach look's state between looks and its answer for the swings ([`ReachLook::reaches`]),
+/// for any game's look: the blade sampled where it is and where it will be, the boxes the game's
+/// own search finds tested against it.
+pub struct ReachLook {
+    /// The blade's hand end and tip at the previous look, and when.
+    last: Mutex<Option<Blade>>,
+    /// When the last look ran, and when it last found the blade about to reach something (ticks).
+    looked: AtomicU64,
+    reached: AtomicU64,
+    looks: AtomicU64,
 }
+
+/// One look at the blade: points along it now and where it will be, their centre and how far
+/// they spread from it.
+pub struct Sweep {
+    pub points: Vec<[f32; 3]>,
+    pub centre: [f32; 3],
+    pub spread: f32,
+}
+
+impl ReachLook {
+    pub const fn new() -> Self {
+        Self { last: Mutex::new(None), looked: AtomicU64::new(0), reached: AtomicU64::new(0), looks: AtomicU64::new(0) }
+    }
+
+    /// The blade from `palm` to `tip` now and [`LOOKAHEAD`] on, moving on as it moved since the
+    /// previous look; none when it is not finite.
+    pub fn sweep(&self, palm: [f32; 3], tip: [f32; 3]) -> Option<Sweep> {
+        if !palm.iter().chain(&tip).all(|v| v.is_finite()) {
+            return None;
+        }
+        let now = Instant::now();
+        let previous = self.last.lock().ok().and_then(|mut last| last.replace((palm, tip, now)));
+        let (palm_ahead, tip_ahead) = match previous {
+            Some((p0, t0, then)) if (now - then).as_secs_f32() > 0.0 && (now - then).as_secs_f32() < 0.1 => {
+                let scale = LOOKAHEAD / (now - then).as_secs_f32();
+                ([0, 1, 2].map(|k| palm[k] + (palm[k] - p0[k]) * scale), [0, 1, 2].map(|k| tip[k] + (tip[k] - t0[k]) * scale))
+            }
+            _ => (palm, tip),
+        };
+        let mut points = Vec::with_capacity(15);
+        for when in [0.0f32, 0.5, 1.0] {
+            let p = [0, 1, 2].map(|k| palm[k] + (palm_ahead[k] - palm[k]) * when);
+            let t = [0, 1, 2].map(|k| tip[k] + (tip_ahead[k] - tip[k]) * when);
+            for share in [0.0f32, 0.25, 0.5, 0.75, 1.0] {
+                points.push([0, 1, 2].map(|k| p[k] + (t[k] - p[k]) * share));
+            }
+        }
+        let centre = [0, 1, 2].map(|k| points.iter().map(|p| p[k]).sum::<f32>() / points.len() as f32);
+        let spread = points.iter().map(|p| monaka_core::math::distance(*p, centre)).fold(0.0f32, f32::max);
+        Some(Sweep { points, centre, spread })
+    }
+
+    /// A look runs now (the swings' check trusts it from here): its number.
+    pub fn counted(&self) -> u64 {
+        self.looked.store(monaka_channel::tick(), Relaxed);
+        self.looks.fetch_add(1, Relaxed)
+    }
+
+    /// The blade is about to reach `what` (logged at most every half second).
+    pub fn reached(&self, what: impl FnOnce() -> String) {
+        let before = self.reached.swap(monaka_channel::tick(), Relaxed);
+        if monaka_channel::tick().saturating_sub(before) > 500 && self.looks.load(Relaxed) < 100_000 {
+            log!("physical melee: the blade is about to reach {}", what());
+        }
+    }
+
+    /// Whether the blade was about to reach something at the latest look (or the look is not
+    /// running: every swing attacks).
+    pub fn reaches(&self) -> bool {
+        let now = monaka_channel::tick();
+        now.saturating_sub(self.looked.load(Relaxed)) > STALE_MS || now.saturating_sub(self.reached.load(Relaxed)) <= REACH_FRESH_MS
+    }
+
+    pub fn looks(&self) -> u64 {
+        self.looks.load(Relaxed)
+    }
+}
+
+impl Default for ReachLook {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Sweep {
+    /// Whether box `b` (least x, y, z, then most) is a body's (at least [`LEAST_HEIGHT`] tall) and
+    /// the blade comes within [`MARGIN`] of it.
+    pub fn touches(&self, b: &[f32; 6]) -> bool {
+        let inside = |p: &[f32; 3]| (0..3).all(|k| p[k] >= b[k] - MARGIN && p[k] <= b[k + 3] + MARGIN);
+        b.iter().all(|v| v.is_finite()) && b[4] - b[1] >= LEAST_HEIGHT && self.points.iter().any(inside)
+    }
+}
+
 
 /// A world direction in `m`'s terms (its axes made unit).
 fn into(m: &Mat34, v: [f32; 3]) -> Option<[f32; 3]> {
@@ -203,38 +287,15 @@ pub fn look(skeleton: &impl Skeleton, weapon: usize, held: Held) {
     let Some(along) = blade_in_model(weapon).and_then(|d| out_of(&holder, d)) else { return };
     let palm = [holder[3], holder[7], holder[11]];
     let tip = [0, 1, 2].map(|k| palm[k] + along[k] * length);
-    if !palm.iter().chain(&tip).all(|v| v.is_finite()) {
-        return;
-    }
-    let now = Instant::now();
-    let previous = LAST_BLADE.lock().ok().and_then(|mut last| last.replace((palm, tip, now)));
-    // Where it will be: moving on as it moved since the last look.
-    let (palm_ahead, tip_ahead) = match previous {
-        Some((p0, t0, then)) if (now - then).as_secs_f32() > 0.0 && (now - then).as_secs_f32() < 0.1 => {
-            let scale = LOOKAHEAD / (now - then).as_secs_f32();
-            ([0, 1, 2].map(|k| palm[k] + (palm[k] - p0[k]) * scale), [0, 1, 2].map(|k| tip[k] + (tip[k] - t0[k]) * scale))
-        }
-        _ => (palm, tip),
-    };
+    let Some(sweep) = LOOK.sweep(palm, tip) else { return };
     let Some(game) = mem::read::<usize>(lookup.game).filter(|&g| g != 0) else { return };
     // SAFETY: the engine's own getter on the live game object, on the game's thread.
     let level = unsafe { (lookup.active_level)(game) };
     if level == 0 {
         return;
     }
-    LOOKED.store(monaka_channel::tick(), Relaxed);
-    let looks = LOOKS.fetch_add(1, Relaxed);
-    // Points along the blade, now and ahead.
-    let mut points = Vec::with_capacity(15);
-    for when in [0.0f32, 0.5, 1.0] {
-        let p = [0, 1, 2].map(|k| palm[k] + (palm_ahead[k] - palm[k]) * when);
-        let t = [0, 1, 2].map(|k| tip[k] + (tip_ahead[k] - tip[k]) * when);
-        for share in [0.0f32, 0.25, 0.5, 0.75, 1.0] {
-            points.push([0, 1, 2].map(|k| p[k] + (t[k] - p[k]) * share));
-        }
-    }
-    let centre = [0, 1, 2].map(|k| points.iter().map(|p| p[k]).sum::<f32>() / points.len() as f32);
-    let spread = points.iter().map(|p| monaka_core::math::distance(*p, centre)).fold(0.0f32, f32::max);
+    let looks = LOOK.counted();
+    let Sweep { centre, spread, .. } = sweep;
     let class = mem::read::<usize>(lookup.target_class).unwrap_or(0);
     let Ok(mut found) = FOUND.lock() else { return };
     found.ready();
@@ -248,27 +309,17 @@ pub fn look(skeleton: &impl Skeleton, weapon: usize, held: Held) {
     if describe {
         log!("physical melee look {looks}: blade {palm:.2?} to {tip:.2?}, {} found near {centre:.2?} (class {class:#x})", objects.len());
     }
-    let mut hit = None;
     for object in objects {
         // SAFETY: the engine's getter on a live control object it just found.
         let b = mem::read::<[f32; 6]>(unsafe { (lookup.extents)(object) } as usize);
         if describe {
             log!("  {} at {object:#x}, box {b:.2?}", class_name(object).unwrap_or_else(|| "?".into()));
         }
-        let Some(b) = b.filter(|b| b.iter().all(|v| v.is_finite()) && b[4] - b[1] >= LEAST_HEIGHT) else { continue };
-        if left_out(object) {
-            continue;
-        }
-        let inside = |p: &[f32; 3]| (0..3).all(|k| p[k] >= b[k] - MARGIN && p[k] <= b[k + 3] + MARGIN);
-        if points.iter().any(inside) {
-            hit = Some((object, b));
+        if let Some(b) = b.filter(|b| sweep.touches(b))
+            && !left_out(object)
+        {
+            LOOK.reached(|| format!("{} ({object:#x}, box {b:.2?})", class_name(object).unwrap_or_else(|| "?".into())));
             break;
-        }
-    }
-    if let Some((object, b)) = hit {
-        let before = REACHED.swap(monaka_channel::tick(), Relaxed);
-        if monaka_channel::tick().saturating_sub(before) > 500 && looks < 100_000 {
-            log!("physical melee: the blade is about to reach {} ({object:#x}, box {b:.2?})", class_name(object).unwrap_or_else(|| "?".into()));
         }
     }
 }
@@ -289,7 +340,7 @@ fn left_out(object: usize) -> bool {
 }
 
 pub fn report() {
-    let looks = LOOKS.load(Relaxed);
+    let looks = LOOK.looks();
     if looks > 0 {
         log!("physical melee: {looks} looks for what the blade reaches");
     }

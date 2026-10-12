@@ -25,6 +25,7 @@
 //! comes a little after the swing that starts it: the fastest of the right hand's last
 //! [`SWING_WINDOW`] is the throw.
 
+use eng_chr::handwork::throwing::ThrowSpan;
 use monaka_core::math::length;
 use crate::player::{hand_world, hands};
 use monaka_core::camera::Mat34;
@@ -121,12 +122,8 @@ static MAKING: Mutex<Option<Vec<usize>>> = Mutex::new(None);
 static BY_HAND: AtomicU64 = AtomicU64::new(0);
 static TOOL_PLACED: AtomicU64 = AtomicU64::new(0);
 static RELEASES: AtomicU64 = AtomicU64::new(0);
-/// When the player's throw controller left its idle state, while it is out of it.
-static THROW_STARTED: Mutex<Option<std::time::Instant>> = Mutex::new(None);
-const LONGEST_THROW: std::time::Duration = std::time::Duration::from_secs(6);
-/// When the throw controller last went back to idle.
-static THROW_ENDED: Mutex<Option<std::time::Instant>> = Mutex::new(None);
-const AFTER_THROW: std::time::Duration = std::time::Duration::from_millis(1500);
+/// The player's throw under way.
+static SPAN: ThrowSpan = ThrowSpan::new();
 
 pub fn install(hooks: &mut Hooks, gamedll: &Module, engine_module: &Module) -> Result<(), Rejection> {
     let set_position = engine_module.export(SET_WORLD_POSITION).ok_or_else(|| Rejection::revision("the engine does not export IControlObject::SetWorldPosition"))?;
@@ -154,20 +151,7 @@ unsafe extern "C" fn set_state(controller: *mut c_void, state: u32) {
     if !hands::players(at) {
         return;
     }
-    let busy = mem::read::<u32>(at + STATE).is_some_and(|s| s != 0);
-    if let Ok(mut started) = THROW_STARTED.lock() {
-        if !busy
-            && started.is_some()
-            && let Ok(mut ended) = THROW_ENDED.lock()
-        {
-            *ended = Some(std::time::Instant::now());
-        }
-        *started = match (busy, *started) {
-            (false, _) => None,
-            (true, Some(at)) => Some(at),
-            (true, None) => Some(std::time::Instant::now()),
-        };
-    }
+    SPAN.note(mem::read::<u32>(at + STATE).is_some_and(|s| s != 0));
     if !THROWING.contains(&state) || mem::read::<u32>(at + STATE) != Some(state) {
         return;
     }
@@ -195,9 +179,8 @@ unsafe extern "C" fn set_state(controller: *mut c_void, state: u32) {
 /// the throw).
 fn throwing_hand() -> Option<([f32; 3], [f32; 3])> {
     let fastest = hand_world::controller_fastest(HAND, RELEASE_WINDOW)?;
-    let speed = length(fastest);
-    let direction = hand_world::controller_stroke(HAND, RELEASE_WINDOW, STROKE_BEFORE, STROKE_AFTER).unwrap_or_else(|| if speed > 0.0 { fastest.map(|c| c / speed) } else { DOWN });
-    hand_world::position(HAND).map(|position| (position, direction.map(|c| c * speed)))
+    let throw = eng_chr::handwork::throwing::throw_velocity(fastest, hand_world::controller_stroke(HAND, RELEASE_WINDOW, STROKE_BEFORE, STROKE_AFTER));
+    hand_world::position(HAND).map(|position| (position, throw))
 }
 
 /// The left hand's bones mirror the right's across their local x-z plane.
@@ -249,8 +232,7 @@ pub fn place_tool(vis: usize) {
 /// less than [`AFTER_THROW`] ago: the game then poses the next tool in the right hand, held out
 /// in front, which the left hand on its controller shows instead.
 pub fn throwing_now() -> bool {
-    let fresh = |at: &Mutex<Option<std::time::Instant>>, within| at.lock().ok().and_then(|s| *s).is_some_and(|at| at.elapsed() < within);
-    fresh(&THROW_STARTED, LONGEST_THROW) || fresh(&THROW_ENDED, AFTER_THROW)
+    SPAN.now()
 }
 
 /// The kind of the item the controller holds.

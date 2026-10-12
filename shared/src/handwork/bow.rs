@@ -27,8 +27,9 @@
 
 use super::aim;
 use crate::hands;
+use monaka_core::math;
 use crate::model::Model;
-use monaka_core::camera::Mat34;
+use monaka_core::camera::{Mat34, rigid_axes, unapply_3x3};
 use monaka_core::gesture::{Pull, PullRules};
 use monaka_core::protocol::{LEFT_HAND, RIGHT_HAND};
 use monaka_hook::module::Module;
@@ -147,37 +148,17 @@ pub fn install(hooks: &mut Hooks, gamedll: &Module, build: Build, aim_build: aim
 }
 
 fn unit(v: [f32; 3]) -> [f32; 3] {
-    let l = hands::length(v);
-    if l > 1e-9 { v.map(|c| c / l) } else { v }
-}
-
-/// `m`'s axes made a rotation (the game's matrices carry a scale), keeping x and the x-y plane.
-fn axes(m: &Mat34) -> [[f32; 3]; 3] {
-    let cross = |a: [f32; 3], b: [f32; 3]| [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
-    let x = unit([m[0], m[4], m[8]]);
-    let z = unit(cross(x, [m[1], m[5], m[9]]));
-    [x, cross(z, x), z]
+    monaka_core::math::unit(v).unwrap_or(v)
 }
 
 /// A world direction in `frame`'s terms.
 fn into(frame: &Mat34, v: [f32; 3]) -> [f32; 3] {
-    axes(frame).map(|axis| hands::dot(axis, v))
-}
-
-/// A world offset in `frame`'s own terms, through its whole 3x3 part (which may scale or mirror, as
-/// a model's bones can): `frame` applied to the result gives the offset back.
-fn in_terms_of(frame: &Mat34, v: [f32; 3]) -> Option<[f32; 3]> {
-    let cross = |a: [f32; 3], b: [f32; 3]| [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
-    let rows = [0, 1, 2].map(|r| [frame[r * 4], frame[r * 4 + 1], frame[r * 4 + 2]]);
-    // The inverse's columns are the rows' pairwise crosses over the determinant.
-    let columns = [cross(rows[1], rows[2]), cross(rows[2], rows[0]), cross(rows[0], rows[1])];
-    let det = hands::dot(rows[0], columns[0]);
-    (det.is_finite() && det.abs() > 1e-9).then(|| [0, 1, 2].map(|i| (columns[0][i] * v[0] + columns[1][i] * v[1] + columns[2][i] * v[2]) / det))
+    rigid_axes(frame).map(|axis| math::dot(axis, v))
 }
 
 /// A direction in `frame`'s terms back in the world.
 fn out_of(frame: &Mat34, v: [f32; 3]) -> [f32; 3] {
-    let [x, y, z] = axes(frame);
+    let [x, y, z] = rigid_axes(frame);
     [0, 1, 2].map(|k| x[k] * v[0] + y[k] * v[1] + z[k] * v[2])
 }
 
@@ -201,7 +182,7 @@ pub fn note_bow(bow: usize) {
     let local_way = into(&grip, way);
     // The line's point level with the root: the root's origin taken onto it.
     let offset = into(&grip, [0, 1, 2].map(|c| at[3 + 4 * c] - grip[3 + 4 * c]));
-    let along = hands::dot(offset, local_way);
+    let along = math::dot(offset, local_way);
     let point = [0, 1, 2].map(|c| offset[c] - local_way[c] * along);
     if let Ok(mut line) = LINE.lock() {
         *line = Some((point, local_way));
@@ -237,11 +218,11 @@ fn nock_axis(model: &Model, nock: i32) -> Option<(usize, f32)> {
     let at = model.world(nock)?;
     let bow = model.world(model.parent(nock))?;
     let forward = [0, 1, 2].map(|k| bow[3 + 4 * k] - at[3 + 4 * k]);
-    if hands::length(forward) < NOCK_DEPTH {
+    if math::length(forward) < NOCK_DEPTH {
         return None;
     }
     let forward = unit(forward);
-    let along = [0, 1, 2].map(|c| hands::dot(unit([at[c], at[4 + c], at[8 + c]]), forward));
+    let along = [0, 1, 2].map(|c| math::dot(unit([at[c], at[4 + c], at[8 + c]]), forward));
     let axis = (0..3).max_by(|&a, &b| along[a].abs().total_cmp(&along[b].abs()))?;
     (along[axis].abs() >= NOCK_ALONG).then(|| (axis, along[axis].signum()))
 }
@@ -275,7 +256,7 @@ pub fn place_string(bow: usize) {
     for (element, local) in [(string, rest.string), (Some(nock), rest.nock)] {
         let (Some(element), Some(mut local)) = (element, local) else { continue };
         let Some(parent) = model.world(model.parent(element)) else { continue };
-        let Some(back_in_parent) = in_terms_of(&parent, way.map(|c| c * back)) else { continue };
+        let Some(back_in_parent) = unapply_3x3(&parent, way.map(|c| c * back)) else { continue };
         for k in 0..3 {
             local[3 + 4 * k] -= back_in_parent[k];
         }
@@ -300,9 +281,9 @@ pub fn note_placed(holder: &Mat34) {
         let palm = hands::palm(LEFT_HAND, FRESH)?;
         let world = out_of(holder, way);
         let columns = [0, 1, 2].map(|c| [palm[c], palm[4 + c], palm[8 + c]]);
-        let local = columns.map(|column| hands::dot(column, world));
+        let local = columns.map(|column| math::dot(column, world));
         // Ahead of the palm (its -z) only, as the arrows.
-        (hands::length(local) > 0.5 && local[2] < 0.0).then_some(local)
+        (math::length(local) > 0.5 && local[2] < 0.0).then_some(local)
     });
     if let Some(local) = along {
         monaka_arms::controllers::aim_reticle(LEFT_HAND, Some(local));
@@ -333,14 +314,14 @@ fn bow_now() -> Option<([f32; 3], [f32; 3])> {
         let aim = unit(out_of(&holder, way));
         let offset = out_of(&holder, point);
         // A line pointing back from where the bow hand points is not the bow's.
-        if hands::length(aim) > 0.5 && hands::dot(aim, pointing) > 0.0 {
+        if math::length(aim) > 0.5 && math::dot(aim, pointing) > 0.0 {
             return Some(([0, 1, 2].map(|k| holder[3 + 4 * k] + offset[k]), aim));
         }
         if BACKWARD_LINES.fetch_add(1, Relaxed) == 0 {
             log!("bow by hand: the bow's line points back from the left controller ({aim:.2?} against {pointing:.2?}); the controller aims instead");
         }
     }
-    (hands::length(pointing) > 0.5).then(|| (hands::position(&palm), pointing))
+    (math::length(pointing) > 0.5).then(|| (hands::position(&palm), pointing))
 }
 
 /// The left holder where the rig last put it, if lately.
@@ -358,7 +339,7 @@ fn pulled() -> Option<f32> {
         return Some(Pull::back(rest.nock_at, way, at, &PULL));
     }
     let (bow, aim) = bow_now()?;
-    Some(hands::dot([0, 1, 2].map(|c| bow[c] - hand[c]), aim) - REST)
+    Some(math::dot([0, 1, 2].map(|c| bow[c] - hand[c]), aim) - REST)
 }
 
 /// The draw's share (0..1) for the string pulled `back` metres: none in front of the rest.
@@ -446,9 +427,9 @@ mod tests {
     fn an_offset_goes_into_a_mirrored_scaled_frame() {
         // A frame mirrored in z and scaled by 2: the world's +z is its -0.5 z.
         let frame: Mat34 = [2.0, 0.0, 0.0, 5.0, 0.0, 2.0, 0.0, 6.0, 0.0, 0.0, -2.0, 7.0];
-        let local = in_terms_of(&frame, [0.0, 0.0, 1.0]).unwrap();
+        let local = unapply_3x3(&frame, [0.0, 0.0, 1.0]).unwrap();
         assert!(local[0].abs() < 1e-6 && local[1].abs() < 1e-6 && (local[2] + 0.5).abs() < 1e-6, "{local:?}");
-        assert!(in_terms_of(&[0.0; 12], [1.0, 0.0, 0.0]).is_none(), "a flat frame has no terms");
+        assert!(unapply_3x3(&[0.0; 12], [1.0, 0.0, 0.0]).is_none(), "a flat frame has no terms");
     }
 
     #[test]

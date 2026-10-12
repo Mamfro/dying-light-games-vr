@@ -13,6 +13,7 @@
 
 use super::throwing::thrown;
 use crate::hands;
+use monaka_core::math;
 use monaka_core::protocol::RIGHT_HAND;
 use monaka_hook::module::Module;
 use monaka_hook::{Hooks, InFlight, Original, mem};
@@ -75,16 +76,16 @@ unsafe extern "C" fn launch(item: usize, toss: u8) {
     let Some(&(build, player_vtable)) = BUILD.get() else { return };
     // Only a launch that just happened: the velocity was zero and now is not.
     let Some(game) = mem::read::<[f32; 3]>(item + build.velocity) else { return };
-    if before != Some([0.0; 3]) || hands::length(game) < 1e-3 || !players_throw(item, &build, player_vtable) {
+    if before != Some([0.0; 3]) || math::length(game) < 1e-3 || !players_throw(item, &build, player_vtable) {
         return;
     }
     let Some(fastest) = hands::fastest(RIGHT_HAND, SWING_WITHIN) else { return };
-    let speed = hands::length(fastest);
+    let speed = math::length(fastest);
     let way = hands::stroke(RIGHT_HAND, SWING_WITHIN, STROKE_BEFORE, STROKE_AFTER).unwrap_or(if speed > 0.0 { fastest.map(|c| c / speed) } else { [0.0; 3] });
     let hand = way.map(|c| c * speed);
-    let Some(throw) = thrown(hand, hands::length(game)) else { return };
+    let Some(throw) = thrown(hand, math::length(game)) else { return };
     if mem::write(item + build.velocity, throw) && THROWS.fetch_add(1, Relaxed) < 40 {
-        log!("weapon thrown by hand: the swing at {:.1} m/s, the game's {:.1} m/s, thrown at {:.1} m/s", hands::length(hand), hands::length(game), hands::length(throw));
+        log!("weapon thrown by hand: the swing at {:.1} m/s, the game's {:.1} m/s, thrown at {:.1} m/s", math::length(hand), math::length(game), math::length(throw));
     }
 }
 

@@ -21,13 +21,13 @@
 
 use crate::{engine, player::hands};
 use monaka_arms::melee::{Held, Physical};
+use eng_chr::melee_reach::ReachLook;
 use monaka_hook::module::Module;
 use monaka_hook::{Hooks, InFlight, Original, mem};
 use monaka_producer::{Rejection, log};
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicU64, Ordering::*};
 use std::sync::{Mutex, OnceLock};
-use std::time::Instant;
 
 /// Sets up an attack: `(controller, attack type)`. Writes the attack's direction and its hit
 /// window, among much else.
@@ -51,9 +51,6 @@ const UPDATE: usize = 0xdb1d10;
 const TARGETS: usize = 0x1cb11d0;
 /// The object a found `IControlObject` belongs to: 0x18 before it.
 const CONTROL_OBJECT_IN_OBJECT: usize = 0x18;
-/// The least height of a box that counts (metres): a zombie's is 0.5 (lying) to 2.3; the
-/// invisible AI target markers the search also finds are 3 cm.
-const LEAST_HEIGHT: f32 = 0.4;
 const ACTIVE_LEVEL: &str = "?GetActiveLevel@IGame@@QEAAPEAVILevel@@XZ";
 const FIND_IN_RADIUS: &str = "?FindObjectsInRadius@ILevel@@QEAA_NPEAV?$vector@PEAVIControlObject@@@ttl@@AEBVvec3@@MPEBVCRTTI@@_NPEAH@Z";
 const EXTENTS: &str = "?GetExtentsInWorld@IControlObject@@QEBAAEBVextents@@XZ";
@@ -70,15 +67,6 @@ const DAMAGE_BLUNT: i32 = 18;
 /// swings (left and right alike). A hit cuts when the tip moved at least this share along it.
 const EDGE_LEAD: f32 = 0.5;
 
-/// How far ahead the blade's path is looked at (seconds): the press, the game's next update and the
-/// attack's start all come before the attack can hit.
-const LOOKAHEAD: f32 = 0.15;
-/// How near an object's box the blade counts as reaching it (metres).
-const MARGIN: f32 = 0.1;
-/// A reach seen within this is current (ms); the check answers yes to anything older than
-/// [`STALE_MS`] since the last look (the look not running: every swing attacks, as without it).
-const REACH_FRESH_MS: u64 = 60;
-const STALE_MS: u64 = 300;
 
 type AttackStartFn = unsafe extern "C" fn(*mut c_void, i32);
 type TakeDamageFn = unsafe extern "C" fn(*mut c_void, *mut u8);
@@ -111,13 +99,8 @@ struct Reach {
 
 static LOOKUP: OnceLock<Reach> = OnceLock::new();
 static FOUND: Mutex<Found> = Mutex::new(Found { items: std::ptr::null_mut(), count: 0, capacity: 0 });
-/// The blade's palm end and tip at the previous look, and when.
-type Blade = ([f32; 3], [f32; 3], Instant);
-static LAST_BLADE: Mutex<Option<Blade>> = Mutex::new(None);
-/// When the last look ran, and when it last found the blade about to reach something (ticks).
-static LOOKED: AtomicU64 = AtomicU64::new(0);
-static REACHED: AtomicU64 = AtomicU64::new(0);
-static LOOKS: AtomicU64 = AtomicU64::new(0);
+/// The blade's look (`eng_chr::melee_reach`: its sweep, the box test, the swings' check).
+static LOOK: ReachLook = ReachLook::new();
 static DESCRIBED: AtomicU64 = AtomicU64::new(0);
 static UPDATE_ORIGINAL: Original<UpdateFn> = Original::new();
 static TAKE_DAMAGE_ORIGINAL: Original<TakeDamageFn> = Original::new();
@@ -179,10 +162,8 @@ pub fn install(hooks: &mut Hooks, gamedll: &Module, engine_module: &Module, phys
     Ok(())
 }
 
-/// Whether the blade was about to reach something at the latest look (or the look is not running).
 fn reaches() -> bool {
-    let now = monaka_channel::tick();
-    now.saturating_sub(LOOKED.load(Relaxed)) > STALE_MS || now.saturating_sub(REACHED.load(Relaxed)) <= REACH_FRESH_MS
+    LOOK.reaches()
 }
 
 unsafe extern "C" fn update(controller: *mut c_void) {
@@ -213,32 +194,9 @@ fn look(held: Held) {
     let palm = [m[3], m[7], m[11]];
     let length = physical.reach(held);
     let tip = [0, 1, 2].map(|k| palm[k] + [m[1], m[5], m[9]][k] * length);
-    if !palm.iter().chain(&tip).all(|v| v.is_finite()) {
-        return;
-    }
-    let now = Instant::now();
-    let previous = LAST_BLADE.lock().ok().and_then(|mut last| last.replace((palm, tip, now)));
-    // Where it will be: moving on as it moved since the last look.
-    let (palm_ahead, tip_ahead) = match previous {
-        Some((p0, t0, then)) if (now - then).as_secs_f32() > 0.0 && (now - then).as_secs_f32() < 0.1 => {
-            let scale = LOOKAHEAD / (now - then).as_secs_f32();
-            ([0, 1, 2].map(|k| palm[k] + (palm[k] - p0[k]) * scale), [0, 1, 2].map(|k| tip[k] + (tip[k] - t0[k]) * scale))
-        }
-        _ => (palm, tip),
-    };
-    LOOKED.store(monaka_channel::tick(), Relaxed);
-    let looks = LOOKS.fetch_add(1, Relaxed);
-    // Points along the blade, now and ahead.
-    let mut points = Vec::with_capacity(15);
-    for when in [0.0f32, 0.5, 1.0] {
-        let p = [0, 1, 2].map(|k| palm[k] + (palm_ahead[k] - palm[k]) * when);
-        let t = [0, 1, 2].map(|k| tip[k] + (tip_ahead[k] - tip[k]) * when);
-        for along in [0.0f32, 0.25, 0.5, 0.75, 1.0] {
-            points.push([0, 1, 2].map(|k| p[k] + (t[k] - p[k]) * along));
-        }
-    }
-    let centre = [0, 1, 2].map(|k| points.iter().map(|p| p[k]).sum::<f32>() / points.len() as f32);
-    let spread = points.iter().map(|p| monaka_core::math::distance(*p, centre)).fold(0.0f32, f32::max);
+    let Some(sweep) = LOOK.sweep(palm, tip) else { return };
+    let looks = LOOK.counted();
+    let (centre, spread) = (sweep.centre, sweep.spread);
     // An object is found by its own place (its feet), so the radius takes in a body's height.
     let radius = spread + 2.0;
     // SAFETY: the engine's own call on the live game object, on the game's thread.
@@ -252,11 +210,10 @@ fn look(held: Held) {
     // grows with its own allocator; the filter is the class the game's melee passes.
     unsafe { (reach.find)(level, &mut *found, &centre, radius, reach.targets, false, std::ptr::null_mut()) };
     let player = model;
-    let mut hit = None;
     // Diagnostic: now and then, everything the search found and where the blade is.
     let describe = looks.is_multiple_of(200) && DESCRIBED.fetch_add(1, Relaxed) < 40;
     if describe {
-        log!("physical melee look {looks}: blade palm {palm:.2?} tip {tip:.2?} (ahead {palm_ahead:.2?} {tip_ahead:.2?}), search at {centre:.2?} radius {radius:.2}, {} found", found.count);
+        log!("physical melee look {looks}: blade palm {palm:.2?} tip {tip:.2?}, search at {centre:.2?} radius {radius:.2}, {} found", found.count);
     }
     for i in 0..found.count as usize {
         let Some(object) = mem::read::<usize>(found.items as usize + i * 8).filter(|&o| o != 0) else { continue };
@@ -274,21 +231,13 @@ fn look(held: Held) {
             log!("  found {i}: {class} at {owner:#x} (control {object:#x}), box {b:.2?}");
         }
         // Not the game's "can be hit" virtual (+0x228): its melee asks it of props, and it says no
-        // for characters, which it tests bone by bone instead.
-        let Some(b) = b.filter(|b| b[4] - b[1] >= LEAST_HEIGHT) else { continue };
-        if is_marker(owner) {
-            continue;
-        }
-        let inside = |p: &[f32; 3]| (0..3).all(|k| p[k] >= b[k] - MARGIN && p[k] <= b[k + 3] + MARGIN);
-        if points.iter().any(inside) {
-            hit = Some((owner, b));
+        // for characters, which it tests bone by bone instead. (The invisible AI target markers the
+        // search also finds have 3 cm boxes, or a body's.)
+        if let Some(b) = b.filter(|b| sweep.touches(b))
+            && !is_marker(owner)
+        {
+            LOOK.reached(|| format!("{} ({owner:#x}, box {b:.2?})", monaka_hook::probe::class_name(owner).unwrap_or_else(|| "?".into())));
             break;
-        }
-    }
-    if let Some((owner, b)) = hit {
-        let before = REACHED.swap(monaka_channel::tick(), Relaxed);
-        if monaka_channel::tick().saturating_sub(before) > 500 && looks < 100_000 {
-            log!("physical melee: the blade is about to reach {} ({owner:#x}, box {b:.2?})", monaka_hook::probe::class_name(owner).unwrap_or_else(|| "?".into()));
         }
     }
     if looks == 0 || looks.is_power_of_two() && looks >= 1024 {

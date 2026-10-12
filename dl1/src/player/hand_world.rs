@@ -4,7 +4,6 @@
 //! engine's element getters ([`sample`]). A short trail of each (`monaka_core::trail`) gives its
 //! velocity.
 
-use monaka_core::math::{cross, unit};
 use crate::player::hands;
 use monaka_core::trail::Trail;
 use monaka_hook::mem;
@@ -155,10 +154,7 @@ pub fn string_point() -> Option<[f32; 3]> {
 /// `m` with its 3x3 part made a rotation (the game's arm and weapon matrices carry a squash),
 /// keeping its x axis and the plane of x and y.
 pub fn rigid(m: &[f32; 12]) -> [f32; 12] {
-    let unit = |v: [f32; 3]| unit(v).unwrap_or(v);
-    let x = unit([m[0], m[4], m[8]]);
-    let z = unit(cross(x, [m[1], m[5], m[9]]));
-    let y = cross(z, x);
+    let [x, y, z] = monaka_core::camera::rigid_axes(m);
     [x[0], y[0], z[0], m[3], x[1], y[1], z[1], m[7], x[2], y[2], z[2], m[11]]
 }
 

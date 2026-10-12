@@ -14,7 +14,8 @@
 //! fires is placed on the arrow's line ([`projectile`], its speed kept). A pull under [`PULL`]'s
 //! least keeps the game's draw.
 
-use monaka_core::math::{self, cross, dot, sub};
+use monaka_core::camera::{apply_3x3, unapply_3x3};
+use monaka_core::math::{self, dot, sub};
 use crate::player::{hand_world, hands, projectile};
 use monaka_arms::Skeleton;
 use monaka_core::gesture::{Pull, PullRules};
@@ -155,20 +156,6 @@ fn drawing() -> bool {
     DRAWN_AT.lock().ok().and_then(|d| *d).is_some_and(|at| at.elapsed() < DRAW_FRESH)
 }
 
-/// A matrix's 3x3 part (rows) applied to `v`.
-fn turn(m: &[f32; 12], v: [f32; 3]) -> [f32; 3] {
-    [0, 1, 2].map(|r| m[r * 4] * v[0] + m[r * 4 + 1] * v[1] + m[r * 4 + 2] * v[2])
-}
-
-/// `v` taken back through a matrix's 3x3 part (which may scale, as the game's weapon matrices do).
-fn unturn(m: &[f32; 12], v: [f32; 3]) -> Option<[f32; 3]> {
-    let rows = [0, 1, 2].map(|r| [m[r * 4], m[r * 4 + 1], m[r * 4 + 2]]);
-    // The inverse's columns are the rows' pairwise crosses over the determinant.
-    let columns = [cross(rows[1], rows[2]), cross(rows[2], rows[0]), cross(rows[0], rows[1])];
-    let det = dot(rows[0], columns[0]);
-    (det.is_finite() && det.abs() > 1e-9).then(|| [0, 1, 2].map(|i| (columns[0][i] * v[0] + columns[1][i] * v[1] + columns[2][i] * v[2]) / det))
-}
-
 /// After the rig placed the arms: where the bow and its axis are; while the bow is drawn, its
 /// string and the arrow's nock on the axis, level with the right hand's fingers.
 pub fn place_string(vis: usize, reticle: Option<[f32; 3]>) {
@@ -194,7 +181,7 @@ pub fn place_string(vis: usize, reticle: Option<[f32; 3]>) {
         };
         log!("bow by hand: the string drawn along the bow (string {:?}, nock {:?}, bow {:?})", known.string, known.nock, known.bow);
     }
-    let along = turn(&root, ARROW_ALONG);
+    let along = apply_3x3(&root, ARROW_ALONG);
     let length = math::length(along);
     if !(length.is_finite() && length > 1e-6) {
         return;
@@ -205,7 +192,7 @@ pub fn place_string(vis: usize, reticle: Option<[f32; 3]>) {
     if let Some(turned) = reticle.and_then(|r| arrow_line(&model, &known, &root, bow_x).and_then(|(at, arrow)| aligned(&root, arrow, sub(r, at)))) {
         model.set_world(0, &turned);
         root = turned;
-        let along = turn(&root, ARROW_ALONG);
+        let along = apply_3x3(&root, ARROW_ALONG);
         bow_x = along.map(|c| c / math::length(along));
     }
     let grip = [root[3], root[7], root[11]];
@@ -319,17 +306,17 @@ fn column_along(m: &[f32; 12], c: usize, along: [f32; 3]) -> f32 {
 
 /// `m` in `frame`'s own terms (its 3x3 part may scale): `frame` applied to it gives `m` back.
 fn in_frame(frame: &[f32; 12], m: &[f32; 12]) -> Option<[f32; 12]> {
-    let columns = [0, 1, 2].map(|c| unturn(frame, [m[c], m[4 + c], m[8 + c]]));
-    let at = unturn(frame, sub([m[3], m[7], m[11]], [frame[3], frame[7], frame[11]]))?;
+    let columns = [0, 1, 2].map(|c| unapply_3x3(frame, [m[c], m[4 + c], m[8 + c]]));
+    let at = unapply_3x3(frame, sub([m[3], m[7], m[11]], [frame[3], frame[7], frame[11]]))?;
     let [x, y, z] = [columns[0]?, columns[1]?, columns[2]?];
     Some([x[0], y[0], z[0], at[0], x[1], y[1], z[1], at[1], x[2], y[2], z[2], at[2]])
 }
 
 /// `local` (from [`in_frame`]) put back through `frame`.
 fn out_of_frame(frame: &[f32; 12], local: &[f32; 12]) -> [f32; 12] {
-    let column = |c: usize| turn(frame, [local[c], local[4 + c], local[8 + c]]);
+    let column = |c: usize| apply_3x3(frame, [local[c], local[4 + c], local[8 + c]]);
     let [x, y, z] = [column(0), column(1), column(2)];
-    let at = turn(frame, [local[3], local[7], local[11]]);
+    let at = apply_3x3(frame, [local[3], local[7], local[11]]);
     [x[0], y[0], z[0], frame[3] + at[0], x[1], y[1], z[1], frame[7] + at[1], x[2], y[2], z[2], frame[11] + at[2]]
 }
 

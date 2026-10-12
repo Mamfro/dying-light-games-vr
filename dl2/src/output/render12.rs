@@ -221,7 +221,7 @@ fn capture(swap: &IDXGISwapChain3) {
             monaka_core::depth::max_shift(scale, desc.Width as u32, pair_head.ipd, NEAREST_COMFORT).max(1.0) as u32,
             hud_rects(&desc, [centre, centre], pair_head.ipd),
             aim,
-            0.03 * desc.Height as f32,
+            eng_chr::hudover::CROSS_RADIUS * desc.Height as f32,
         );
         params.ui_out_of_frame = own_used && eng_chr::hudlayer::redirecting();
         if config.hud.world
@@ -344,7 +344,7 @@ pub fn hud_params(queue: &ID3D12CommandQueue, desc: &D3D12_RESOURCE_DESC, layer:
     let aim = aim.map_or([0.0, 0.0], |a| [a[0] * 0.5 * desc.Width as f32, -a[1] * 0.5 * desc.Height as f32]);
     // Each eye was drawn with its own frustum (centred when the run asks for that).
     let frustums = [Frustum::from_fov(pair_head.fov[0]), Frustum::from_fov(pair_head.fov[1])];
-    let mut params = Params::depth_stereo(0.0, 0, hud_rects(desc, frustums, pair_head.ipd), aim, 0.03 * desc.Height as f32);
+    let mut params = Params::depth_stereo(0.0, 0, hud_rects(desc, frustums, pair_head.ipd), aim, eng_chr::hudover::CROSS_RADIUS * desc.Height as f32);
     params.ui_out_of_frame = true;
     let mut pieces = LAST_PIECES.locked();
     if left && let Some(name) = CHANNEL_NAME.get() {

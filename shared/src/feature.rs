@@ -7,7 +7,9 @@
 use crate::{grabs, gui, handwork, hudfix, hudlayer, hudover, melee, melee_reach, panels, view_bob, walk};
 use monaka_arms::roomscale;
 use monaka_core::feature::Feature;
-use monaka_core::manifest::{DISABLE_VIEW_BOBBING, Kind, Manifest, Opt, ROOM_SCALE, Shown, WORLD_HUD, opt};
+use monaka_core::manifest::{
+    AIM_HAND, AIM_LOOK, AIM_MOTION, AIM_MOUSE, AIM_POINT, DISABLE_VIEW_BOBBING, Kind, Manifest, Opt, ROOM_SCALE, Shown, WORLD_HUD, aim, aims, opt,
+};
 use monaka_core::options::{Options, Shared};
 use monaka_hook::module::Module;
 use monaka_producer::game::{Component, Game, Lack, On, Run, Start};
@@ -62,6 +64,31 @@ fn fact<T>(fact: Option<T>, what: &str) -> Result<T, Lack> {
 
 fn missing(why: Rejection) -> Lack {
     Lack::Missing(why.reason)
+}
+
+// ---- Look and the arms ----
+
+const LOOK_OPTIONS: &[Opt] = &[aim(&[AIM_MOTION, AIM_LOOK, AIM_POINT, AIM_MOUSE], aims::HAND_RIG), AIM_HAND];
+
+/// Head aim on the character (`headaim`): motion controls, pointing or look-based aim, the
+/// controllers in for a pointing hand. A game gives where it steers (`install`), its hand-back
+/// (`give_back`, its `HeadAim`'s release) and what it works on top of, by struct update.
+pub const fn look<G: Chrome>() -> Component<G> {
+    Component {
+        name: "look",
+        features: &[Feature::Look],
+        options: LOOK_OPTIONS,
+        needs_channel: true,
+        on: |run| On::when(run.shared.aim.head, "aim is mouse and stick only"),
+        release: monaka_arms::controllers::close,
+        ..Component::NONE
+    }
+}
+
+/// The arms on the controllers (`rig`), with motion controls: a game gives its install and what it
+/// works on top of, by struct update.
+pub const fn arms<G: Chrome>() -> Component<G> {
+    Component { name: "arms", features: &[Feature::HandRig], on: |run| On::when(run.shared.aim.rig, "aim is not motion controls"), ..Component::NONE }
 }
 
 // ---- View bob ----
