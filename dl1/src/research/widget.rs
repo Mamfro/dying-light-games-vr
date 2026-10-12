@@ -25,12 +25,12 @@ pub fn note(name: &str, leaves: &[Leaf]) {
         return;
     }
     let Some(first) = leaves.first() else { return };
-    let camera = crate::view::stereo::live_camera_look().map_or("none".to_owned(), |(yaw, pitch, turned)| format!("{yaw:.2} {pitch:.2}{}", if turned { " view" } else { "" }));
+    let camera = crate::stereo::eyes::live_camera_look().map_or("none".to_owned(), |(yaw, pitch, turned)| format!("{yaw:.2} {pitch:.2}{}", if turned { " view" } else { "" }));
     let line = format!(
         "{} eye {} present {:?} camera {camera}: {}({:.1} {:.1})",
         monaka_channel::tick(),
-        crate::view::stereo::eye(),
-        crate::view::stereo::drawing_present(),
+        crate::stereo::eyes::eye(),
+        crate::stereo::eyes::drawing_present(),
         if first.text { "text" } else { "image" },
         first.at[0],
         first.at[1]

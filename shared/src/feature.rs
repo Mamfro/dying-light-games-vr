@@ -4,7 +4,10 @@
 //! `Component { needs: &[&ARMS], ..eng_chr::feature::melee() }`. A fact its build has not been read
 //! for leaves that component off for the run, said in the log.
 
+use crate::headaim::{self, HeadAim, IdLoad, InputActionFn, PitchActions};
 use crate::{grabs, gui, handwork, hudfix, hudlayer, hudover, melee, melee_reach, panels, view_bob, walk};
+use monaka_arms::aim::AimSettings;
+use monaka_hook::Site;
 use monaka_arms::roomscale;
 use monaka_core::feature::Feature;
 use monaka_core::manifest::{
@@ -33,6 +36,7 @@ pub trait Chrome: Game {
 
 /// One build's facts for the ready-made components (none where the build has not been read).
 pub struct Facts {
+    pub look: Option<Look>,
     pub view_bob: Option<view_bob::Build>,
     pub grabs: Option<grabs::Build>,
     pub walk: Option<walk::Build>,
@@ -50,6 +54,15 @@ pub struct Facts {
     /// The game's present lays the HUD layer over the eyes whenever the HUD is shown (The Beast);
     /// otherwise the layer is made only for the dynamic HUD (Dying Light 2's eyes draw the HUD in).
     pub hud_over_eyes: bool,
+}
+
+/// Head aim's facts: the game's [`HeadAim`] (its offsets), its input-action converter, and the
+/// vertical look actions with how the build loads their ids.
+pub struct Look {
+    pub aim: &'static HeadAim,
+    pub input_action: Site<InputActionFn>,
+    pub pitch_actions: &'static PitchActions,
+    pub id_load: IdLoad,
 }
 
 /// The game DLL a component hooks, or why it stays off.
@@ -76,8 +89,46 @@ pub const fn look<G: Chrome>() -> Component<G> {
         options: LOOK_OPTIONS,
         needs_channel: true,
         on: |run| On::when(run.shared.aim.head, "aim is mouse and stick only"),
+        install: install_look::<G>,
+        give_back: give_back_look::<G>,
         release: monaka_arms::controllers::close,
         ..Component::NONE
+    }
+}
+
+/// Head aim's own part of a look's install: what aims, the vertical look input held while the head
+/// steers, the controllers for a pointing hand. A game's install calls it, then hooks where it
+/// steers ([`HeadAim::steer`]).
+pub fn install_look<G: Chrome>(start: &mut Start<'_, G>) -> Result<(), Lack> {
+    let look = fact(G::FACTS.look, "head aim")?;
+    let settings = AimSettings::from_options(start.options, start.shared.aim, true);
+    look.aim.configure(settings, gamedll(start)?.base());
+    log!("{settings:?}");
+    match hook_input_action::<G>(start) {
+        Err(Lack::Missing(why)) => log!("vertical look not locked: {why}"),
+        other => other?,
+    }
+    if settings.hand_aim {
+        monaka_arms::controllers::open(start.channel()?);
+    }
+    Ok(())
+}
+
+/// The game's input-action converter hooked ([`headaim::input_action`]), once the vertical look
+/// actions are where the build keeps them.
+pub fn hook_input_action<G: Chrome>(start: &mut Start<'_, G>) -> Result<(), Lack> {
+    let look = fact(G::FACTS.look, "head aim")?;
+    let gamedll = gamedll(start)?;
+    headaim::pitch_actions_match(G::engine(start.build), look.pitch_actions, look.id_load).missing()?;
+    headaim::convert_for(look.aim, look.pitch_actions);
+    start.hooks.site(&headaim::INPUT_ACTION, gamedll, &look.input_action, headaim::input_action)?;
+    Ok(())
+}
+
+/// The next camera update hands the head's share back.
+fn give_back_look<G: Chrome>() {
+    if let Some(look) = G::FACTS.look {
+        look.aim.release(500);
     }
 }
 

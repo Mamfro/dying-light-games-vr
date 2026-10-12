@@ -245,7 +245,7 @@ unsafe extern "system" fn on_screen_point_f(camera: usize, out: usize, x: f32, y
     // SAFETY: forwards the game's own call.
     let point = as_fixed_returning(|| unsafe { ON_SCREEN_POINT_F_ORIGINAL.get()(camera, out, x, y) });
     // The grappling hook's search takes the screen's centre for where to aim: the left reticle.
-    crate::player::grapple::on_screen_point(point);
+    crate::arms::grapple::on_screen_point(point);
     point
 }
 

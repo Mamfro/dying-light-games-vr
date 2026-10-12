@@ -1,4 +1,4 @@
-//! `probe_streamline=1` (D3D12): the DLSS inputs the renderer hands Streamline (`crate::output::streamline`),
+//! `probe_streamline=1` (D3D12): the DLSS inputs the renderer hands Streamline (`crate::dlss::streamline`),
 //! the first frames' tags, camera constants and evaluates logged with the eye being rendered
 //! (changing nothing), and a check of the game's `clipToPrevClip` against the cameras. The
 //! Streamline hooks also feed `probe_motion` ([`super::motion`]).
@@ -28,7 +28,7 @@ pub fn tagged(n: u64, frame: usize, viewport: *const u8, tags: &[Tag], commands:
         }
     }
     if o.streamline && n <= LOGGED_CALLS {
-        let label = format!("sl tag call {n} (frame {frame:#x}, viewport {:?}, eye {:?}, commands {})", viewport_id(viewport), crate::view::stereo::rendering_eye(), !commands.is_null());
+        let label = format!("sl tag call {n} (frame {frame:#x}, viewport {:?}, eye {:?}, commands {})", viewport_id(viewport), crate::stereo::eyes::rendering_eye(), !commands.is_null());
         monaka_streamline::log_tags(&label, tags);
     }
 }
@@ -53,7 +53,7 @@ pub fn unchanged(n: u64, constants: *const u8, frame: usize, viewport: *const u8
                 "sl constants {n} (frame {frame:#x}, viewport {:?}, eye {:?}): near {} far {} fov {} aspect {} jitter {:?} mvec scale {:?} pos {:?} fwd {:?}; \
                  depthInverted {} cameraMotionIncluded {} motionVectors3D {} reset {}",
                 viewport_id(viewport),
-                crate::view::stereo::rendering_eye(),
+                crate::stereo::eyes::rendering_eye(),
                 c.f32(at::NEAR),
                 c.f32(at::FAR),
                 c.f32(at::FOV),
@@ -86,7 +86,7 @@ pub fn evaluated(n: u64, feature: u32, frame: *const u8, inputs: *const *const u
             let first = mem::read::<u32>(input + 32).unwrap_or(u32::MAX);
             described.push(format!("{{guid {guid:02x?} v{version} first u32 {first}}}"));
         }
-        log!("sl evaluate {n}: feature {feature}, frame {frame_index}, {count} inputs {}, commands {commands:?}, eye {:?}", described.join(" "), crate::view::stereo::rendering_eye());
+        log!("sl evaluate {n}: feature {feature}, frame {frame_index}, {count} inputs {}, commands {commands:?}, eye {:?}", described.join(" "), crate::stereo::eyes::rendering_eye());
     }
 }
 

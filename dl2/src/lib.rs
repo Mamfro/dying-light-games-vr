@@ -14,50 +14,34 @@
 //! each guarded by its byte signature before use; options come from `dl2-options.txt` beside the
 //! DLL copy. The probes are in `research`.
 //!
-//! The adapter ([`Dl2::ADAPTER`]), in the order its components start:
-//!
-//! - [`EYES`]: the stereo pair on the engine side (`view::scene`) and the eyes leaving the
-//!   renderer (`output`);
-//! - [`LOOK`]: head aim on the character at the player camera update; [`PITCH`]: the vertical look
-//!   input held for head aim, or locked toward level (`lock_pitch`);
-//! - [`ARMS`]: the arms on the controllers; [`FINGERS`]: their fingers; [`MELEE`], [`HANDWORK`],
-//!   [`ROOM_SCALE`]: what the hands and steps do; [`VIEW_BOB`], [`GRABS`]: the game's own, for VR;
-//! - [`GAMEPAD`]: the controllers as the game's pad (Monaka's);
-//! - [`HUD`]: the HUD as a layer laid over each eye (D3D12); [`PANELS`]: its pieces on the hands;
-//!   [`MARKERS`]: its world markers at their targets' depth;
-//! - research: [`PROBES`].
+//! The adapter ([`Dl2::ADAPTER`]), in the order its components start, by feature: [`stereo`] (the
+//! pair on the engine side, the eyes leaving the renderer), [`look`] (head aim at the player camera
+//! update, the pitch lock, the level view), [`arms`] (the hand rig, fingers, melee, handwork,
+//! room-scale), [`GRABS`], the [`pad`], the [`hud`] (the layer, its pieces on the hands, the world
+//! markers) and the probes.
 
+mod arms;
 mod config;
 mod engine;
 mod game;
 mod hud;
+mod look;
 mod manifest;
 #[cfg(test)]
 mod launch_tests;
-mod output;
-mod player;
+mod pad;
 mod research;
-mod view;
+mod stereo;
 
 use config::Config;
-use eng_chr::feature::{Chrome, Facts as ChromeFacts};
-use hud::markers;
-use monaka_arms::aim::AimSettings;
-use monaka_channel::pose::PoseChannel;
-use monaka_core::feature::Feature;
-use monaka_core::manifest::{
-    CONTROLLER_PAD, CONTROLLER_PROXY, HUD_SIZE, Kind, Manifest, Opt, Shown, line, opt, render_size,
-};
+use eng_chr::feature::{Chrome, Facts as ChromeFacts, Look};
+use eng_chr::headaim::IdLoad;
+use monaka_core::manifest::Manifest;
 use monaka_core::options::Options;
-use monaka_hook::InFlight;
 use monaka_hook::module::Module;
-use eng_chr::feature::gamedll;
-use monaka_producer::game::{Adapter, Component, Game, Lack, Missing, On, Start};
+use monaka_producer::game::{Adapter, Component, Game};
 use monaka_producer::{Rejection, Session, log, require_build};
-use output::{framegen, render11, render12, video};
-use player::{aim, hands};
-use std::sync::atomic::Ordering;
-use view::{head, scene};
+use stereo::{framegen, render11, render12};
 use windows::Win32::Graphics::Direct3D12::ID3D12CommandQueue;
 
 monaka_producer::producer!(game: crate::Dl2);
@@ -78,20 +62,20 @@ impl Game for Dl2 {
     const MANIFESTS: &'static [Manifest] = manifest::MANIFESTS;
     const ADAPTER: Adapter<Dl2> = Adapter {
         components: &[
-            &EYES,
-            &LOOK,
-            &PITCH,
-            &ARMS,
-            &FINGERS,
-            &MELEE,
-            &HANDWORK,
-            &ROOM_SCALE,
-            &VIEW_BOB,
+            &stereo::EYES,
+            &look::LOOK,
+            &look::PITCH,
+            &arms::ARMS,
+            &arms::FINGERS,
+            &arms::MELEE,
+            &arms::HANDWORK,
+            &arms::ROOM_SCALE,
+            &look::VIEW_BOB,
             &GRABS,
-            &GAMEPAD,
-            &HUD,
-            &PANELS,
-            &MARKERS,
+            &pad::GAMEPAD,
+            &hud::HUD,
+            &hud::PANELS,
+            &hud::MARKERS,
             &PROBES,
         ],
     };
@@ -155,6 +139,7 @@ impl Game for Dl2 {
 
 impl Chrome for Dl2 {
     const FACTS: ChromeFacts = ChromeFacts {
+        look: Some(Look { aim: &look::AIM, input_action: engine::INPUT_ACTION, pitch_actions: &engine::PITCH_ACTIONS, id_load: IdLoad::MemImm32 }),
         view_bob: Some(engine::VIEW_BOB),
         grabs: Some(engine::GRABS),
         walk: Some(engine::WALK),
@@ -180,7 +165,7 @@ impl Chrome for Dl2 {
     }
 
     fn showing() -> bool {
-        scene::publishing()
+        stereo::scene::publishing()
     }
 }
 
@@ -194,207 +179,8 @@ fn engine_function<F: Copy>(engine: &Module, (rva, bytes): (usize, &[u8]), name:
     Ok(unsafe { std::mem::transmute_copy(&address) })
 }
 
-// ---- Stereo ----
-
-const MODE: Opt = opt("mode", "Rendering", "Smooth renders each eye and adds in-between frames, Sharp renders each eye, Fast draws once for both eyes (gaps beside near things).", Kind::Choice {
-    choices: &[("framegen", "Smooth"), ("same", "Sharp"), ("depth", "Fast"), ("alternate", "Alternate eye"), ("auto", "Smooth")],
-    default: "framegen",
-    window: 3,
-})
-.on(Shown::Engine)
-// Fast shows the hands no nearer than its nearest comfortable depth: the panels on them too.
-.viewer_args("depth", &["--panel-nearest", "0.5"]);
-
-/// Stereo in the mode the run picked (`config`): the pair on the engine side, each eye's camera and
-/// frustum written into the scene (`view::scene`), the head from the viewer or synthetic
-/// (`view::head`); the eyes leave the renderer at its present (`output`), at the headset's eye size
-/// (`output::video`). Always on: menus and loading go out mono.
-pub const EYES: Component<Dl2> = Component {
-    name: "eyes",
-    features: &[Feature::Stereo, Feature::PerEyeHistory],
-    options: &[render_size("Experimental in this game."), MODE],
-    needs_channel: true,
-    settings: |options, manifest| {
-        Config::from_options(options, manifest);
-    },
-    install: install_eyes,
-    arm: start_publishing,
-    // A pair in progress restores the camera itself before returning.
-    quiet: || {
-        scene::PUBLISHING.store(false, Ordering::Release);
-        scene::stop_stereo();
-    },
-    give_back: || {
-        video::restore();
-        InFlight::wait_idle(2000);
-        scene::abandon_pair();
-    },
-    release: || {
-        framegen::close();
-        render11::close();
-        render12::close();
-        head::HEAD.close();
-        output::report();
-    },
-    summary: Some(scene::timing_report),
-    ..Component::NONE
-};
-
-fn install_eyes(start: &mut Start<'_, Dl2>) -> Result<(), Lack> {
-    let Facts { engine, renderer, d3d11, .. } = start.build;
-    let channel = start.channel()?;
-    // SAFETY: the engine's and the renderer's hashes were checked.
-    unsafe {
-        scene::install(start.hooks, engine)?;
-        output::install(start.hooks, renderer, *d3d11, channel)?;
-    }
-    // A synthetic head still writes pose records (the viewer and the probe read them).
-    head::open(PoseChannel::open(channel).map_err(|e| log!("pose channel: {e}; publishing mono")).ok());
-    Ok(())
-}
-
-fn start_publishing() {
-    scene::PUBLISHING.store(true, Ordering::Release);
-    let config = config::get();
-    let world = config.hud.world && game::try_get().is_some_and(|g| g.renderer12.is_some());
-    let mode = match (config.framegen, config.depth_stereo, config.alternate_eye) {
-        (true, _, _) => "same-frame stereo with FSR frame generation per eye",
-        (_, true, _) => "depth stereo (one render, both eyes from depth)",
-        (_, _, true) => "alternate-eye stereo",
-        _ => "same-frame stereo",
-    };
-    let pose = if config.synthetic.is_some() {
-        "a synthetic pose"
-    } else if head::HEAD.connected() {
-        "the viewer"
-    } else {
-        "nowhere (mono)"
-    };
-    log!("DL2 producer running: {mode}{}; head pose from {pose}", if world { " with the dynamic HUD" } else { "" });
-}
-
-// ---- Look ----
-
-/// Head aim on the character (`player::aim`), steered at the player camera update
-/// (`FromForwardUpPos`); with pointing aim the controllers come in. Handed back at the next update.
-pub const LOOK: Component<Dl2> = Component { needs: &[&EYES], install: install_look, give_back: || aim::release(500), ..eng_chr::feature::look() };
-
-fn install_look(start: &mut Start<'_, Dl2>) -> Result<(), Lack> {
-    let gamedll = gamedll(start)?;
-    let engine_module = &start.build.engine;
-    let settings = AimSettings::from_options(start.options, start.shared.aim, true);
-    aim::AIM.configure(settings, gamedll.base());
-    start.hooks.site(&aim::FROM_FORWARD, engine_module, &engine::FROM_FORWARD_UP_POS, aim::from_forward)?;
-    if settings.hand_aim {
-        monaka_arms::controllers::open(start.channel()?);
-    }
-    Ok(())
-}
-
-const LOCK_PITCH: Opt = line("lock_pitch", "Block stick pitch", "With mouse / stick aim: no looking up and down with the stick, except toward level.", Kind::Switch { default: false });
-
-/// The game's input-action converter (`player::aim`): while head aim steers, the head alone pitches
-/// the character; without it, `lock_pitch` lets vertical look through only toward level.
-pub const PITCH: Component<Dl2> = Component {
-    name: "pitch",
-    options: &[LOCK_PITCH],
-    needs: &[&EYES],
-    settings: |options, _| {
-        options.switch("lock_pitch", false);
-    },
-    on: |run| On::when(run.shared.aim.head || run.options.switch("lock_pitch", false), "vertical look as the game has it"),
-    install: install_pitch,
-    ..Component::NONE
-};
-
-fn install_pitch(start: &mut Start<'_, Dl2>) -> Result<(), Lack> {
-    let gamedll = gamedll(start)?;
-    aim::pitch_actions_match(&start.build.engine).missing()?;
-    start.hooks.site(&aim::INPUT_ACTION, gamedll, &engine::INPUT_ACTION, aim::input_action)?;
-    Ok(())
-}
-
-// ---- Hand rig ----
-
-/// The arms on the controllers at the arms visual's camera-target callback (`player::hands`,
-/// `eng_chr::rig`), a swing of a held weapon or a fist attacking (`swing_attack`, `swing_speed`).
-pub const ARMS: Component<Dl2> = Component { needs: &[&LOOK], install: |start| install_hands(start, true), release: hands::report, ..eng_chr::feature::arms() };
-
-fn install_hands(start: &mut Start<'_, Dl2>, rig: bool) -> Result<(), Lack> {
-    let gamedll = gamedll(start)?;
-    let options = eng_chr::rig::Options::read(start.options, start.shared, rig, research::options().hands);
-    // SAFETY: the game DLL's hash was checked.
-    unsafe { hands::install(start.hooks, &start.build.engine, gamedll, options) }.missing()
-}
-
-/// A free hand's fingers on the tracked fingers (`eng_chr::fingers`, at the arms' pose).
-pub const FINGERS: Component<Dl2> = Component { needs: &[&ARMS], ..monaka_arms::feature::fingers() };
-
-pub const MELEE: Component<Dl2> = Component { needs: &[&ARMS], ..eng_chr::feature::melee() };
-pub const HANDWORK: Component<Dl2> = Component { needs: &[&ARMS], ..eng_chr::feature::handwork() };
-pub const ROOM_SCALE: Component<Dl2> = Component { needs: &[&ARMS], ..eng_chr::feature::room_scale() };
-
-// ---- The game's own, for VR ----
-
-pub const VIEW_BOB: Component<Dl2> = Component { needs: &[&LOOK], ..eng_chr::feature::view_bob() };
+/// Zombies' grabs never land on the player (`eng_chr::grabs`).
 pub const GRABS: Component<Dl2> = eng_chr::feature::grabs();
 
-// ---- Pad ----
-
-/// The controllers as the game's pad, the whole right stick to the game (head aim and the pitch
-/// lock decide what its pitch does).
-pub const GAMEPAD: Component<Dl2> = Component { options: &[CONTROLLER_PAD, CONTROLLER_PROXY], arm: monaka_pad::feature::whole_stick, ..monaka_pad::feature::gamepad() };
-
-// ---- HUD ----
-
-pub const HUD: Component<Dl2> = Component { options: &[HUD_SIZE.default_number(0.55)], needs: &[&EYES], ..eng_chr::feature::hud() };
-pub const PANELS: Component<Dl2> = Component { needs: &[&HUD], ..eng_chr::feature::panels() };
-
-const WORLD_MARKERS: Opt =
-    opt("world_markers", "Markers in the world", "Objective and waypoint markers sit at their targets' distance instead of in the flat HUD.", Kind::Switch { default: true }).on(Shown::Hud);
-
-/// The HUD's world markers (objectives, waypoints) drawn at their targets' depth with the dynamic
-/// HUD (`hud::markers`: their world points each tick).
-pub const MARKERS: Component<Dl2> = Component {
-    name: "markers",
-    options: &[WORLD_MARKERS],
-    needs: &[&PANELS],
-    on: |run| On::when(run.shared.hud.markers, "markers stay in the flat HUD"),
-    install: |start| {
-        // SAFETY: the game DLL's hash was checked.
-        unsafe { markers::install(start.hooks, gamedll(start)?) }.missing()
-    },
-    arm: || markers::enable(true),
-    quiet: || markers::enable(false),
-    release: markers::report,
-    ..Component::NONE
-};
-
-// ---- Research ----
-
-/// The research probes: their hooks and reports. Each probe checks its own option; the arms and
-/// markers probes take their component's hook when it is off.
-pub const PROBES: Component<Dl2> = Component { install: install_probes, release: research::report, ..monaka_producer::game::probes() };
-
-fn install_probes(start: &mut Start<'_, Dl2>) -> Result<(), Lack> {
-    let probes = research::options();
-    let Some(gamedll) = start.build.gamedll.as_ref() else { return Ok(()) };
-    if probes.hands
-        && !start.is_on(&ARMS)
-        && let Err(Lack::Missing(why)) = install_hands(start, false)
-    {
-        log!("arms probe off: {why}");
-    }
-    if probes.markers && !start.is_on(&MARKERS) {
-        // SAFETY: the game DLL's hash was checked.
-        if let Err(why) = unsafe { markers::install(start.hooks, gamedll) } {
-            log!("markers probe off: {}", why.reason);
-        }
-    }
-    if (probes.melee || probes.sweep)
-        && let Err(why) = research::melee::install(start.hooks, gamedll, probes.melee, probes.sweep)
-    {
-        log!("melee probe off: {}", why.reason);
-    }
-    Ok(())
-}
+/// The research probes: their hooks and reports. Each probe checks its own option.
+pub const PROBES: Component<Dl2> = Component { install: research::install_probes, release: research::report, ..monaka_producer::game::probes() };

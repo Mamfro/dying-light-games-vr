@@ -5,7 +5,7 @@
 //! nose), so the HUD floats readable in front of the world instead of in the far periphery at
 //! infinity.
 
-use crate::view::stereo;
+use crate::stereo::eyes;
 use monaka_hook::{InFlight, Original};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::*};
@@ -105,7 +105,7 @@ pub fn frame_end(chain: &IDXGISwapChain) {
     }
     pass.scene_copied = false;
     pass.shifted = false;
-    crate::output::hybrid::frame_end();
+    crate::stereo::hybrid::frame_end();
     crate::research::targets::frame_end();
     crate::hud::panels::hud_phase(false);
     // SAFETY: COM calls on the game's live swapchain.
@@ -129,7 +129,7 @@ pub unsafe extern "system" fn set_targets(
     let _flight = InFlight::enter();
     // SAFETY: the game passes its live context and an array of `count` views.
     unsafe {
-        if stereo::capturing()
+        if eyes::capturing()
             && let Some(ctx) = ID3D11DeviceContext::from_raw_borrowed(&context)
             && immediate(ctx)
         {
@@ -148,11 +148,11 @@ pub unsafe extern "system" fn set_targets(
             crate::research::backbuffer::bound(ctx, on, count, !depth.is_null());
             crate::research::targets::bound(count, views, !depth.is_null());
             crate::research::depth::bound(depth);
-            if !depth.is_null() && (crate::output::hybrid::enabled() || crate::output::upscale::enabled()) {
-                crate::output::hybrid::depth_bound(depth as usize);
+            if !depth.is_null() && (crate::stereo::hybrid::enabled() || crate::stereo::upscale::enabled()) {
+                crate::stereo::hybrid::depth_bound(depth as usize);
             }
-            if crate::output::upscale::enabled() {
-                crate::output::upscale::bound(count, views, !depth.is_null());
+            if crate::stereo::upscale::enabled() {
+                crate::stereo::upscale::bound(count, views, !depth.is_null());
             }
         }
         TARGETS.get()(context, count, views, depth)
@@ -171,13 +171,13 @@ pub fn draws_seen() -> u64 {
 fn before_draw(context: *mut core::ffi::c_void, vertices: u32) -> Option<[ID3D11RenderTargetView; 2]> {
     DRAWS_SEEN.fetch_add(1, Relaxed);
     if crate::research::targets::enabled()
-        && stereo::capturing()
+        && eyes::capturing()
         // SAFETY: the game passes its live context.
         && unsafe { ID3D11DeviceContext::from_raw_borrowed(&context) }.is_some_and(immediate)
     {
         crate::research::targets::draw(vertices);
     }
-    if !ON_BACKBUFFER.load(Relaxed) || !stereo::capturing() {
+    if !ON_BACKBUFFER.load(Relaxed) || !eyes::capturing() {
         return None;
     }
     // SAFETY: the game passes its live context.
@@ -205,15 +205,15 @@ fn before_draw(context: *mut core::ffi::c_void, vertices: u32) -> Option<[ID3D11
                 crate::research::targets::scene_copied(context);
             }
             if pass.scene_copied {
-                crate::output::hybrid::scene_copied();
+                crate::stereo::hybrid::scene_copied();
                 crate::hud::panels::hud_phase(true);
             }
         }
         return None;
     }
     // The first draw after the scene copy: the back buffer holds the world, not yet the HUD.
-    if (crate::output::hybrid::needs_capture() || crate::output::upscale::needs_capture())
-        && let Some(frame) = stereo::drawing_present()
+    if (crate::stereo::hybrid::needs_capture() || crate::stereo::upscale::needs_capture())
+        && let Some(frame) = eyes::drawing_present()
     {
         let mut target = [None];
         // SAFETY: reads the bound render target into a local.
@@ -221,22 +221,22 @@ fn before_draw(context: *mut core::ffi::c_void, vertices: u32) -> Option<[ID3D11
         // SAFETY: COM calls on the bound render target view and its resource.
         let image = target[0].as_ref().and_then(|view| unsafe { view.GetResource() }.ok()).and_then(|r| r.cast::<ID3D11Texture2D>().ok());
         if let Some(image) = image {
-            crate::output::hybrid::capture(context, &image, frame);
-            crate::output::upscale::capture(context, &image, frame);
+            crate::stereo::hybrid::capture(context, &image, frame);
+            crate::stereo::upscale::capture(context, &image, frame);
         }
     }
     if crate::hud::panels::on_hud_draw(context, vertices) {
         SKIP_DRAW.store(true, Relaxed);
     }
-    let frame = stereo::drawing_present()?;
-    if crate::output::hybrid::hud_layer() || crate::output::upscale::enabled() {
+    let frame = eyes::drawing_present()?;
+    if crate::stereo::hybrid::hud_layer() || crate::stereo::upscale::enabled() {
         // Drawn at the game's own layout into the layer; each eye places it when composited (by
         // the hybrid, or over the upscaled eye). The size is copied out: the layer owners take
         // their own locks, and the present holds theirs while asking for the HUD's rectangles.
         let (width, height) = SETTINGS.lock().ok()?.as_ref().map(|s| (s.backbuffer_width, s.backbuffer_height))?;
         drop(pass);
         // The fixed UI (`hud::ui_size`) goes into an FSR layer of its own shape and size.
-        let fixed_layer = crate::hud::ui_size::fixed().filter(|_| !crate::output::hybrid::hud_layer()).map(crate::hud::ui_size::layer_size);
+        let fixed_layer = crate::hud::ui_size::fixed().filter(|_| !crate::stereo::hybrid::hud_layer()).map(crate::hud::ui_size::layer_size);
         match fixed_layer {
             Some(size) => crate::hud::ui_size::fill_draw(context, size),
             None => crate::hud::ui_size::band_draw(context),
@@ -254,11 +254,11 @@ fn before_draw(context: *mut core::ffi::c_void, vertices: u32) -> Option<[ID3D11
                 PANEL_DRAW.store(true, Relaxed);
             }
         }
-        return if crate::output::hybrid::hud_layer() { crate::output::hybrid::hud_targets(context, width, height) } else { crate::output::upscale::hud_targets(context, width, height) };
+        return if crate::stereo::hybrid::hud_layer() { crate::stereo::hybrid::hud_targets(context, width, height) } else { crate::stereo::upscale::hud_targets(context, width, height) };
     }
     let settings = SETTINGS.lock().unwrap_or_else(|e| e.into_inner());
     let settings = settings.as_ref()?;
-    let setup_eye = stereo::schedule().map(|s| s.eye_at(frame))?;
+    let setup_eye = eyes::schedule().map(|s| s.eye_at(frame))?;
 
     let mut count = 1u32;
     let mut viewport = D3D11_VIEWPORT::default();
@@ -272,13 +272,13 @@ fn before_draw(context: *mut core::ffi::c_void, vertices: u32) -> Option<[ID3D11
         pass.base = viewport;
         pass.shifted = true;
     }
-    let pose = stereo::pending_pose();
-    let frustum = stereo::rendered_frustum(&pose, setup_eye)?;
+    let pose = eyes::pending_pose();
+    let frustum = eyes::rendered_frustum(&pose, setup_eye)?;
     // With the UI at a fixed size the HUD fills a band of its shape in the game's viewport: the
     // whole viewport is placed (the placement is made for it), and the band keeps its place in it.
     let layout = crate::hud::ui_size::layout_band(context, viewport, pass.base);
     let base = Rect::new(pass.base.TopLeftX, pass.base.TopLeftY, pass.base.Width, pass.base.Height);
-    let rect = Placement::new(frustum, setup_eye, stereo::config().separation_for(&pose), settings.distance).rect(base, base.aspect(), settings.scale);
+    let rect = Placement::new(frustum, setup_eye, eyes::config().separation_for(&pose), settings.distance).rect(base, base.aspect(), settings.scale);
     let (sx, sy) = (rect.width / pass.base.Width, rect.height / pass.base.Height);
     let placed = D3D11_VIEWPORT {
         TopLeftX: rect.x + (layout.TopLeftX - pass.base.TopLeftX) * sx,
@@ -415,8 +415,8 @@ pub unsafe extern "system" fn draw_instanced(context: *mut core::ffi::c_void, co
 pub fn eye_rects(pose: &monaka_core::protocol::HeadPose, width: u32, height: u32) -> [[f32; 4]; 2] {
     let settings = SETTINGS.lock().unwrap_or_else(|e| e.into_inner());
     let base = Rect::sized(width as f32, height as f32);
-    std::array::from_fn(|eye| match (settings.as_ref(), stereo::rendered_frustum(pose, eye)) {
-        (Some(s), Some(frustum)) => Placement::new(frustum, eye, stereo::config().separation_for(pose), s.distance).rect(base, base.aspect(), s.scale).array(),
+    std::array::from_fn(|eye| match (settings.as_ref(), eyes::rendered_frustum(pose, eye)) {
+        (Some(s), Some(frustum)) => Placement::new(frustum, eye, eyes::config().separation_for(pose), s.distance).rect(base, base.aspect(), s.scale).array(),
         _ => base.array(),
     })
 }

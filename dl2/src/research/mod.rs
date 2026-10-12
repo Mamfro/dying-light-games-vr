@@ -17,6 +17,9 @@ pub mod cameras;
 pub mod markers;
 pub mod melee;
 
+use crate::{Dl2, arms, hud};
+use monaka_producer::game::{Lack, Start};
+use monaka_producer::log;
 use monaka_producer::research::Research;
 
 /// What this run probes.
@@ -55,6 +58,30 @@ pub static PROBES: Research<Options> = Research::new(Options::from_options);
 /// This run's probes (none before the start read them).
 pub fn options() -> &'static Options {
     PROBES.get()
+}
+
+/// The probes' hooks: the arms and markers probes take their component's hook when it is off.
+pub(crate) fn install_probes(start: &mut Start<'_, Dl2>) -> Result<(), Lack> {
+    let probes = options();
+    let Some(gamedll) = start.build.gamedll.as_ref() else { return Ok(()) };
+    if probes.hands
+        && !start.is_on(&arms::ARMS)
+        && let Err(Lack::Missing(why)) = arms::install_hands(start, false)
+    {
+        log!("arms probe off: {why}");
+    }
+    if probes.markers && !start.is_on(&hud::MARKERS) {
+        // SAFETY: the game DLL's hash was checked.
+        if let Err(why) = unsafe { hud::markers::install(start.hooks, gamedll) } {
+            log!("markers probe off: {}", why.reason);
+        }
+    }
+    if (probes.melee || probes.sweep)
+        && let Err(why) = melee::install(start.hooks, gamedll, probes.melee, probes.sweep)
+    {
+        log!("melee probe off: {}", why.reason);
+    }
+    Ok(())
 }
 
 /// The stop: what the probes gathered.

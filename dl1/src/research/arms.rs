@@ -1,12 +1,12 @@
-//! The arms' probes, around the arms callback (`crate::player::hands`): `probe_hands` adds to the shared
+//! The arms' probes, around the arms callback (`crate::arms::hands`): `probe_hands` adds to the shared
 //! probe (`eng_chr::fpp`) the callback's caller and thread, the visual's element table, the eye
 //! camera and the right holder in the wrist; `probe_fingers` the hands' elements with their rest
 //! poses; `probe_rig` keeps what each rig move was made from, for [`super::view::rig`].
 
 use super::options;
 use crate::engine;
-use crate::player::hands::{Model, camera_matrix};
-use crate::view::stereo;
+use crate::arms::hands::{Model, camera_matrix};
+use crate::stereo::eyes;
 use eng_chr::fpp::{self, ArmsSkeleton};
 use monaka_arms::{Placed, Skeleton, Snapshot};
 use monaka_core::camera::{Mat34, compose, rigid_inverse};
@@ -39,9 +39,9 @@ pub fn moved(placed: Option<&Placed>, game: Option<Mat34>) {
     }
     let (Some(placed), Some(game)) = (placed, game) else { return };
     // The same tracking origin the rig used: the view's.
-    let origin = stereo::tracking_origin(&game, true, stereo::config().aim.hand);
+    let origin = eyes::tracking_origin(&game, true, eyes::config().aim.hand);
     if let Ok(mut last) = LAST_RIG.lock() {
-        *last = Some(RigSample { palm: placed.palm, origin, game, call: fpp::calls(), present: stereo::drawing_present().unwrap_or(0) });
+        *last = Some(RigSample { palm: placed.palm, origin, game, call: fpp::calls(), present: eyes::drawing_present().unwrap_or(0) });
     }
 }
 
@@ -67,7 +67,7 @@ fn probe(vis: usize, camera: usize, call: u64) {
         return;
     };
     let view = rigid_inverse(&game);
-    let player = stereo::player_camera();
+    let player = eyes::player_camera();
     log!(
         "hands probe {call}: from {} thread {} camera {camera:#x} {} (player camera {}), camera at [{:.3} {:.3} {:.3}]",
         Module::describe(caller()),

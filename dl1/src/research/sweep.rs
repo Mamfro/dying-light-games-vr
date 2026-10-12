@@ -5,7 +5,7 @@
 //! the rig ran since the last sweep. Each hit the sweep turns into damage is logged with its
 //! point, direction and bone. Read-only.
 
-use crate::{engine, player::hands};
+use crate::{engine, arms::hands};
 use monaka_hook::module::Module;
 use monaka_hook::probe::class_name;
 use monaka_hook::{Hooks, InFlight, Original, mem};
@@ -157,7 +157,7 @@ unsafe extern "C" fn detect(controller: *mut c_void, track: *mut c_void, mode: i
             "sweep probe: {} ms sweep {n} track {track_name} mode {mode} attack type {} direction {:.2?} | object {object:#x} ({}) {} arms model {arms:#x} | hand {} | arms hand {} | tip motion in the hand's axes {motion} | rig calls since last sweep {rig_since}",
             ms(),
             mem::read::<i32>(ctrl + ATTACK_TYPE).unwrap_or(-1),
-            crate::player::walk::vec3(ctrl + ATTACK_DIRECTION),
+            crate::arms::walk::vec3(ctrl + ATTACK_DIRECTION),
             class_name(object).unwrap_or_else(|| "?".into()),
             if object == arms { "IS the" } else { "is not the" },
             fmt(hand_holder(object)),
@@ -183,7 +183,7 @@ unsafe extern "C" fn deal(
     if n < LINES && !entry.is_null() {
         let at = entry as usize;
         let victim = mem::read::<usize>(at).unwrap_or(0);
-        let point = crate::player::walk::vec3(at + 0x18);
+        let point = crate::arms::walk::vec3(at + 0x18);
         // How far out the blade the hit is: from the hand element, along it and off it.
         let reach = hand_holder(hands::arms_model()).map_or("hand unknown".to_owned(), |(hand, along)| {
             let d = [0, 1, 2].map(|k| point[k] - hand[k]);
@@ -198,7 +198,7 @@ unsafe extern "C" fn deal(
             mem::read::<i32>(at + 0x08).unwrap_or(-1),
             mem::read::<i32>(at + 0x30).unwrap_or(-1),
             point,
-            crate::player::walk::vec3(at + 0x0c),
+            crate::arms::walk::vec3(at + 0x0c),
             mem::read::<f32>(at + 0x38).unwrap_or(f32::NAN),
         );
     }

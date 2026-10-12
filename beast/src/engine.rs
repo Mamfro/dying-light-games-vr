@@ -151,7 +151,7 @@ pub const TARGET_YAW: usize = 0xbb8;
 pub const TARGET_PITCH: usize = 0xbbc;
 /// The game's input-action converter `(binding, receivers, value, source, repeat)`, DL2's: action
 /// id at binding+0, flags at +0x10 (0x10: inverted, neutral 1).
-pub type InputActionFn = unsafe extern "system" fn(binding: usize, receivers: usize, value: f32, source: bool, repeat: bool);
+pub use eng_chr::headaim::InputActionFn;
 pub const INPUT_ACTION: Site<InputActionFn> = site("input action", 0x1fae0b0, &[Instruction::plain(&[0x48, 0x89, 0x5c, 0x24, 0x10])]);
 /// The vertical look actions, checked in the engine's action table: (RVA of `mov edx, id`, name
 /// RVA, id, name). The ids moved from DL2's (0x5e, 0x5f, 0x89, 0x8a).
@@ -179,8 +179,6 @@ pub const ARMS_LAYOUT: eng_chr::fpp::Layout = eng_chr::fpp::Layout { weapons: 0x
 /// wrist frame matches DL2's within about a degree. The gun holder has no correction of its own,
 /// as in DL2.
 pub const BONE_AXES: monaka_arms::BoneAxes = monaka_arms::BoneAxes::DYING_LIGHT_2;
-/// The finger bones' axes ([`eng_chr::fingers`]), as Dying Light 2's.
-pub const FINGER_AXES: eng_chr::fingers::Axes = eng_chr::fingers::Axes::DYING_LIGHT_2;
 // --- The engine's gui tree (the dynamic HUD; `eng_chr::gui`) ---------------------------------------------
 /// The implementations the exported `gui::IElement` getters jump to: `GetWorldMatrix`'s
 /// `push rbx; sub rsp, 0x20; test byte

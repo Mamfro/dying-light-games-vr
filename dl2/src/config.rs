@@ -74,8 +74,6 @@ pub struct Config {
     pub depth_stereo: bool,
     /// FSR frame generation per eye (`mode=framegen`; same-frame stereo, D3D12).
     pub framegen: bool,
-    /// Block vertical look while VR runs, letting through only input toward level (`lock_pitch`).
-    pub lock_pitch: bool,
     pub debug: u32,
     /// Which of `engine::ONCE_COMMANDS` the right eye skips (bit per index; `once_skip=`).
     /// Default: the ray-tracing structures only. Skipping the wind commands gives the right eye
@@ -108,7 +106,6 @@ impl Config {
             alternate_eye: mode == Mode::Alternate,
             depth_stereo: mode == Mode::Depth,
             framegen: mode == Mode::FrameGen,
-            lock_pitch: options.switch("lock_pitch", false),
             debug: options.value::<u32>("debug_flags").unwrap_or(0),
             once_skip: options.value::<u32>("once_skip").unwrap_or(ONCE_SKIP_DEFAULT),
         }
@@ -148,7 +145,7 @@ mod tests {
         assert_eq!(config.once_skip, ONCE_SKIP_DEFAULT);
         let read = |text: &str| Config::from_options(&Options::parse(text), &MANIFESTS[0]);
         let depth = read("mode=depth\nhud_scale=0.4\naim=off\nlock_pitch=1\ndebug_flags=5\nonce_skip=3");
-        assert!(depth.depth_stereo && !depth.framegen && !depth.aim.head && depth.lock_pitch);
+        assert!(depth.depth_stereo && !depth.framegen && !depth.aim.head);
         assert_eq!((depth.hud.scale, depth.debug, depth.once_skip), (0.4, 5, 3));
         assert!(depth.has(debug::MONO) && !depth.has(debug::SHOW_LEFT));
         let same = read("mode=same\nsynthetic_yaw=30\nsynthetic_pitch=-10");

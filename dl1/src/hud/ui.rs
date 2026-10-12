@@ -170,8 +170,8 @@ unsafe extern "system" fn set_opacity(object: *mut c_void, opacity: f32) {
     let held = opacity < 1.0
         && object as usize != 0
         && HELD.iter().any(|h| h.load(Relaxed) == object as usize)
-        && crate::view::stereo::capturing()
-        && crate::view::stereo::config().world_hud_opaque;
+        && crate::stereo::eyes::capturing()
+        && crate::stereo::eyes::config().world_hud_opaque;
     if held {
         FADES_HELD.fetch_add(1, Relaxed);
     }
@@ -203,13 +203,13 @@ unsafe extern "system" fn set_text(element: *mut c_void, text: *const c_void) {
 /// An element the game handed an engine UI function, on the game thread: finds the root from it
 /// if none is known, and takes the snapshot when it is due.
 fn seen(element: usize) {
-    if element == 0 || BUSY.load(Relaxed) || !crate::view::stereo::capturing() {
+    if element == 0 || BUSY.load(Relaxed) || !crate::stereo::eyes::capturing() {
         return;
     }
     // A loading screen: a level is being loaded or unloaded and its UI freed. Reading the cached
     // tree then reads freed elements (quitting to the menu would crash the game), so it is let go
     // and found again once the world is drawn.
-    if !crate::view::stereo::world_drawn_recently() {
+    if !crate::stereo::eyes::world_drawn_recently() {
         forget_tree();
         return;
     }
@@ -358,7 +358,7 @@ fn snapshot(calls: &Calls, root: usize, now: u64) -> Layout {
             .collect();
         cache.root = root;
     }
-    if crate::view::stereo::config().world_hud_opaque {
+    if crate::stereo::eyes::config().world_hud_opaque {
         hold_opaque(calls, &cache.widgets);
     }
     let count = cache.widgets.len().max(1);

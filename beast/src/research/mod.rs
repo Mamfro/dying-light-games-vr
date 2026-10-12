@@ -15,7 +15,9 @@ pub mod history;
 pub mod motion;
 pub mod streamline;
 
+use crate::{Beast, arms, look, stereo_on};
 use monaka_hook::Hooks;
+use monaka_producer::game::{Lack, Start};
 use monaka_hook::module::Module;
 use monaka_producer::research::Research;
 use monaka_producer::{Rejection, log};
@@ -67,6 +69,26 @@ impl Options {
     pub fn history_any(&self) -> bool {
         self.history || self.refs || self.dump.is_some() || self.vp.is_some() || self.frames
     }
+}
+
+/// The probes' install: their hooks on the renderer and the game DLL; `probe_hands` rides on the
+/// look's arms callback.
+pub(crate) fn install_probes(start: &mut Start<'_, Beast>) -> Result<(), Lack> {
+    let stereo = stereo_on(start.options);
+    if options().hands
+        && start.is_on(&look::LOOK)
+        && !start.is_on(&arms::ARMS)
+        && let Err(why) = arms::hands::configure(&start.build.engine, arms::hands_settings(start, false))
+    {
+        log!("arms probe off: {}", why.reason);
+    }
+    // SAFETY: the renderer's and the game DLL's hashes were checked.
+    unsafe {
+        install(start.hooks, &start.build.renderer, stereo)?;
+        install_game(start.hooks, start.build.gamedll.as_ref())?;
+    }
+    self::start(stereo, start.build.renderer.base());
+    Ok(())
 }
 
 pub static PROBES: Research<Options> = Research::new(Options::from_options);

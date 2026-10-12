@@ -158,7 +158,7 @@ pub const ONCE_EXECUTES: [Target; 9] = [
 pub const CAMERA_WRITER_RETURNS: [usize; 7] = [0x11161b6, 0x11161e4, 0x1116243, 0x11162ad, 0x111632d, 0x11163a3, 0x111640d];
 
 // --- Game DLL ---------------------------------------------------------------------------------------
-pub type InputActionFn = unsafe extern "system" fn(binding: usize, receivers: usize, value: f32, source: bool, repeat: bool);
+pub use eng_chr::headaim::InputActionFn;
 pub const INPUT_ACTION: Site<InputActionFn> = site("input action", 0x1ec1700, &[Instruction::plain(&[0x48, 0x89, 0x5c, 0x24, 0x10])]);
 /// The vertical look actions, checked against the engine's action names: (instruction RVA in the
 /// engine that loads the id, name RVA, id, name).
@@ -212,9 +212,6 @@ pub const ARMS_LAYOUT: eng_chr::fpp::Layout = eng_chr::fpp::Layout { weapons: 0x
 /// about its own x (along the forearm) against DL1's; without this the hands are upside down. The
 /// gun holder has no correction of its own.
 pub const BONE_AXES: monaka_arms::BoneAxes = monaka_arms::BoneAxes::DYING_LIGHT_2;
-/// The finger bones' axes ([`eng_chr::fingers`]; `r_hand` carries the thumb `finger01`-`03` and a
-/// metacarpal `finger10`..`40` with three knuckles each).
-pub const FINGER_AXES: eng_chr::fingers::Axes = eng_chr::fingers::Axes::DYING_LIGHT_2;
 // --- D3D11 renderer -----------------------------------------------------------------------------------
 pub type PacketFn = unsafe extern "system" fn(packet: usize) -> usize;
 pub const DLSS_EVALUATE_11: Site<PacketFn> = site("DLSS evaluate", 0x37300, &[Instruction::plain(&[0x48, 0x89, 0x5c, 0x24, 0x18])]);

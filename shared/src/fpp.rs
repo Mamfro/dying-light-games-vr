@@ -110,9 +110,9 @@ pub struct Options {
     /// Log the skeleton's elements and the weapon visuals (`probe_hands`).
     pub probe: bool,
     pub melee: melee::Settings,
-    /// With the rig: a free hand's fingers follow the headset's finger tracking, on these bone
-    /// axes ([`crate::fingers`]); `None` leaves the fingers to the game.
-    pub fingers: Option<crate::fingers::Axes>,
+    /// With the rig: a free hand's fingers follow the headset's finger tracking
+    /// ([`crate::fingers`]).
+    pub fingers: bool,
     /// Each controller's palm in tracking space, by side, for the swings (the same the `pose`
     /// closure puts the arms on).
     pub palms: [Option<HandPose>; 2],
@@ -238,8 +238,8 @@ pub fn around<S: ArmsSkeleton>(
             if let Some(skeleton) = &skeleton {
                 crate::melee_reach::look(skeleton, weapon, held);
             }
-            if let (Some(axes), Some(skeleton)) = (options.fingers, &skeleton) {
-                monaka_arms::fingers::place_free_hands(options.melee.aim_side, weapon != 0, |side, tracked| crate::fingers::apply(skeleton, &axes, side, tracked));
+            if let (true, Some(skeleton)) = (options.fingers, &skeleton) {
+                monaka_arms::fingers::place_free_hands(options.melee.aim_side, weapon != 0, |side, tracked| crate::fingers::apply(skeleton, side, tracked));
             }
             Outcome { before, placed: Some(placed) }
         }

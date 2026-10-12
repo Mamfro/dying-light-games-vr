@@ -137,7 +137,7 @@ pub fn camera_lean(pitch: f32) -> (f32, f32) {
 // projection again (`UI_ON_RESOLUTION_CHANGE`, the only caller of that export), runs five more of
 // the level's virtuals and puts the screens back. The game does not run it when the video settings
 // change size. Run from outside, at the game's frame, it breaks the game (placeholder text on the
-// start screen, then access violations in the engine), so `output::video` makes only the
+// start screen, then access violations in the engine), so `stereo::video` makes only the
 // projection call on each level.
 
 /// A level's UI system, `[level + 0x568]` (the level an `ILevel` keeps at +8), and its UI manager at

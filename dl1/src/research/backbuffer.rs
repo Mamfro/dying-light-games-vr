@@ -60,7 +60,7 @@ pub fn bound(context: &ID3D11DeviceContext, on: bool, count: u32, depth: bool) {
     if !enabled() {
         return;
     }
-    let Some(frame) = crate::view::stereo::drawing_present() else { return };
+    let Some(frame) = crate::stereo::eyes::drawing_present() else { return };
     if !LOGGED.contains(&frame) {
         return;
     }
@@ -83,7 +83,7 @@ pub fn draw(context: &ID3D11DeviceContext, vertices: u32, copied: bool) {
     if !enabled() {
         return;
     }
-    let Some(frame) = crate::view::stereo::drawing_present() else { return };
+    let Some(frame) = crate::stereo::eyes::drawing_present() else { return };
     let index = {
         let Ok(mut counts) = COUNTS.lock() else { return };
         at_frame(&mut counts, frame);

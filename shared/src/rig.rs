@@ -27,7 +27,6 @@ pub struct Facts {
     pub skeleton: crate::coskeleton::Layout,
     pub arms: Layout,
     pub bones: BoneAxes,
-    pub fingers: crate::fingers::Axes,
     /// The key head aim notes the player camera under, from the camera the callback gets: the
     /// camera itself, or the object at this offset in it (The Beast's renderer camera).
     pub camera_key_at: Option<usize>,
@@ -112,7 +111,7 @@ impl Rig {
             return;
         };
         let palms = controllers::palms();
-        let fpp_options = fpp::Options { rig: options.rig, probe: options.probe, melee: options.melee, fingers: (options.rig && options.fingers).then_some(self.facts.fingers), palms, apart: crate::handwork::throwing::throwing_now() };
+        let fpp_options = fpp::Options { rig: options.rig, probe: options.probe, melee: options.melee, fingers: options.rig && options.fingers, palms, apart: crate::handwork::throwing::throwing_now() };
         let vis = target.wrapping_sub(self.facts.icamera_target);
         let key = match self.facts.camera_key_at {
             Some(at) => mem::read::<usize>(camera + at).unwrap_or(0),

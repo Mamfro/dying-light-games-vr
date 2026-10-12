@@ -11,18 +11,19 @@
 //! hands drawn and the hand rig on, the head aims; the left hand's tool aims with the left
 //! controller (`monaka_arms::aim`), except a throw or a bow by hand, which aim themselves
 //! ([`crate::handwork::head_aims`]). A game supplies its offsets ([`Fields`]) and where it steers
-//! from (DL2 at the player camera setter, The Beast at the arms callback); the state, the steps
-//! and the tallies are here.
+//! from (DL2 at the player camera setter, The Beast at the arms callback); the state, the steps,
+//! the input-action converter's hook ([`input_action`]) and the tallies are here, and the method's
+//! component is `crate::feature::look`.
 
 use monaka_arms::aim::{AimSettings, LookFields, LookSteer, TOOL, neutral_pitch, note_source};
 use monaka_core::aim::{BakedYaw, Convention, Look};
 use monaka_core::camera::{Mat34, from_back_up, head_yaw_pitch, level, turn};
 use monaka_core::protocol::HeadPose;
-use monaka_hook::mem;
 use monaka_hook::module::Module;
+use monaka_hook::{InFlight, Original, mem};
 use monaka_producer::log;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering::*};
+use std::sync::{Mutex, OnceLock};
 use monaka_core::sync::Locked;
 
 /// How long after an update head aim counts as steering (ms): a pause, a loading screen or a
@@ -155,9 +156,16 @@ impl HeadAim {
 
     /// One player camera update: steers `character` for the next update toward the head (or the
     /// aiming controller), recording the share this update's camera carries under `counter` (the
-    /// game frame, when the game numbers them). With no `head` (VR stopped, no pose) or while
-    /// releasing, hands the game's own angles and the left trigger back; `None` then.
+    /// game frame, when the game numbers them), the view level meanwhile
+    /// ([`crate::view_bob::hold`]). With no `head` (VR stopped, no pose) or while releasing, hands
+    /// the game's own angles, its view bob and the left trigger back; `None` then.
     pub fn steer(&self, character: usize, head: Option<HeadPose>, counter: Option<u64>) -> Option<Steered> {
+        let steered = self.steer_look(character, head, counter);
+        crate::view_bob::hold(character, steered.is_some());
+        steered
+    }
+
+    fn steer_look(&self, character: usize, head: Option<HeadPose>, counter: Option<u64>) -> Option<Steered> {
         let settings = self.settings();
         let mut steer = self.steer.locked();
         // The share this update's camera carries (written by the previous update).
@@ -280,6 +288,45 @@ impl HeadAim {
     pub fn pitch_blocked(&self) -> u64 {
         self.pitch_blocked.load(Relaxed)
     }
+}
+
+/// The game's input-action converter `(binding, receivers, value, source, repeat)`: action id at
+/// binding+0, flags at +0x10 (0x10: inverted, neutral 1).
+pub type InputActionFn = unsafe extern "system" fn(binding: usize, receivers: usize, value: f32, source: bool, repeat: bool);
+
+pub static INPUT_ACTION: Original<InputActionFn> = Original::new();
+/// A build's vertical look actions: the RVA of each id's load, its name's RVA, the id, the name.
+pub type PitchActions = [(usize, usize, u32, &'static str)];
+/// Head aim and its vertical look actions, once the converter is hooked.
+static CONVERTER: OnceLock<(&'static HeadAim, &'static PitchActions)> = OnceLock::new();
+/// A game's rule for vertical look while head aim does not steer (Dying Light 2's pitch lock).
+static PITCH_RULE: OnceLock<fn(binding: usize, value: f32) -> f32> = OnceLock::new();
+
+/// The converter is hooked for `aim`, its vertical look actions in `table`.
+pub fn convert_for(aim: &'static HeadAim, table: &'static PitchActions) {
+    let _ = CONVERTER.set((aim, table));
+}
+
+/// What vertical look does while head aim does not steer: `rule` gets each input's binding and
+/// value and gives the value passed on.
+pub fn pitch_rule(rule: fn(binding: usize, value: f32) -> f32) {
+    let _ = PITCH_RULE.set(rule);
+}
+
+/// The game's input-action converter: while head aim steers the character, the head alone pitches
+/// it, so vertical look input (mouse and stick) gets its neutral value; otherwise the game's own
+/// rule, if it has one.
+///
+/// # Safety
+/// Only as the converter's detour ([`INPUT_ACTION`] its original), with the game's own arguments.
+pub unsafe extern "system" fn input_action(binding: usize, receivers: usize, value: f32, source: bool, repeat: bool) {
+    let _flight = InFlight::enter();
+    let value = match CONVERTER.get() {
+        Some((aim, table)) if aim.live() => aim.neutral_pitch_if_live(binding, value, |action| is_pitch_action(table, action)),
+        _ => PITCH_RULE.get().map_or(value, |rule| rule(binding, value)),
+    };
+    // SAFETY: forwards the game's own call, the value possibly neutralised.
+    unsafe { INPUT_ACTION.get()(binding, receivers, value, source, repeat) }
 }
 
 /// Whether `action` is one of `table`'s vertical look actions (RVA of the id's load, name RVA,

@@ -52,9 +52,9 @@ pub struct Config {
     /// Diagnostic: the real pad's input is dropped from the reads the VR pad merges into.
     pub pad_mask_real: bool,
     /// Room-scale following (with the hand rig; `monaka_arms::roomscale` on
-    /// [`crate::player::roomscale`]).
+    /// [`crate::arms::roomscale`]).
     pub room_scale: Option<roomscale::Settings>,
-    /// Physical melee (with the hand rig; [`crate::player::melee`]). DL1 starts a light attack
+    /// Physical melee (with the hand rig; [`crate::arms::melee`]). DL1 starts a light attack
     /// when it is let go: swings press briefly.
     pub physical_melee: Option<melee::Physical>,
     /// With physical melee, a weapon's swing attacks only once the blade is about to reach

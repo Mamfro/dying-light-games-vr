@@ -30,9 +30,11 @@ pub mod view;
 pub mod walk;
 pub mod widget;
 
+use crate::{Dl1, Facts};
 use monaka_hook::Hooks;
 use monaka_hook::module::Module;
 use monaka_producer::Rejection;
+use monaka_producer::game::{Lack, Start};
 use monaka_producer::research::Research;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -228,6 +230,24 @@ pub unsafe fn install(hooks: &mut Hooks, engine_module: &Module, gamedll: &Modul
         pad::install(hooks, engine_module)?;
         monaka_pad::probe::install(hooks);
     }
+    Ok(())
+}
+
+/// The probes' hooks: the look and arms probes take their component's hook when it is off.
+pub(crate) fn install_probes(start: &mut Start<'_, Dl1>) -> Result<(), Lack> {
+    let probes = options();
+    let Facts { engine: engine_module, renderer, gamedll } = start.build;
+    if !probes.flat {
+        if probes.look && !start.is_on(&crate::look::LOOK) {
+            crate::look::hook_from_forward(start.hooks, engine_module)?;
+        }
+        if probes.arms() && !start.is_on(&crate::arms::ARMS) {
+            crate::arms::hook_arms(start.hooks, engine_module, gamedll)?;
+        }
+    }
+    let size = if probes.flat { None } else { crate::swapchain_parts(renderer).ok().map(|(_, _, _, size)| size) };
+    // SAFETY: the engine and the game DLL are the builds `engine.rs` describes (hashes checked).
+    unsafe { install(start.hooks, engine_module, gamedll, size)? };
     Ok(())
 }
 

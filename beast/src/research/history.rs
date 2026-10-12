@@ -522,7 +522,7 @@ fn camera_eye(object: usize, eyes: &[[f32; 3]; 2]) -> Option<(String, Option<usi
 
 fn camera_refs(context: usize) {
     let eyes = eyes();
-    let rendering = crate::view::stereo::rendering_eye();
+    let rendering = crate::stereo::eyes::rendering_eye();
     let renderer = mem::read::<usize>(REFS_RENDERER.load(Relaxed) + crate::engine::RENDERER_GLOBAL).unwrap_or(0);
     let frame = mem::read::<usize>(renderer + crate::engine::RENDERER_FRAME_DATA).unwrap_or(0);
     let main_view = mem::read::<usize>(frame + 0xf0).and_then(|c| camera_eye(c, &eyes));

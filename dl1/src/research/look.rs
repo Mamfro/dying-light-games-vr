@@ -1,4 +1,4 @@
-//! Head aim's probes (`crate::player::aim`).
+//! Head aim's probes (`crate::look`).
 //!
 //! - `probe_look` finds DL1's look fields: it logs who calls `FromForwardUpPos` on
 //!   the player camera, the classes of the objects around that camera (and of the player objects

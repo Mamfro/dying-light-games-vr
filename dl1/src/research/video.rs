@@ -1,5 +1,5 @@
 //! `probe_video`: where the game keeps the current resolution (the video settings layout
-//! `crate::output::video` relies on): on the game's frames ([`eng_chr::game::observe`]), the objects around the game
+//! `crate::stereo::video` relies on): on the game's frames ([`eng_chr::game::observe`]), the objects around the game
 //! object searched for the back buffer's size.
 
 use crate::engine;
@@ -18,7 +18,7 @@ pub fn set_size(width: u32, height: u32) {
 
 /// On the game's frames: where the size is kept, twice.
 pub fn probe_frame(game: usize) {
-    if crate::view::stereo::capturing() {
+    if crate::stereo::eyes::capturing() {
         let n = PROBES.fetch_add(1, Relaxed);
         if n == 100 || n == 5000 {
             probe(game);

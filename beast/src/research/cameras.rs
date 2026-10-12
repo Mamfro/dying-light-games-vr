@@ -1,4 +1,4 @@
-//! `probe=1`: observing probe of the renderer's camera (`crate::view::cameras`): which cameras are set or
+//! `probe=1`: observing probe of the renderer's camera (`crate::stereo::cameras`): which cameras are set or
 //! rebuilt, from where, on which thread and how often, to find the player's camera and the one
 //! place per frame where an eye camera can be written. Changes nothing: every detour counts its call
 //! and runs the original with the game's own arguments (`CCamera::SetView(mtx34)` is hooked for
