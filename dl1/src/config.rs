@@ -1,10 +1,10 @@
 //! What the launcher can set, from `dl1-options.txt` beside the DLL: the shared settings
 //! ([`Shared`], the manifest's defaults) and this game's own. Defaults are the headset play mode.
 
-use crate::manifest::MANIFESTS;
 use monaka_arms::aim::AimSettings;
 use monaka_arms::{melee, roomscale};
 use monaka_core::camera::Frustum;
+use monaka_core::manifest::Manifest;
 use monaka_core::options::{Options, Shared};
 use monaka_core::protocol::HeadPose;
 use std::ops::Deref;
@@ -125,8 +125,8 @@ impl Fsr {
 }
 
 impl Config {
-    pub fn from_options(options: &Options) -> Self {
-        let shared = Shared::from_options(options, &MANIFESTS[0]);
+    pub fn from_options(options: &Options, manifest: &Manifest) -> Self {
+        let shared = Shared::from_options(options, manifest);
         let arms_aim = AimSettings::from_options(options, shared.aim, true);
         let throw_by_hand = options.switch("throw_by_hand", true);
         Self {
@@ -170,6 +170,11 @@ impl Config {
         }
     }
 
+    /// FSR as it can run: with the headset's eye size, not with the hybrid.
+    pub fn upscaled(&self) -> Option<Fsr> {
+        self.fsr.filter(|_| self.eye_size.is_some() && !self.hybrid)
+    }
+
     /// The HUD and menus are placed in front of the eyes (`hud=0`: left as the game draws them).
     pub fn hud_active(&self) -> bool {
         self.hud.shown
@@ -197,54 +202,53 @@ pub fn widened_fov(pose: &HeadPose) -> Option<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::manifest::MANIFESTS;
     use monaka_core::protocol::{LEFT_HAND, RIGHT_HAND};
 
-    #[test]
-    fn reads_every_manifest_option() {
-        let unread = monaka_core::manifest::unread_options(&MANIFESTS[0], |options| {
-            Config::from_options(options);
-        });
-        assert!(unread.is_empty(), "not read: {unread:?}");
+    impl Config {
+        fn parse(text: &str) -> Self {
+            Self::from_options(&Options::parse(text), &MANIFESTS[0])
+        }
     }
 
     #[test]
     fn fsr_keeps_the_dynamic_hud() {
         // The hands' panels take their pieces' draws in the upscaler's HUD layer path too.
-        assert!(Config::from_options(&Options::parse("fsr=1\nworld_hud=1")).hud.world);
+        assert!(Config::parse("fsr=1\nworld_hud=1").hud.world);
     }
 
     #[test]
     fn defaults_are_the_headset_mode() {
-        let config = Config::from_options(&Options::default());
+        let config = Config::parse("");
         assert_eq!(config.schedule.latency, 2);
         assert!(config.head_tracking && config.headset_fov && config.aim.head && config.widen_game_fov);
         assert!(config.aim.rig && config.aim.hand, "motion controls, as the manifest says");
         assert!(config.turn_live_camera, "hand aim turns the live camera back to the view");
-        assert!(!Config::from_options(&Options::parse("aim=head")).turn_live_camera, "head aim replaces the live-camera turn");
+        assert!(!Config::parse("aim=head").turn_live_camera, "head aim replaces the live-camera turn");
         assert!(config.no_raster_occlusion && config.hud_active() && config.hud.world);
         assert_eq!((config.hud.scale, config.hud.distance, config.mesh_cull_scale), (0.36, 2.0, 0.2));
         assert_eq!((config.synthetic, config.detail_zoom), (None, None));
         assert!(!config.symmetric_projection && !config.hybrid, "experiments are opt-in");
         assert!(config.fsr.is_none(), "FSR is opt-in");
-        let without = Config::from_options(&Options::parse("aim=off"));
+        let without = Config::parse("aim=off");
         assert!(!without.aim.head && without.turn_live_camera && !without.arms_aim.head_aim);
-        let hands = Config::from_options(&Options::parse("aim=controller\naim_hand=Left"));
+        let hands = Config::parse("aim=controller\naim_hand=Left");
         assert!(hands.aim.hand && hands.aim.side == LEFT_HAND && !hands.aim.rig && hands.arms_aim.hand_aim);
         assert!(hands.turn_live_camera, "hand aim turns the live camera back to the view");
-        assert_eq!(Config::from_options(&Options::parse("aim=head")).aim.side, RIGHT_HAND);
-        let rig = Config::from_options(&Options::parse("aim=hand_rig\nhand_hold=-0.02, 0.01,0.03"));
+        assert_eq!(Config::parse("aim=head").aim.side, RIGHT_HAND);
+        let rig = Config::parse("aim=hand_rig\nhand_hold=-0.02, 0.01,0.03");
         assert!(rig.aim.rig && rig.hand_hold == [-0.02, 0.01, 0.03]);
         assert!(rig.melee.swing && rig.arms_aim.melee_aim_head, "melee by swinging comes with the rig");
         assert_eq!(rig.physical_melee, Some(melee::Physical { blade: 1.1, fist: 0.15, press_ms: Some(40) }), "and physical melee");
-        assert!(Config::from_options(&Options::parse("aim=head")).physical_melee.is_none());
-        assert!(!Config::from_options(&Options::parse("swing_attack=0")).melee.swing);
-        assert_eq!(Config::from_options(&Options::parse("hand_hold=0,2,0")).hand_hold, [0.0; 3]);
-        assert_eq!(Config::from_options(&Options::parse("hand_hold=0,0")).hand_hold, [0.0; 3]);
+        assert!(Config::parse("aim=head").physical_melee.is_none());
+        assert!(!Config::parse("swing_attack=0").melee.swing);
+        assert_eq!(Config::parse("hand_hold=0,2,0").hand_hold, [0.0; 3]);
+        assert_eq!(Config::parse("hand_hold=0,0").hand_hold, [0.0; 3]);
     }
 
     #[test]
     fn rendered_frustum_follows_the_experiment() {
-        let mut config = Config::from_options(&Options::default());
+        let mut config = Config::parse("");
         let pose = config.synthetic_pose(0.0, 0.0);
         let own = config.rendered_frustum(&pose, 0).unwrap();
         assert!(own.straight_ahead()[0] > 0.0, "the headset's own off-centre frustum");
@@ -256,20 +260,20 @@ mod tests {
     #[test]
     fn options_override_and_are_bounded() {
         let options = Options::parse("latency=9\nhud=0\nsynthetic_yaw=30\nhead_tracking=off\ndetail_zoom=0.5");
-        let config = Config::from_options(&options);
+        let config = Config::from_options(&options, &MANIFESTS[0]);
         assert_eq!(config.schedule.latency, 2, "out-of-range latency keeps the default");
         assert!(!config.hud_active());
         assert_eq!(config.synthetic, Some((30.0, 0.0)));
         assert!(config.no_raster_occlusion, "a synthetic pose still turns occlusion off");
         assert_eq!(config.detail_zoom, None);
         assert_eq!(config.eye_size, None);
-        assert_eq!(Config::from_options(&Options::parse("eye_size=2644x2644")).eye_size, Some((2644, 2644)));
-        assert_eq!(Config::from_options(&Options::parse("eye_size=100x2644")).eye_size, None);
+        assert_eq!(Config::parse("eye_size=2644x2644").eye_size, Some((2644, 2644)));
+        assert_eq!(Config::parse("eye_size=100x2644").eye_size, None);
     }
 
     #[test]
     fn widened_fov_contains_both_eyes() {
-        let config = Config::from_options(&Options::default());
+        let config = Config::parse("");
         let pose = config.synthetic_pose(0.0, 0.0);
         let fov = widened_fov(&pose).unwrap();
         // The vertical half-angle 0.80 dominates: 2*0.80 radians in degrees, plus 8.
@@ -278,11 +282,11 @@ mod tests {
 
     #[test]
     fn fsr_renders_smaller_in_eights() {
-        let config = Config::from_options(&Options::parse("fsr=1\neye_size=2644x2644"));
+        let config = Config::parse("fsr=1\neye_size=2644x2644");
         let fsr = config.fsr.expect("on");
         assert_eq!(fsr.render_size((2644, 2644)), (1760, 1760));
         assert_eq!(fsr.sharpness, Some(0.3));
-        let off = Config::from_options(&Options::parse("fsr=1\nfsr_sharpness=0\nfsr_scale=2"));
+        let off = Config::parse("fsr=1\nfsr_sharpness=0\nfsr_scale=2");
         assert_eq!(off.fsr.map(|f| (f.sharpness, f.render_size((2644, 2644)))), Some((None, (1320, 1320))));
     }
 }

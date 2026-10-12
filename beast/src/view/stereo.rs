@@ -24,6 +24,7 @@ use std::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release};
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, AtomicUsize};
 use windows::Win32::Graphics::Direct3D12::ID3D12CommandQueue;
 use windows::Win32::Graphics::Dxgi::IDXGISwapChain3;
+use monaka_core::sync::Locked;
 
 pub static HEAD: HeadSource = HeadSource::new();
 static PUBLISHER: Mutex<Option<AlternatePublisher12>> = Mutex::new(None);
@@ -132,17 +133,18 @@ pub fn channel() -> Option<ChannelName> {
     CHANNEL.lock().ok().and_then(|c| c.clone())
 }
 
-pub fn start(settings: Settings) {
-    *CHANNEL.lock().unwrap_or_else(|e| e.into_inner()) = Some(settings.channel.clone());
+/// Makes the publisher and opens the head; eye cameras are written once [`arm`]ed.
+pub fn install(settings: Settings) {
+    *CHANNEL.locked() = Some(settings.channel.clone());
     let poses = PoseChannel::open(&settings.channel).inspect_err(|e| log!("no pose channel ({e}): no head pose records")).ok();
     let synthetic = settings.synthetic.is_some();
     HEAD.open(poses, settings.synthetic);
     SEPARATION.store(settings.separation);
     EYE_TEST.store(settings.eye_test_degrees.to_radians());
     LATENCY_TEST.store(settings.latency_test_degrees.to_radians());
-    *FOV.lock().unwrap_or_else(|e| e.into_inner()) = FovState { game: None, written: [0.0; 4], restore: false, restored: false };
+    *FOV.locked() = FovState { game: None, written: [0.0; 4], restore: false, restored: false };
     HEADSET_FOV.store(settings.headset_fov, Release);
-    *HUD.lock().unwrap_or_else(|e| e.into_inner()) = settings.hud;
+    *HUD.locked() = settings.hud;
     let test = |name: &str, degrees: f32| if degrees != 0.0 { format!(", {name} test {degrees} degrees") } else { String::new() };
     log!(
         "alternate-eye stereo on {} (latency {}, eye separation {} m, {} field of view{}{}{})",
@@ -154,13 +156,17 @@ pub fn start(settings: Settings) {
         test("eye", settings.eye_test_degrees),
         test("latency", settings.latency_test_degrees),
     );
-    *PUBLISHER.lock().unwrap_or_else(|e| e.into_inner()) = Some(AlternatePublisher12::new(settings.channel, settings.schedule));
+    *PUBLISHER.locked() = Some(AlternatePublisher12::new(settings.channel, settings.schedule));
     PRESENTS.store(0, Relaxed);
     CHOICES.store(0, Relaxed);
-    *SEQUENCER.lock().unwrap_or_else(|e| e.into_inner()) = None;
-    *WRITTEN.lock().unwrap_or_else(|e| e.into_inner()) = ([None; WRITTEN_KEPT], 0);
-    *LABEL.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    *SEQUENCER.locked() = None;
+    *WRITTEN.locked() = ([None; WRITTEN_KEPT], 0);
+    *LABEL.locked() = None;
     LABELLING.store(false, Relaxed);
+}
+
+/// Every hook is in (and the eye size asked for): stereo starts with the next present.
+pub fn arm() {
     ENABLED.store(true, Release);
 }
 
@@ -172,7 +178,7 @@ pub fn quiet(wait_ms: u64) {
     EYE.store(-1, Release);
     CURRENT_EYE.store(-1, Release);
     let pending = {
-        let mut fov = FOV.lock().unwrap_or_else(|e| e.into_inner());
+        let mut fov = FOV.locked();
         fov.restore = fov.game.is_some();
         fov.restore
     };
@@ -184,7 +190,7 @@ pub fn quiet(wait_ms: u64) {
 
 /// After the hooks are out: lets go of the channel and the head.
 pub fn release() {
-    if let Some(mut publisher) = PUBLISHER.lock().unwrap_or_else(|e| e.into_inner()).take() {
+    if let Some(mut publisher) = PUBLISHER.locked().take() {
         log!("{} pairs published, {} failures", publisher.pairs(), publisher.failures());
         publisher.close();
     }
@@ -201,7 +207,7 @@ pub fn before_present(swap: &IDXGISwapChain3, queue: Option<ID3D12CommandQueue>)
     if !crate::output::video::ready() {
         // Waiting for the headset eye size: nothing is published (the channel takes the first
         // published frame's size).
-        LABEL.lock().unwrap_or_else(|e| e.into_inner()).take();
+        LABEL.locked().take();
         COUNTERS.size_waits.fetch_add(1, Relaxed);
         return Some(n);
     }
@@ -226,8 +232,8 @@ pub fn before_present(swap: &IDXGISwapChain3, queue: Option<ID3D12CommandQueue>)
             used.fov = [Frustum { left: -x, right: x, up: y, down: -y }.fov(); 2];
         }
     };
-    let label = LABEL.lock().unwrap_or_else(|e| e.into_inner()).take();
-    let mut publisher = PUBLISHER.lock().unwrap_or_else(|e| e.into_inner());
+    let label = LABEL.locked().take();
+    let mut publisher = PUBLISHER.locked();
     if let Some(publisher) = publisher.as_mut() {
         let scheduled = publisher.schedule().shown_eye(n);
         if let Some(shown) = label.map(|l| l.eye).or(scheduled) {
@@ -306,7 +312,7 @@ static LABEL: Mutex<Option<Label>> = Mutex::new(None);
 static LABELLING: AtomicBool = AtomicBool::new(false);
 
 fn remember_written(written: Written) {
-    let mut ring = WRITTEN.lock().unwrap_or_else(|e| e.into_inner());
+    let mut ring = WRITTEN.locked();
     let slot = ring.1 % WRITTEN_KEPT;
     ring.0[slot] = Some(written);
     ring.1 += 1;
@@ -388,13 +394,13 @@ pub fn label_frame(position: [f32; 3]) -> Option<usize> {
         return None;
     }
     let found = {
-        let ring = WRITTEN.lock().unwrap_or_else(|e| e.into_inner());
+        let ring = WRITTEN.locked();
         let distance = |w: &Written| (0..3).map(|i| (w.position[i] - position[i]).abs()).fold(0.0, f32::max);
         ring.0.iter().flatten().filter(|w| distance(w) < SAME_CAMERA).min_by(|a, b| distance(a).total_cmp(&distance(b))).copied()
     };
     match found {
         Some(written) => {
-            *LABEL.lock().unwrap_or_else(|e| e.into_inner()) = Some(Label { eye: written.eye, pose: written.pose });
+            *LABEL.locked() = Some(Label { eye: written.eye, pose: written.pose });
             LABELLING.store(true, Relaxed);
             COUNTERS.labelled.fetch_add(1, Relaxed);
             Some(written.eye)
@@ -482,7 +488,7 @@ pub fn eye_vectors(camera: usize, back: usize, up: usize, position: usize, baked
         return None;
     }
     PLAYER_CAMERA.store(camera, Relaxed);
-    let (choice, taken) = SEQUENCER.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_default().next(CHOICES.load(Acquire));
+    let (choice, taken) = SEQUENCER.locked().get_or_insert_default().next(CHOICES.load(Acquire));
     let counter = match taken {
         Taken::InStep => None,
         Taken::Early => Some(&COUNTERS.repeated),
@@ -497,7 +503,7 @@ pub fn eye_vectors(camera: usize, back: usize, up: usize, position: usize, baked
     let eye = Schedule::camera_eye(n);
     // Both eyes of a pair are drawn from one head pose, sampled for its left-eye frame.
     let pose = {
-        let mut pair = PAIR_POSE.lock().unwrap_or_else(|e| e.into_inner());
+        let mut pair = PAIR_POSE.locked();
         // With frame generation each frame takes the newest pose: a generated eye stands for the
         // moment of the other eye's frame, which must be drawn from that moment's head.
         if Schedule::starts_pair(n) || crate::output::framegen::enabled() {
@@ -510,10 +516,10 @@ pub fn eye_vectors(camera: usize, back: usize, up: usize, position: usize, baked
         }
         *pair
     };
-    if let Some(publisher) = PUBLISHER.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+    if let Some(publisher) = PUBLISHER.locked().as_mut() {
         publisher.record_pose(n, pose);
     }
-    *PENDING.lock().unwrap_or_else(|e| e.into_inner()) = pose;
+    *PENDING.locked() = pose;
     CURRENT_EYE.store(eye as i32, Release);
     if let Some(scale) = mem::read::<[f32; 6]>(camera + engine::CAMERA_PROJECTION) {
         GAME_SCALE[0].store(scale[0]);
@@ -542,7 +548,7 @@ pub fn before_frustum(camera: usize) {
         return;
     }
     let extents = camera + engine::CAMERA_EXTENTS;
-    let mut fov = FOV.lock().unwrap_or_else(|e| e.into_inner());
+    let mut fov = FOV.locked();
     let Some(current) = mem::read::<[f32; 4]>(extents) else { return };
     // The game's own extents: these, unless they are still ours from the last rebuild.
     if fov.game.is_none() || current != fov.written {
@@ -567,7 +573,7 @@ pub fn before_frustum(camera: usize) {
         return;
     }
     let Ok(eye) = usize::try_from(CURRENT_EYE.load(Acquire)) else { return };
-    let pose = *PENDING.lock().unwrap_or_else(|e| e.into_inner());
+    let pose = *PENDING.locked();
     let near = mem::read::<f32>(camera + engine::CAMERA_NEAR).filter(|n| n.is_finite() && *n > 0.0);
     let (Some(frustum), Some(near)) = (Frustum::from_fov(pose.fov[eye.min(1)]).filter(|_| pose.valid != 0), near) else { return };
     let wanted = frustum.symmetric().extents(near);

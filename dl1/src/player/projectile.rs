@@ -4,7 +4,7 @@
 //! ([`aim`]); each projectile fired then gets its start and direction from the hands, its speed
 //! kept.
 
-use crate::player::hand_world;
+use monaka_core::math::{cross, dot, length, unit};
 use monaka_hook::module::Module;
 use monaka_hook::{Hooks, InFlight, Original, mem};
 use monaka_producer::Rejection;
@@ -66,23 +66,10 @@ pub fn placed() -> u64 {
     PLACED.load(Relaxed)
 }
 
-fn unit(v: [f32; 3]) -> Option<[f32; 3]> {
-    let l = hand_world::length(v);
-    (l.is_finite() && l > 1e-6).then(|| v.map(|c| c / l))
-}
-
-fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
-
-fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
-}
-
 /// `v` turned by the rotation that takes unit `from` to unit `to`.
 pub fn turned(v: [f32; 3], from: [f32; 3], to: [f32; 3]) -> [f32; 3] {
     let axis = cross(from, to);
-    let (sin, cos) = (hand_world::length(axis), dot(from, to));
+    let (sin, cos) = (length(axis), dot(from, to));
     let Some(k) = unit(axis).filter(|_| sin > 1e-6) else { return v };
     let kv = cross(k, v);
     let kd = dot(k, v) * (1.0 - cos);
@@ -97,7 +84,7 @@ unsafe extern "C" fn fire(projectile: *mut c_void) {
         && let Some(velocity) = mem::read::<[f32; 3]>(at + VELOCITY)
         && let Some(along) = unit(velocity)
     {
-        let speed = hand_world::length(velocity);
+        let speed = length(velocity);
         let (start, direction) = match shot {
             Shot::Along { start, direction } => (start, direction),
             // This pellet's turn away from the aim, put on the barrel.

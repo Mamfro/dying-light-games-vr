@@ -65,10 +65,6 @@ type LaunchFn = unsafe extern "C" fn(usize, *const [f32; 3], *const [f32; 3]);
 static LAUNCH_ORIGINAL: Original<LaunchFn> = Original::new();
 static LAUNCHES: AtomicU64 = AtomicU64::new(0);
 
-fn vec3(at: usize) -> [f32; 3] {
-    mem::read::<[f32; 3]>(at).unwrap_or([f32::NAN; 3])
-}
-
 fn position(object: usize) -> [f32; 3] {
     let f = POSITION.load(Relaxed);
     if f == 0 || object == 0 {
@@ -81,7 +77,7 @@ fn position(object: usize) -> [f32; 3] {
 }
 
 fn describe(object: usize) -> String {
-    format!("{object:#x} ({}) at {:.2?}, +0x100 {:.2?}", class_name(object).unwrap_or_default(), position(object), vec3(object + VELOCITY))
+    format!("{object:#x} ({}) at {:.2?}, +0x100 {:.2?}", class_name(object).unwrap_or_default(), position(object), crate::player::walk::vec3(object + VELOCITY))
 }
 
 fn begin(name: &'static str) {
@@ -116,7 +112,7 @@ unsafe extern "C" fn throw(controller: *mut c_void) {
 
 unsafe extern "C" fn drop_or_throw(player: *mut c_void, slot: u32, item: usize, flag: u8, target: *const f32, a: usize, b: usize, c: usize, d: usize) -> usize {
     let _flight = InFlight::enter();
-    let point = if target.is_null() { [f32::NAN; 3] } else { vec3(target as usize) };
+    let point = if target.is_null() { [f32::NAN; 3] } else { crate::player::walk::vec3(target as usize) };
     begin("drop");
     // SAFETY: forwards the game's own call.
     let object = unsafe { DROP_ORIGINAL.get()(player, slot, item, flag, target, a, b, c, d) };
@@ -143,10 +139,10 @@ unsafe extern "C" fn projectile_fire(projectile: *mut c_void) {
     let _flight = InFlight::enter();
     let at = projectile as usize;
     if let Some(draw) = LOOSING.lock().ok().and_then(|l| *l) {
-        let velocity = vec3(at + PROJECTILE_VELOCITY);
+        let velocity = crate::player::walk::vec3(at + PROJECTILE_VELOCITY);
         let speed = (velocity[0] * velocity[0] + velocity[1] * velocity[1] + velocity[2] * velocity[2]).sqrt();
         let n = ARROWS.fetch_add(1, Relaxed) + 1;
-        log!("probe_throw: arrow {n}: draw {draw:.2}, start {:.2?}, velocity {velocity:.2?} ({speed:.1} m/s)", vec3(at + PROJECTILE_START));
+        log!("probe_throw: arrow {n}: draw {draw:.2}, start {:.2?}, velocity {velocity:.2?} ({speed:.1} m/s)", crate::player::walk::vec3(at + PROJECTILE_START));
     }
     // SAFETY: forwards the game's own call.
     unsafe { PROJECTILE_FIRE_ORIGINAL.get()(projectile) }
@@ -158,7 +154,7 @@ unsafe extern "C" fn launch(object: usize, velocity: *const [f32; 3], target: *c
     let point = (!target.is_null()).then(|| mem::read::<[f32; 3]>(target as usize)).flatten();
     // SAFETY: forwards the game's own call.
     unsafe { LAUNCH_ORIGINAL.get()(object, velocity, target) };
-    let after = vec3(object + VELOCITY);
+    let after = crate::player::walk::vec3(object + VELOCITY);
     let speed = (after[0] * after[0] + after[1] * after[1] + after[2] * after[2]).sqrt();
     let n = LAUNCHES.fetch_add(1, Relaxed) + 1;
     log!("probe_throw: launch {n}: {} given {given:.2?}, target {point:.2?}; after {after:.2?} ({speed:.1} m/s)", describe(object));

@@ -31,6 +31,7 @@ use std::collections::BTreeMap;
 use std::ffi::c_void;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
+use monaka_core::sync::Locked;
 
 const IS_ACTUALLY_VISIBLE: &str = "?IsActuallyVisible@IElement@gui@@QEBA_NXZ";
 const GET_VISIBLE: &str = "?GetVisible@IElement@gui@@QEBA_NXZ";
@@ -218,7 +219,7 @@ pub fn layout() -> Option<Layout> {
 /// (none: not read); `active` says whether the game's HUD is live now (VR running, in play).
 pub fn configure(probe: bool, pieces: &'static [Piece], active: fn() -> bool) {
     PROBING.store(probe, Relaxed);
-    *PIECES.lock().unwrap_or_else(|e| e.into_inner()) = &pieces[..pieces.len().min(MAX_PIECES)];
+    *PIECES.locked() = &pieces[..pieces.len().min(MAX_PIECES)];
     PIECES_WANTED.store(!pieces.is_empty(), Relaxed);
     ACTIVE.store(active as usize, Relaxed);
 }
@@ -257,7 +258,7 @@ pub fn install(hooks: &mut Hooks, engine: &Module, build: &Build) -> Result<(), 
         hooks.inline(&POSITION_IMPL_ORIGINAL, "gui::CElement actual position", position, build.position.1, actual_position as RefFn)?;
         hooks.inline(&SIZE_IMPL_ORIGINAL, "gui::CElement actual size", size, build.size.1, actual_size as RefFn)?;
     }
-    *CALLS.lock().unwrap_or_else(|e| e.into_inner()) = Some(calls);
+    *CALLS.locked() = Some(calls);
     Ok(())
 }
 

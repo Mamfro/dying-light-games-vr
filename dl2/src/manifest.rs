@@ -1,7 +1,23 @@
-//! What this game crate declares about itself, for the launcher, the loader and its own config
-//! (`monaka_core::manifest`). Built from that module alone: the launcher compiles this file too.
+//! Dying Light 2's game info, for the launcher and the loader (`monaka_core::manifest`). Its options
+//! are those of the components ([`crate::Dl2`], `monaka_producer::game::options`), then the
+//! launcher's own for starting it through Steam.
 
+use crate::Dl2;
 use monaka_core::manifest::*;
+use monaka_producer::game::{options, options_len};
+
+const COMPONENTS: usize = options_len::<Dl2>("dl2");
+const DL2: [Opt; COMPONENTS + 2] = {
+    let components: [Opt; COMPONENTS] = options::<Dl2, COMPONENTS>("dl2");
+    let mut all = [LAUNCH; COMPONENTS + 2];
+    let mut i = 0;
+    while i < COMPONENTS {
+        all[i] = components[i];
+        i += 1;
+    }
+    all[COMPONENTS + 1] = settle(180.0, 30.0);
+    all
+};
 
 pub const MANIFESTS: &[Manifest] = &[Manifest {
     id: "dl2",
@@ -16,63 +32,8 @@ pub const MANIFESTS: &[Manifest] = &[Manifest {
     launch: Launch::Auto { settle_seconds: 30 },
     refused_arguments: &[],
     before: "In the game's options, use DirectX 12. The game's own Frame Generation can be on or off (Monaka VR holds it off while VR runs); for Smooth, turn it OFF.",
-    options: &[
-        aim(&[AIM_MOTION, AIM_LOOK, AIM_POINT, AIM_MOUSE], aims::HAND_RIG),
-        AIM_HAND,
-        render_size("Experimental in this game."),
-        WORLD_HUD,
-        opt("world_markers", "Markers in the world", "Objective and waypoint markers sit at their targets' distance instead of in the flat HUD.", Kind::Switch { default: true }).on(Shown::Hud),
-        HUD_SIZE.default_number(0.55),
-        FINGER_TRACKING,
-        opt("room_scale", "Room-scale movement", "Your real steps and leans move your character; walls and enemies still stop it.", Kind::Switch { default: true })
-            .on(Shown::Game)
-            .only_when("aim", "hand_rig"),
-        // Monaka's own setting (on its tab, for every game), read here.
-        DISABLE_VIEW_BOBBING,
-        opt("disable_zombie_grabs", "Disable zombie grabs", "Zombies never grab you. Off: they grab and bite until you break free, as in the game.", Kind::Switch { default: true })
-            .on(Shown::Game),
-        BINARY_FINGERS,
-        opt("mode", "Rendering", "Smooth renders each eye and adds in-between frames, Sharp renders each eye, Fast draws once for both eyes (gaps beside near things).", Kind::Choice {
-            choices: &[("framegen", "Smooth"), ("same", "Sharp"), ("depth", "Fast"), ("alternate", "Alternate eye"), ("auto", "Smooth")],
-            default: "framegen",
-            window: 3,
-        })
-        .on(Shown::Engine)
-        // Fast shows the hands no nearer than its nearest comfortable depth: the panels on them too.
-        .viewer_args("depth", &["--panel-nearest", "0.5"]),
-        line("lock_pitch", "Block stick pitch", "With mouse / stick aim: no looking up and down with the stick, except toward level.", Kind::Switch { default: false }),
-        CONTROLLER_PROXY, OTHER_BUILDS, EXTRA,
-        LAUNCH,
-        settle(180.0, 30.0),
-    ],
+    options: &DL2,
     licences: &["DyingLight2VR-LICENSE.txt"],
     left_hand_aims: true,
     weapon_ring: true,
 }];
-
-#[cfg(test)]
-mod tests {
-    use monaka_core::capability::{Capabilities, FEATURES, unbacked};
-
-    /// What this game's producer supplies (`monaka_core::capability`): the eye cameras, the arms
-    /// with their fingers, what the hand holds, the look it steers, the buttons it presses, the
-    /// character's step, the HUD at a depth and in pieces, DLSS per eye. It reports no situations.
-    const CAPABILITIES: Capabilities = Capabilities::EYE_CAMERA
-        .with(Capabilities::SKELETON)
-        .with(Capabilities::FINGER_BONES)
-        .with(Capabilities::HELD_ITEM)
-        .with(Capabilities::LOOK_SINK)
-        .with(Capabilities::ACTION_PRESS)
-        .with(Capabilities::CHARACTER_STEP)
-        .with(Capabilities::HUD_LAYER)
-        .with(Capabilities::HUD_PIECES)
-        .with(Capabilities::PER_EYE_HISTORY);
-
-    #[test]
-    fn every_shared_option_offered_is_one_the_game_can_carry() {
-        for manifest in super::MANIFESTS {
-            let unbacked = unbacked(manifest, CAPABILITIES, FEATURES);
-            assert!(unbacked.is_empty(), "{}: {unbacked:?}", manifest.id);
-        }
-    }
-}

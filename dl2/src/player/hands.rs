@@ -6,7 +6,6 @@
 //! `probe_hands=1` (`research::Options`) logs the skeleton's elements (name, type, parent, place
 //! against the camera) and the weapon visuals' classes.
 
-use crate::config;
 use crate::engine;
 use crate::{player::aim, game, view::head, view::scene};
 use eng_chr::fpp::CameraTargetFn;
@@ -32,9 +31,7 @@ pub static RIG: Rig = Rig::new(Facts {
 ///
 /// # Safety
 /// `gamedll` is the inspected build (hash checked by the caller).
-pub unsafe fn install(hooks: &mut monaka_hook::Hooks, engine_module: &Module, gamedll: &Module) -> Result<(), Rejection> {
-    let config = config::get();
-    let options = Options { rig: config.aim.rig, probe: crate::research::options().hands, melee: config.melee, fingers: config.fingers.tracking };
+pub unsafe fn install(hooks: &mut monaka_hook::Hooks, engine_module: &Module, gamedll: &Module, options: Options) -> Result<(), Rejection> {
     // SAFETY: the caller's guarantee; the detour has the callback's type.
     unsafe { RIG.install(hooks, engine_module, gamedll, options, &CAMERA_TARGET, camera_target) }
 }

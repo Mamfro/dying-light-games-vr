@@ -90,7 +90,7 @@ pub fn ui(queue: &ID3D12CommandQueue, ui: &ID3D12Resource) {
     if !options().markers {
         return;
     }
-    let present = crate::PRESENTS.load(Relaxed);
+    let present = crate::output::PRESENTS.load(Relaxed);
     let done = DUMPS.load(Relaxed) as usize;
     if done >= DUMP_AT.len() || present < DUMP_AT[done] {
         return;

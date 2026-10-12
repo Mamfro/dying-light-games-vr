@@ -339,6 +339,20 @@ pub fn write_level_float(level: usize, handle: usize, value: f32) -> bool {
     written
 }
 
+/// Checks an entry of the game's input action table: its name (text at +0) and id (+0x10).
+pub fn action_matches(gamedll: &monaka_hook::module::Module, (entry, name, id): (usize, &str, u32)) -> Result<(), String> {
+    let at = gamedll.at(entry);
+    let found = monaka_hook::mem::read::<usize>(at).and_then(|text| monaka_hook::mem::read_c_string(text, 64));
+    let found_id = monaka_hook::mem::read::<u32>(at + 0x10);
+    if found.as_deref() != Some(name) || found_id != Some(id) {
+        return Err(format!("action table entry {entry:#x} is {found:?} id {found_id:?}, not {name} id {id}"));
+    }
+    Ok(())
+}
+
+/// `int IModelObject::GetElementID(const char*) const`: an element's index by name.
+pub const ELEMENT_ID: &str = "?GetElementID@IModelObject@@QEBAHPEBD@Z";
+
 #[cfg(test)]
 mod tests {
     use super::*;

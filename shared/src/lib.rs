@@ -7,9 +7,11 @@
 //! video settings ([`game`]), the HUD as a layer and its pieces ([`hudlayer`], [`gui`],
 //! [`panels`], [`hudfix`]), physical melee ([`melee`]) and the player's movement step for
 //! room-scale following ([`walk`]), and the D3D12 renderer's present request and queue
-//! ([`rd3d12`]). Each game crate supplies the addresses of its own build.
+//! ([`rd3d12`]). Each game crate supplies the addresses of its own build. The features as
+//! ready-made components, for a game that implements [`feature::Chrome`]: [`feature`].
 
 pub mod coskeleton;
+pub mod feature;
 pub mod fingers;
 pub mod fpp;
 pub mod game;

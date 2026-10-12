@@ -24,6 +24,7 @@ use std::sync::Mutex;
 use windows::Win32::Graphics::Direct3D12::*;
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_R8G8B8A8_UNORM;
 use windows::core::s;
+use monaka_core::sync::Locked;
 
 const SOURCE: &str = include_str!("panels12.hlsl");
 /// A piece's box grown by this share of its larger side on each side for its panel (small: the
@@ -175,10 +176,10 @@ impl Panels {
 /// COMMON), published on `channel`'s panel channels. Returns the shown pieces' rectangles of the
 /// layer (x, y, width, height), for the warp to leave out of the eyes.
 pub fn publish(queue: &ID3D12CommandQueue, ui: &ID3D12Resource, channel: &ChannelName, tick: u64) -> Vec<[f32; 4]> {
-    if *FAILED.lock().unwrap_or_else(|e| e.into_inner()) {
+    if *FAILED.locked() {
         return Vec::new();
     }
-    let mut panels = PANELS.lock().unwrap_or_else(|e| e.into_inner());
+    let mut panels = PANELS.locked();
     if panels.is_none() {
         match d3d12::device_of(queue).map_err(|e| e.to_string()).and_then(|device| Panels::new(&device)) {
             Ok(made) => {
@@ -187,7 +188,7 @@ pub fn publish(queue: &ID3D12CommandQueue, ui: &ID3D12Resource, channel: &Channe
             }
             Err(why) => {
                 log!("dynamic HUD off: {why}");
-                *FAILED.lock().unwrap_or_else(|e| e.into_inner()) = true;
+                *FAILED.locked() = true;
                 return Vec::new();
             }
         }
@@ -252,7 +253,7 @@ pub fn publish(queue: &ID3D12CommandQueue, ui: &ID3D12Resource, channel: &Channe
 
 /// The end of a run: the channels go away with the producers, once the GPU is done with the panels.
 pub fn close() {
-    let mut panels = PANELS.lock().unwrap_or_else(|e| e.into_inner());
+    let mut panels = PANELS.locked();
     if let Some(made) = panels.take() {
         made.recorder.idle(2000);
         log!("dynamic HUD: {} panels published", made.published);

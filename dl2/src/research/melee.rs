@@ -20,6 +20,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::*};
 use std::time::Instant;
 use windows::Win32::System::Diagnostics::Debug::RtlCaptureStackBackTrace;
+use monaka_core::sync::Locked;
 
 /// Sends a damage message to its victim.
 const SEND_DAMAGE: usize = 0x215bd40;
@@ -63,7 +64,7 @@ type Blade = ([f32; 3], [f32; 3], f32);
 static BLADE: Mutex<Option<Blade>> = Mutex::new(None);
 
 pub fn install(hooks: &mut Hooks, gamedll: &Module, damage: bool, sweep: bool) -> Result<(), Rejection> {
-    *STARTED_AT.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
+    *STARTED_AT.locked() = Some(Instant::now());
     // SAFETY: the detours have the targets' signatures (from their code and call sites); the game
     // DLL's build is checked by the caller; prologues are decoded and moved.
     unsafe {
@@ -128,7 +129,7 @@ unsafe extern "C" fn detect(player: *mut c_void, interface: *mut c_void, track: 
     let along = [tip[0] - start[0], tip[1] - start[1], tip[2] - start[2]];
     let length = (along[0] * along[0] + along[1] * along[1] + along[2] * along[2]).sqrt();
     if length > 1e-4 && length.is_finite() {
-        *BLADE.lock().unwrap_or_else(|e| e.into_inner()) = Some((start, along.map(|c| c / length), length));
+        *BLADE.locked() = Some((start, along.map(|c| c / length), length));
     }
     if n < LINES {
         let last = vec3(track + TRACK_LAST_START);

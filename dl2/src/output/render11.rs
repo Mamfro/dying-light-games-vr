@@ -25,6 +25,7 @@ use windows::Win32::Graphics::Direct3D11::{D3D11_TEXTURE2D_DESC, ID3D11Device, I
 use windows::Win32::Graphics::Dxgi::{DXGI_PRESENT_TEST, IDXGISwapChain};
 use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
 use windows::core::{HRESULT, Interface};
+use monaka_core::sync::Locked;
 
 pub static DLSS_EVALUATE: Original<PacketFn> = Original::new();
 pub static DLSS_CONSTANTS: Original<PacketFn> = Original::new();
@@ -38,7 +39,7 @@ static ALL_PRESENTS: AtomicU64 = AtomicU64::new(0);
 static PRESENTS_HIDDEN: AtomicU64 = AtomicU64::new(0);
 
 pub fn set_channel(name: ChannelName) {
-    *CHANNEL.lock().unwrap_or_else(|e| e.into_inner()) = Some(PairPublisher11::new(name));
+    *CHANNEL.locked() = Some(PairPublisher11::new(name));
 }
 
 /// The renderer's queue drain, and the driver vtable slot that must name it.
@@ -82,7 +83,7 @@ fn back_buffer(swap: &IDXGISwapChain) -> Option<(ID3D11Texture2D, ID3D11Device, 
 }
 
 fn published(step: Step) {
-    crate::count(step == Step::Published);
+    crate::output::count(step == Step::Published);
 }
 
 /// Copies one eye out of the back buffer before its present runs; after the right eye the pair is
@@ -93,7 +94,7 @@ fn capture_eye(swap: usize, eye: u32, pair: u64) {
     // SAFETY: the swapchain of the present command being dispatched.
     let Some(swap) = (unsafe { IDXGISwapChain::from_raw_borrowed(&raw) }) else { return };
     let Some((buffer, device, context, _)) = back_buffer(swap) else { return };
-    let mut guard = CHANNEL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut guard = CHANNEL.locked();
     let Some(publisher) = guard.as_mut().filter(|p| !p.broken()) else { return };
     if !publisher.copy_eye(&device, &context, (eye - 1) as usize, &buffer, pair, crate::output::video::at_headset_size) {
         return;
@@ -133,7 +134,7 @@ unsafe extern "system" fn dxgi_present(swap: *mut c_void, interval: u32, flags: 
                 GAME_WINDOW.store(window, Ordering::Relaxed);
             }
             if window != 0 && window == GAME_WINDOW.load(Ordering::Relaxed) {
-                crate::PRESENTS.fetch_add(1, Ordering::Relaxed);
+                crate::output::PRESENTS.fetch_add(1, Ordering::Relaxed);
                 let (dispatched, eye) = local(|l| (l.dispatched_swap.get(), l.dispatch_eye.get()));
                 // The left eye's present is not shown on the monitor; the right eye's is.
                 if swap as usize == dispatched && eye == 1 && !config::debug(debug::SHOW_LEFT) {
@@ -153,7 +154,7 @@ unsafe extern "system" fn dxgi_present(swap: *mut c_void, interval: u32, flags: 
 
 fn publish_mono(swap: &IDXGISwapChain) {
     let Some((buffer, device, context, _)) = back_buffer(swap) else { return };
-    let mut guard = CHANNEL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut guard = CHANNEL.locked();
     if let Some(publisher) = guard.as_mut() {
         published(publisher.publish_flat(&device, &context, &buffer, game::tick(), crate::output::video::at_headset_size));
     }
@@ -193,7 +194,7 @@ pub unsafe fn install_present(hooks: &mut Hooks) -> Result<(), Rejection> {
 }
 
 pub fn close() {
-    CHANNEL.lock().unwrap_or_else(|e| e.into_inner()).take();
+    CHANNEL.locked().take();
 }
 
 pub fn report() -> String {

@@ -14,6 +14,7 @@ use monaka_producer::log;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::time::{Duration, Instant};
+use monaka_core::sync::Locked;
 
 /// The presented size (width << 32 | height).
 static PRESENTED: AtomicU64 = AtomicU64::new(0);
@@ -28,6 +29,8 @@ struct Switched {
 }
 
 static SWITCHED: Mutex<Option<Switched>> = Mutex::new(None);
+/// The size to switch to once the hooks are in, with the renderer whose setters do it.
+static WANTED: Mutex<Option<(Module, (u32, u32))>> = Mutex::new(None);
 
 /// The size the game just presented (from the present request).
 pub fn presented(width: u32, height: u32) {
@@ -96,9 +99,23 @@ pub fn ready() -> bool {
     }
 }
 
+/// The run wants `eye` (width, height), through `renderer`'s setters ([`switch`]).
+pub fn want(renderer: Module, eye: (u32, u32)) {
+    *WANTED.locked() = Some((renderer, eye));
+}
+
+/// The hooks are in: asks for the wanted size ([`switch_to`]), or says why the game keeps its own.
+pub fn switch() {
+    if let Some((renderer, eye)) = WANTED.locked().take()
+        && let Err(why) = switch_to(&renderer, eye)
+    {
+        log!("rendering at the game's own size: {why}");
+    }
+}
+
 /// Asks for `eye` (width, height), windowed; [`ready`] then holds publishing until the game presents
 /// at that size. Errors when the request cannot be made (the game carries on at its size).
-pub fn switch_to(renderer: &Module, eye: (u32, u32)) -> Result<(), String> {
+fn switch_to(renderer: &Module, eye: (u32, u32)) -> Result<(), String> {
     if !wait_for(Duration::from_secs(3), || game::game().is_some() && presented_size().is_some()) {
         return Err("the game object or its presented size was not seen within 3 s".into());
     }
@@ -125,7 +142,7 @@ pub fn switch_to(renderer: &Module, eye: (u32, u32)) -> Result<(), String> {
     let (set_resolution, set_window_mode): (SetResolutionFn, SetWindowModeFn) =
         unsafe { (std::mem::transmute::<usize, SetResolutionFn>(export(engine::SET_RESOLUTION)?), std::mem::transmute::<usize, SetWindowModeFn>(export(engine::SET_WINDOW_MODE)?)) };
     log!("asking for the headset eye size {}x{} windowed (was {width}x{height}, mode {mode}); publishing waits for it (the game applies it while it has focus)", eye.0, eye.1);
-    *SWITCHED.lock().unwrap_or_else(|e| e.into_inner()) = Some(Switched { settings, set_resolution, set_window_mode, mode, size: (width, height), bit_depth });
+    *SWITCHED.locked() = Some(Switched { settings, set_resolution, set_window_mode, mode, size: (width, height), bit_depth });
     PRESENTS_AT_OLD_SIZE.store(0, Relaxed);
     PENDING.store(((eye.0 as u64) << 32) | eye.1 as u64, Relaxed);
     request(settings, set_resolution, set_window_mode, engine::WINDOWED, eye, bit_depth);
@@ -135,7 +152,7 @@ pub fn switch_to(renderer: &Module, eye: (u32, u32)) -> Result<(), String> {
 /// Asks for the original mode and size back (applied on the game's next frame).
 pub fn restore() {
     PENDING.store(0, Relaxed);
-    if let Some(s) = SWITCHED.lock().unwrap_or_else(|e| e.into_inner()).take() {
+    if let Some(s) = SWITCHED.locked().take() {
         log!("asking for the original {}x{} (mode {}) back", s.size.0, s.size.1, s.mode);
         request(s.settings, s.set_resolution, s.set_window_mode, s.mode, s.size, s.bit_depth);
     }

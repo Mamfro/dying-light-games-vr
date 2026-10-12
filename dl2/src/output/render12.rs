@@ -30,6 +30,7 @@ use windows::Win32::Graphics::Direct3D12::{
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_R8G8B8A8_UNORM;
 use windows::Win32::Graphics::Dxgi::IDXGISwapChain3;
 use windows::core::Interface;
+use monaka_core::sync::Locked;
 
 pub static PRESENT_REQUEST: Original<PresentRequest12Fn> = Original::new();
 pub static DLSS_EVALUATE: Original<Packet12Fn> = Original::new();
@@ -49,13 +50,13 @@ pub static LAST_UI_PRESENT: AtomicU64 = AtomicU64::new(0);
 
 /// The game tagged its UI layer (it does only in gameplay).
 pub fn ui_tagged() {
-    LAST_UI_PRESENT.store(crate::PRESENTS.load(Ordering::Relaxed), Ordering::Relaxed);
+    LAST_UI_PRESENT.store(crate::output::PRESENTS.load(Ordering::Relaxed), Ordering::Relaxed);
     UI_SEEN.store(true, Ordering::Release);
 }
 
 /// A menu, map, inventory or loading screen: a UI layer has been seen, but none for a few presents.
 pub fn in_menu() -> bool {
-    UI_SEEN.load(Ordering::Acquire) && crate::PRESENTS.load(Ordering::Relaxed).saturating_sub(LAST_UI_PRESENT.load(Ordering::Relaxed)) > 4
+    UI_SEEN.load(Ordering::Acquire) && crate::output::PRESENTS.load(Ordering::Relaxed).saturating_sub(LAST_UI_PRESENT.load(Ordering::Relaxed)) > 4
 }
 pub static UI_COPIES: AtomicU64 = AtomicU64::new(0);
 pub static DEPTH_COPIES: AtomicU64 = AtomicU64::new(0);
@@ -68,7 +69,7 @@ static FLAT_MENU_FRAMES: AtomicU64 = AtomicU64::new(0);
 const NEAREST_COMFORT: f32 = 0.5;
 
 pub fn set_channel(name: ChannelName) {
-    *CHANNEL.lock().unwrap_or_else(|e| e.into_inner()) = Some(PairPublisher12::new(name.clone()));
+    *CHANNEL.locked() = Some(PairPublisher12::new(name.clone()));
     let _ = CHANNEL_NAME.set(name);
 }
 
@@ -78,7 +79,7 @@ pub fn game_queue() -> Option<ID3D12CommandQueue> {
 }
 
 fn with_warp<R>(f: impl FnOnce(&mut DepthWarp) -> R) -> Option<R> {
-    let mut warp = WARP.lock().unwrap_or_else(|e| e.into_inner());
+    let mut warp = WARP.locked();
     if warp.is_none() && !WARP_FAILED.load(Ordering::Acquire) {
         let made = game_queue()
             .ok_or_else(|| "no game queue".to_owned())
@@ -117,7 +118,7 @@ pub fn copy_ui(list: &ID3D12GraphicsCommandList, ui: &ID3D12Resource, state: D3D
     }
     if let Some(Ok(())) = with_warp(|warp| warp.copy_ui(list, ui, state)) {
         UI_COPIES.fetch_add(1, Ordering::Relaxed);
-        LAST_UI_PRESENT.store(crate::PRESENTS.load(Ordering::Relaxed), Ordering::Relaxed);
+        LAST_UI_PRESENT.store(crate::output::PRESENTS.load(Ordering::Relaxed), Ordering::Relaxed);
         UI_SEEN.store(true, Ordering::Release);
     }
 }
@@ -127,17 +128,17 @@ fn published(step: Step, eye_copy: bool) {
     if ok && eye_copy {
         local(|l| l.eye_copies.set(l.eye_copies.get() + 1));
     }
-    crate::count(ok);
+    crate::output::count(ok);
 }
 
 /// No pose adjustment: the eyes go out with the pose given.
 fn as_is(_: &mut HeadPose) {}
 
 fn capture(swap: &IDXGISwapChain3) {
-    crate::PRESENTS.fetch_add(1, Ordering::Relaxed);
+    crate::output::PRESENTS.fetch_add(1, Ordering::Relaxed);
     // SAFETY: COM calls on the game's live swapchain.
     let Ok(buffer) = (unsafe { swap.GetBuffer::<ID3D12Resource>(swap.GetCurrentBackBufferIndex()) }) else { return };
-    let mut guard = CHANNEL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut guard = CHANNEL.locked();
     let Some(channel) = guard.as_mut().filter(|c| !c.broken()) else { return };
     if !channel.made() {
         // The headset size first, when asked for: the channel takes the first frame's size.
@@ -168,7 +169,7 @@ fn capture(swap: &IDXGISwapChain3) {
     let tick = game::tick();
     const PRESENT: D3D12_RESOURCE_STATES = D3D12_RESOURCE_STATE_PRESENT;
     const COMMON: D3D12_RESOURCE_STATES = D3D12_RESOURCE_STATE_COMMON;
-    let presents = crate::PRESENTS.load(Ordering::Relaxed);
+    let presents = crate::output::PRESENTS.load(Ordering::Relaxed);
     // No UI layer tagged by the game this frame (it tags one only in gameplay with its DLSS Frame
     // Generation on): the HUD layer made from the game's own HUD draws stands in
     // (`eng_chr::hudlayer`). Without that too, a frame shortly after a tagged one is a menu or
@@ -285,7 +286,7 @@ fn capture(swap: &IDXGISwapChain3) {
     }
     // Debug: left = the HUD-less colour, right = the finished frame.
     if config::debug(debug::HUDLESS_LEFT) && desc.Format == DXGI_FORMAT_R8G8B8A8_UNORM {
-        let ui = WARP.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|w| w.ui().cloned());
+        let ui = WARP.locked().as_ref().and_then(|w| w.ui().cloned());
         if let Some(ui) = ui {
             // SAFETY: reads a descriptor.
             let d = unsafe { ui.GetDesc() };
@@ -329,7 +330,7 @@ fn world_markers(desc: &D3D12_RESOURCE_DESC, frustum: Option<Frustum>, ipd: f32)
     let origin = layout.map_or([0.0, 0.0], |l| l.origin);
     let screen = layout.filter(|l| l.screen[0] > 1.0 && l.screen[1] > 1.0).map_or([desc.Width as f32, desc.Height as f32], |l| l.screen);
     let (bw, bh) = (MARKER_BOX[0] * screen[0], MARKER_BOX[1] * screen[1]);
-    crate::hud::markers::latest(crate::PRESENTS.load(Ordering::Relaxed))
+    crate::hud::markers::latest(crate::output::PRESENTS.load(Ordering::Relaxed))
         .into_iter()
         .map(|m| crate::output::warp12::Marker { rect: [origin[0] + m.screen[0] - bw * 0.5, origin[1] + m.screen[1] - bh * 0.5, bw, bh], shift: disparity_at(desc, frustum, ipd, m.distance) })
         .collect()
@@ -345,7 +346,7 @@ pub fn hud_params(queue: &ID3D12CommandQueue, desc: &D3D12_RESOURCE_DESC, layer:
     let frustums = [Frustum::from_fov(pair_head.fov[0]), Frustum::from_fov(pair_head.fov[1])];
     let mut params = Params::depth_stereo(0.0, 0, hud_rects(desc, frustums, pair_head.ipd), aim, 0.03 * desc.Height as f32);
     params.ui_out_of_frame = true;
-    let mut pieces = LAST_PIECES.lock().unwrap_or_else(|e| e.into_inner());
+    let mut pieces = LAST_PIECES.locked();
     if left && let Some(name) = CHANNEL_NAME.get() {
         *pieces = [[0.0; 4]; 5];
         for (slot, rect) in pieces.iter_mut().zip(eng_chr::panels::publish(queue, layer, name, tick)) {
@@ -407,7 +408,7 @@ fn frame_generation(eye: u32, buffer: &ID3D12Resource) {
 
 /// Publishes a finished pair (both eyes in the common state) with its pose; any thread.
 pub fn publish_pair(eyes: &[ID3D12Resource; 2], pose: HeadPose) {
-    let mut channel = CHANNEL.lock().unwrap_or_else(|e| e.into_inner());
+    let mut channel = CHANNEL.locked();
     let Some(channel) = channel.as_mut() else { return };
     const COMMON: D3D12_RESOURCE_STATES = D3D12_RESOURCE_STATE_COMMON;
     published(channel.publish([(&eyes[0], COMMON), (&eyes[1], COMMON)], [pose, pose], &head::HEAD, as_is), false);
@@ -450,7 +451,7 @@ unsafe fn scoped(state: usize, packet: usize, original: Packet12Fn, evaluate: bo
         // SAFETY: the original, with the renderer's arguments.
         return unsafe { original(state, packet) };
     }
-    let _lock = DLSS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _lock = DLSS_LOCK.locked();
     let cache = (cache != 0).then(|| (cache + 0x30) as *mut u32);
     // SAFETY: the renderer's DLSS state holds the viewport id (and its cached copy) as u32s; the
     // ids are put back after the call, under the lock.
@@ -470,10 +471,10 @@ pub unsafe extern "system" fn dlss_constants(state: usize, packet: usize) -> usi
 /// Releases the channel and the warp once the GPU is done with them (leaked if it never is).
 pub fn close() {
     eng_chr::panels::close();
-    if let Some(mut channel) = CHANNEL.lock().unwrap_or_else(|e| e.into_inner()).take() {
+    if let Some(mut channel) = CHANNEL.locked().take() {
         channel.close();
     }
-    if let Some(warp) = WARP.lock().unwrap_or_else(|e| e.into_inner()).take()
+    if let Some(warp) = WARP.locked().take()
         && !warp.idle()
     {
         std::mem::forget(warp);

@@ -17,8 +17,8 @@ pub mod streamline;
 
 use monaka_hook::Hooks;
 use monaka_hook::module::Module;
+use monaka_producer::research::Research;
 use monaka_producer::{Rejection, log};
-use std::sync::OnceLock;
 use std::time::Duration;
 
 /// What this run probes.
@@ -33,10 +33,6 @@ pub struct Options {
     pub streamline: bool,
     /// `probe_motion=1`: the motion vectors' statistics (`motion`).
     pub motion: bool,
-    /// The dynamic HUD's probes in `eng_chr` (`probe_hud`: [`eng_chr::hudlayer`], `probe_gui`:
-    /// [`eng_chr::gui`]).
-    pub hud: bool,
-    pub gui: bool,
     /// `camera_refs=1`: the DLSS command's camera references (`history`).
     pub refs: bool,
     /// `probe_history=1` (with stereo and a synthetic head): where the renderer keeps the previous
@@ -58,8 +54,6 @@ impl Options {
             hands: options.switch("probe_hands", false),
             streamline: options.switch("probe_streamline", false),
             motion: options.switch("probe_motion", false),
-            hud: options.switch("probe_hud", false),
-            gui: options.switch("probe_gui", false),
             refs: options.switch("camera_refs", false),
             history: options.switch("probe_history", false),
             dump: options.text("dump_object").map(str::to_owned),
@@ -75,21 +69,11 @@ impl Options {
     }
 }
 
-static OPTIONS: OnceLock<Options> = OnceLock::new();
+pub static PROBES: Research<Options> = Research::new(Options::from_options);
 
-/// This run's probes (none before [`configure`]).
+/// This run's probes (none before the start read them).
 pub fn options() -> &'static Options {
-    OPTIONS.get_or_init(Options::default)
-}
-
-/// Reads the run's probe options.
-pub fn configure(options: &monaka_core::options::Options) {
-    let options = Options::from_options(options);
-    log!("research: {options:?}");
-    if let Some(items) = &options.give {
-        give::configure(items);
-    }
-    let _ = OPTIONS.set(options);
+    PROBES.get()
 }
 
 /// The probes' own hooks, beside the adapter's, on the renderer (`engine::RENDERER`).
@@ -98,6 +82,9 @@ pub fn configure(options: &monaka_core::options::Options) {
 /// `renderer` is the build `engine.rs` describes (hash checked).
 pub unsafe fn install(hooks: &mut Hooks, renderer: &Module, stereo: bool) -> Result<(), Rejection> {
     let o = options();
+    if let Some(items) = &o.give {
+        give::configure(items);
+    }
     if o.cameras {
         // SAFETY: the caller's guarantee.
         unsafe { cameras::install(hooks, renderer)? };

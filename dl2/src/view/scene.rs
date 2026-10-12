@@ -24,6 +24,7 @@ use std::cell::Cell;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
+use monaka_core::sync::Locked;
 
 pub static SCENE_ORIGINAL: Original<SceneFn> = Original::new();
 pub static PREPARE_ORIGINAL: Original<PrepareFn> = Original::new();
@@ -90,16 +91,16 @@ pub struct SceneInput {
 static LAST_SCENE: Mutex<Option<SceneInput>> = Mutex::new(None);
 
 fn last_scene() -> SceneInput {
-    LAST_SCENE.lock().unwrap_or_else(|e| e.into_inner()).unwrap_or_default()
+    LAST_SCENE.locked().unwrap_or_default()
 }
 
 fn set_last_scene(input: SceneInput) {
-    *LAST_SCENE.lock().unwrap_or_else(|e| e.into_inner()) = Some(input);
+    *LAST_SCENE.locked() = Some(input);
 }
 
 /// The last scene, with its pending left eye taken (it is restored or paired exactly once).
 fn take_left() -> SceneInput {
-    let mut last = LAST_SCENE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut last = LAST_SCENE.locked();
     let input = last.unwrap_or_default();
     if let Some(scene) = last.as_mut() {
         scene.normal_left = false;
@@ -340,7 +341,7 @@ unsafe extern "system" fn history_lookup(tree: usize, key: *const u32, _: usize,
     }
     let epoch = TEMPORAL_EPOCH.load(Ordering::Acquire);
     // SAFETY: the lookup returns a camera history entry of 0x140 bytes.
-    let own = unsafe { CAMERA_HISTORY.lock().unwrap_or_else(|e| e.into_inner()).get(tree, key, epoch, eye, original as *const u8) };
+    let own = unsafe { CAMERA_HISTORY.locked().get(tree, key, epoch, eye, original as *const u8) };
     match own {
         Some(own) => {
             HISTORY_READS.fetch_add(1, Ordering::Relaxed);
@@ -358,7 +359,7 @@ unsafe extern "system" fn external_pass(object: usize, context: usize) -> usize 
         // SAFETY: the original, with the game's arguments.
         return unsafe { EXTERNAL_PASS_ORIGINAL.get()(object, context) };
     }
-    let mut bank = EXTERNAL_HISTORY.lock().unwrap_or_else(|e| e.into_inner());
+    let mut bank = EXTERNAL_HISTORY.locked();
     let region = (object + 0x20) as *mut u8;
     // SAFETY: the pass object holds 0x90 bytes of previous camera at +0x20; the swap is undone
     // after the pass, under the bank's lock.
@@ -418,7 +419,7 @@ fn end_temporal_scene(eye: u32, token: u32) {
         let current = unsafe { HISTORY_LOOKUP_ORIGINAL.get()(tree, &token) };
         let epoch = TEMPORAL_EPOCH.load(Ordering::Acquire);
         // SAFETY: the lookup returns a camera history entry of 0x140 bytes (or null, refused).
-        let stored = current != 0 && unsafe { CAMERA_HISTORY.lock().unwrap_or_else(|e| e.into_inner()).store(tree, token, epoch, eye, current as *const u8) };
+        let stored = current != 0 && unsafe { CAMERA_HISTORY.locked().store(tree, token, epoch, eye, current as *const u8) };
         if stored {
             CAMERA_COMMITS.fetch_add(1, Ordering::Relaxed);
         }
@@ -446,11 +447,11 @@ fn track_left(game: usize, token: u32, a: usize, b: usize) -> Option<(SceneInput
     let config = config::get();
     let alternate_next = ALTERNATE_NEXT.load(Ordering::Relaxed);
     let head = if config.alternate_eye && alternate_next == 2 {
-        *ALTERNATE_HEAD.lock().unwrap_or_else(|e| e.into_inner())
+        *ALTERNATE_HEAD.locked()
     } else {
         let head = head::HEAD.current();
         if config.alternate_eye && head.is_some() {
-            *ALTERNATE_HEAD.lock().unwrap_or_else(|e| e.into_inner()) = head;
+            *ALTERNATE_HEAD.locked() = head;
         }
         head
     };

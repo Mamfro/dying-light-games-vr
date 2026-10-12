@@ -20,6 +20,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use windows::Win32::Graphics::Direct3D12::ID3D12GraphicsCommandList;
 use windows::core::Interface;
+use monaka_core::sync::Locked;
 
 static SET_TAG: Original<SetTagFn> = Original::new();
 static SET_CONSTANTS: Original<SetConstantsFn> = Original::new();
@@ -84,7 +85,7 @@ fn hold_generation_off(viewport: *const u8) {
         return;
     }
     {
-        let mut done = GENERATION_OFF.lock().unwrap_or_else(|e| e.into_inner());
+        let mut done = GENERATION_OFF.locked();
         if done.contains(&id) || done.len() >= 16 {
             return;
         }

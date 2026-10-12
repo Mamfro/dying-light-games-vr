@@ -7,7 +7,8 @@
 //! holder (`R_HandHolder`) points along the hand's aim with its +z: that is the barrel, and the
 //! muzzle is [`MUZZLE`] along it. A shot at a given target point keeps the game's aim.
 
-use crate::player::{bow, hand_world, hands, projectile};
+use monaka_core::math::{length};
+use crate::player::{hand_world, hands, projectile};
 use monaka_hook::module::Module;
 use monaka_hook::{Hooks, InFlight, Original, mem};
 use monaka_producer::{Rejection, log};
@@ -44,19 +45,19 @@ fn aim(player: usize) -> Option<[f32; 3]> {
     // SAFETY: the player's own aim getter, on the game thread, into our vec3.
     let result = unsafe { std::mem::transmute::<usize, AimFn>(getter)(player, &mut out) };
     let v = mem::read::<[f32; 3]>(result as usize)?;
-    let l = hand_world::length(v);
+    let l = length(v);
     (l.is_finite() && l > 1e-6).then(|| v.map(|c| c / l))
 }
 
 fn barrel_shot(controller: usize, target: *const f32) -> Option<projectile::Shot> {
     // A shot at a point the game chose (a locked target) keeps its aim.
     let point = if target.is_null() { None } else { mem::read::<[f32; 3]>(target as usize) };
-    if point.is_some_and(|p| p.iter().any(|c| *c != 0.0)) || !bow::players(controller) {
+    if point.is_some_and(|p| p.iter().any(|c| *c != 0.0)) || !hands::players(controller) {
         return None;
     }
     let holder = hand_world::element(c"R_HandHolder")?;
     let z = [holder[2], holder[6], holder[10]];
-    let l = hand_world::length(z);
+    let l = length(z);
     if !(l.is_finite() && l > 1e-6) {
         return None;
     }

@@ -4,6 +4,7 @@
 //! the string and the arrow's nock when they move against the root: where they are, and how far
 //! from the right hand.
 
+use monaka_core::math::length;
 use crate::player::hand_world;
 use monaka_arms::Skeleton;
 use monaka_core::camera::{Mat34, compose, rigid_inverse};
@@ -32,7 +33,7 @@ fn translation(m: &Mat34) -> [f32; 3] {
 }
 
 fn distance(a: [f32; 3], b: [f32; 3]) -> f32 {
-    hand_world::length([a[0] - b[0], a[1] - b[1], a[2] - b[2]])
+    length([a[0] - b[0], a[1] - b[1], a[2] - b[2]])
 }
 
 /// After the rig placed the arms: the held weapon's model when it is a bow.

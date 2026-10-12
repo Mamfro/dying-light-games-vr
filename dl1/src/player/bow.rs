@@ -14,6 +14,7 @@
 //! fires is placed on the arrow's line ([`projectile`], its speed kept). A pull under [`PULL`]'s
 //! least keeps the game's draw.
 
+use monaka_core::math::{self, cross, dot, sub};
 use crate::player::{hand_world, hands, projectile};
 use monaka_arms::Skeleton;
 use monaka_core::gesture::{Pull, PullRules};
@@ -37,9 +38,8 @@ const DRAW_FRESH: Duration = Duration::from_millis(200);
 /// The bow model's string, and the arrow's nock on it.
 const STRING: &str = "bone_string";
 const NOCK: &str = "arrow_pose";
-/// In the controller: how far it is drawn (0 to 1); its player (vfunc +0x20).
+/// In the controller: how far it is drawn (0 to 1).
 const DRAWN: usize = 0x6c;
-const PLAYER_SLOT: usize = 0x20;
 /// The pull (metres behind where the string rests) that counts (0.05), that is a full draw (0.5),
 /// and the most the string goes back (0.7).
 const PULL: PullRules = PullRules::BOW;
@@ -55,7 +55,6 @@ const FLIP_BEYOND: f32 = 0.1;
 
 type LooseFn = unsafe extern "C" fn(*mut c_void);
 type UpdateFn = unsafe extern "C" fn(*mut c_void, f32);
-type GetterFn = unsafe extern "system" fn(*mut c_void) -> usize;
 
 static LOOSE_ORIGINAL: Original<LooseFn> = Original::new();
 static UPDATE_ORIGINAL: Original<UpdateFn> = Original::new();
@@ -114,20 +113,11 @@ pub fn install(hooks: &mut Hooks, gamedll: &Module) -> Result<(), Rejection> {
     Ok(())
 }
 
-/// Whether the controller (a bow's or a gun's) is the player's (the arms the rig poses).
-pub fn players(controller: usize) -> bool {
-    let ours = hands::arms_model();
-    let getter = mem::read::<usize>(controller).and_then(|vtable| mem::read::<usize>(vtable + PLAYER_SLOT));
-    let Some(getter) = getter.filter(|&g| Module::find(crate::engine::GAMEDLL).is_some_and(|m| m.contains(g))) else { return false };
-    // SAFETY: the controller's own player getter, on the game thread.
-    ours != 0 && unsafe { std::mem::transmute::<usize, GetterFn>(getter)(controller as *mut c_void) } == ours
-}
-
 unsafe extern "C" fn loose(controller: *mut c_void) {
     let _flight = InFlight::enter();
     let at = controller as usize;
     let bow = BOW.lock().ok().and_then(|b| *b).filter(|b| b.at.elapsed() < DRAW_FRESH);
-    let shot = bow.filter(|_| players(at)).map(|bow| {
+    let shot = bow.filter(|_| hands::players(at)).map(|bow| {
         if let Some(share) = Pull::share(bow.pull, &PULL) {
             mem::write::<f32>(at + DRAWN, share);
         }
@@ -148,7 +138,7 @@ unsafe extern "C" fn update(controller: *mut c_void, seconds: f32) {
     // SAFETY: forwards the game's own call.
     unsafe { UPDATE_ORIGINAL.get()(controller, seconds) };
     let at = controller as usize;
-    if players(at) {
+    if hands::players(at) {
         let drawing = mem::read::<i32>(at + STATE).is_some_and(|s| DRAWING.contains(&s));
         if let Ok(mut drawn) = DRAWN_AT.lock() {
             *drawn = drawing.then(Instant::now);
@@ -165,14 +155,6 @@ fn drawing() -> bool {
     DRAWN_AT.lock().ok().and_then(|d| *d).is_some_and(|at| at.elapsed() < DRAW_FRESH)
 }
 
-fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
-
-fn sub(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
-}
-
 /// A matrix's 3x3 part (rows) applied to `v`.
 fn turn(m: &[f32; 12], v: [f32; 3]) -> [f32; 3] {
     [0, 1, 2].map(|r| m[r * 4] * v[0] + m[r * 4 + 1] * v[1] + m[r * 4 + 2] * v[2])
@@ -181,7 +163,6 @@ fn turn(m: &[f32; 12], v: [f32; 3]) -> [f32; 3] {
 /// `v` taken back through a matrix's 3x3 part (which may scale, as the game's weapon matrices do).
 fn unturn(m: &[f32; 12], v: [f32; 3]) -> Option<[f32; 3]> {
     let rows = [0, 1, 2].map(|r| [m[r * 4], m[r * 4 + 1], m[r * 4 + 2]]);
-    let cross = |a: [f32; 3], b: [f32; 3]| [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
     // The inverse's columns are the rows' pairwise crosses over the determinant.
     let columns = [cross(rows[1], rows[2]), cross(rows[2], rows[0]), cross(rows[0], rows[1])];
     let det = dot(rows[0], columns[0]);
@@ -214,7 +195,7 @@ pub fn place_string(vis: usize, reticle: Option<[f32; 3]>) {
         log!("bow by hand: the string drawn along the bow (string {:?}, nock {:?}, bow {:?})", known.string, known.nock, known.bow);
     }
     let along = turn(&root, ARROW_ALONG);
-    let length = hand_world::length(along);
+    let length = math::length(along);
     if !(length.is_finite() && length > 1e-6) {
         return;
     }
@@ -225,7 +206,7 @@ pub fn place_string(vis: usize, reticle: Option<[f32; 3]>) {
         model.set_world(0, &turned);
         root = turned;
         let along = turn(&root, ARROW_ALONG);
-        bow_x = along.map(|c| c / hand_world::length(along));
+        bow_x = along.map(|c| c / math::length(along));
     }
     let grip = [root[3], root[7], root[11]];
     let drawn = drawing();
@@ -258,7 +239,7 @@ pub fn place_string(vis: usize, reticle: Option<[f32; 3]>) {
     let Some(nock) = start.nock.map(|local| out_of_frame(&root, &local)) else { return };
     let from = [nock[3], nock[7], nock[11]];
     let column = [nock[start.arrow], nock[4 + start.arrow], nock[8 + start.arrow]];
-    let column_length = hand_world::length(column);
+    let column_length = math::length(column);
     if !(column_length.is_finite() && column_length > 1e-6) {
         return;
     }
@@ -309,14 +290,14 @@ fn arrow_line(model: &hands::Model, known: &Known, root: &[f32; 12], bow_x: [f32
         }
     };
     let column = [nock[arrow], nock[4 + arrow], nock[8 + arrow]];
-    let length = hand_world::length(column);
+    let length = math::length(column);
     (length > 1e-6).then(|| ([nock[3], nock[7], nock[11]], column.map(|c| c * sign / length)))
 }
 
 /// `root` turned about its own position so `arrow` (unit) points along `toward`; `None` when they
 /// are further apart than [`MOST_TURN`] (the bow then is not being aimed).
 fn aligned(root: &[f32; 12], arrow: [f32; 3], toward: [f32; 3]) -> Option<[f32; 12]> {
-    let length = hand_world::length(toward);
+    let length = math::length(toward);
     if !length.is_finite() || length <= 1e-6 {
         return None;
     }
@@ -332,7 +313,7 @@ fn aligned(root: &[f32; 12], arrow: [f32; 3], toward: [f32; 3]) -> Option<[f32; 
 /// How far `m`'s column `c` (made unit) runs along unit `along`.
 fn column_along(m: &[f32; 12], c: usize, along: [f32; 3]) -> f32 {
     let column = [m[c], m[4 + c], m[8 + c]];
-    let length = hand_world::length(column);
+    let length = math::length(column);
     if length > 1e-6 { dot(column, along) / length } else { 0.0 }
 }
 

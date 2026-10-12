@@ -23,6 +23,7 @@ use monaka_hook::module::Module;
 use monaka_producer::log;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering::*};
+use monaka_core::sync::Locked;
 
 /// How long after an update head aim counts as steering (ms): a pause, a loading screen or a
 /// cutscene stops the updates, and the head's share is then left in place.
@@ -106,7 +107,7 @@ impl HeadAim {
 
     /// At start: what aims, and the game DLL the vtables are in (0: no character is recognised).
     pub fn configure(&self, settings: AimSettings, gamedll: usize) {
-        *self.settings.lock().unwrap_or_else(|e| e.into_inner()) = Some(settings);
+        *self.settings.locked() = Some(settings);
         self.gamedll.store(gamedll, Release);
         self.releasing.store(false, Release);
     }
@@ -158,12 +159,12 @@ impl HeadAim {
     /// releasing, hands the game's own angles and the left trigger back; `None` then.
     pub fn steer(&self, character: usize, head: Option<HeadPose>, counter: Option<u64>) -> Option<Steered> {
         let settings = self.settings();
-        let mut steer = self.steer.lock().unwrap_or_else(|e| e.into_inner());
+        let mut steer = self.steer.locked();
         // The share this update's camera carries (written by the previous update).
         let baked = steer.share(character);
         self.latest_baked.store(baked.to_bits(), Relaxed);
         if let Some(counter) = counter {
-            self.baked.lock().unwrap_or_else(|e| e.into_inner()).record(counter, baked);
+            self.baked.locked().record(counter, baked);
         }
         let head = head.filter(|h| h.valid != 0 && settings.head_aim && !self.releasing.load(Acquire));
         if let Some(head) = head {
@@ -200,7 +201,7 @@ impl HeadAim {
     pub fn baked_at(&self, counter: Option<u64>) -> f32 {
         match counter {
             Some(counter) => {
-                let (yaw, found) = self.baked.lock().unwrap_or_else(|e| e.into_inner()).lookup(counter);
+                let (yaw, found) = self.baked.locked().lookup(counter);
                 if !found {
                     self.baked_misses.fetch_add(1, Relaxed);
                 }
@@ -232,7 +233,7 @@ impl HeadAim {
     /// the back axis): remembered for the arms, and returned for a game's own probes.
     pub fn note_player_camera(&self, key: usize, back: [f32; 3], up: [f32; 3], position: [f32; 3]) -> Option<Mat34> {
         let matrix = from_back_up(back, up, position)?;
-        *self.player_camera.lock().unwrap_or_else(|e| e.into_inner()) = (key, matrix);
+        *self.player_camera.locked() = (key, matrix);
         Some(matrix)
     }
 

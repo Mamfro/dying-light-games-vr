@@ -2,52 +2,19 @@
 //! the notes (`monaka_launch::games::plan`).
 
 use crate::manifest::MANIFESTS;
-#[allow(unused_imports)]
-use monaka_launch::games::{EyeSize, Kind, Manifest, Shown, SteamFiles, Values, eye_size, plan, plan_with};
-
-/// What `monaka_play` makes of its `id=value` arguments.
-#[allow(dead_code)]
-fn parsed(game: &Manifest, args: &[&str]) -> Values {
-    let mut values = Values::default();
-    for arg in args {
-        let (id, value) = arg.split_once('=').unwrap();
-        values.set_checked(game, id, value).unwrap_or_else(|why| panic!("{why}"));
-    }
-    values
-}
-
-/// The options file a run writes.
-fn file(game: &Manifest, values: &Values, eye: Option<(u32, u32)>) -> String {
-    let plan = plan(values, game, eye);
-    assert_eq!(plan.files.len(), 1);
-    assert_eq!(plan.files[0].0, game.options_file);
-    plan.files[0].1.clone()
-}
-
-/// The viewer's arguments without Dying Light's held d-pad menus (checked on their own).
-#[allow(dead_code)]
-fn rings(game: &Manifest, args: &[&str]) -> Vec<String> {
-    let mut v = plan(&parsed(game, args), game, None).viewer_args;
-    if let Some(at) = v.iter().position(|a| a == "--dpad-hold") {
-        v.drain(at..at + 2);
-    }
-    v
-}
+use monaka_launch::games::{EyeSize, SteamFiles, Values, defaults_are_options, eye_size, options_file, plan, plan_with, values_of as parsed, viewer_args_of as rings};
 
 #[test]
 fn defaults_alone_make_a_plan() {
-    for game in MANIFESTS {
-        let defaults = file(game, &Values::default(), None);
-        assert!(defaults.lines().all(|l| l.split_once('=').is_some_and(|(k, _)| game.option(k).is_some())), "{}: {defaults}", game.id);
-    }
+    defaults_are_options(MANIFESTS);
 }
 
 #[test]
 fn defaults_write_the_manifests_values() {
     let dl1 = &MANIFESTS[0];
     assert_eq!(
-        file(dl1, &Values::default(), Some((2880, 2880))),
-        "aim=hand_rig\nworld_hud=1\nhud_scale=0.36\nhud_distance=2\nfinger_tracking=1\nroom_scale=1\ndisable_zombie_grabs=1\nvr_buttons=1\nfinger_binary=0\nfsr=0\neye_separation=0.064\nother_builds=0\neye_size=2880x2880"
+        plan(&Values::default(), dl1, Some((2880, 2880))).files[0].1,
+        "eye_separation=0.064\nfsr=0\nhud_scale=0.36\nhud_distance=2\nworld_hud=1\naim=hand_rig\nfinger_tracking=1\nfinger_binary=0\nroom_scale=1\nvr_buttons=1\ndisable_zombie_grabs=1\ncontroller_pad=1\nother_builds=0\neye_size=2880x2880"
     );
     assert_eq!(eye_size(&Values::default(), dl1), EyeSize::Headset);
 }
@@ -83,13 +50,13 @@ fn rings_follow_the_aim() {
 fn options_apply_only_where_they_mean_something() {
     let dl1 = &MANIFESTS[0];
     // The aiming hand only for a pointing controller; the fingers only with the rig.
-    let text = file(dl1, &parsed(dl1, &["aim=hand_rig", "aim_hand=left", "finger_binary=on"]), None);
+    let text = options_file(dl1, &parsed(dl1, &["aim=hand_rig", "aim_hand=left", "finger_binary=on"]));
     assert!(!text.contains("aim_hand") && text.contains("finger_binary=1"), "{text}");
-    let text = file(dl1, &parsed(dl1, &["aim=controller", "aim_hand=left", "finger_binary=on"]), None);
+    let text = options_file(dl1, &parsed(dl1, &["aim=controller", "aim_hand=left", "finger_binary=on"]));
     assert!(text.contains("aim_hand=left") && !text.contains("finger"), "{text}");
     // Extra pairs go last, junk dropped.
-    let text = file(dl1, &parsed(dl1, &["extra=probe_rig=1 junk hand_hold=0.01,0,-0.02"]), None);
-    assert!(text.ends_with("eye_separation=0.064\nother_builds=0\nprobe_rig=1\nhand_hold=0.01,0,-0.02"), "{text}");
+    let text = options_file(dl1, &parsed(dl1, &["extra=probe_rig=1 junk hand_hold=0.01,0,-0.02"]));
+    assert!(text.ends_with("controller_pad=1\nother_builds=0\nprobe_rig=1\nhand_hold=0.01,0,-0.02"), "{text}");
     // FSR, as the manifest declares: with an eye size and AMD's DLLs from Dying Light 2 only;
     // without either it is written off and the player told why.
     let fsr = parsed(dl1, &["fsr=on", "fsr_scale=2"]);

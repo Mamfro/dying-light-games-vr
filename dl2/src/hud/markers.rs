@@ -139,7 +139,7 @@ unsafe extern "system" fn project(out: *mut f32, world: *const f32, camera: usiz
     HUD_CALLS.fetch_add(1, Relaxed);
     let (Some(world), Some(out_values)) = (mem::read::<[f32; 3]>(world as usize), mem::read::<[f32; 4]>(result as usize)) else { return result };
     let call = Call {
-        present: crate::PRESENTS.load(Relaxed),
+        present: crate::output::PRESENTS.load(Relaxed),
         caller,
         world,
         out: out_values,

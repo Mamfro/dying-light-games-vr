@@ -26,6 +26,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
 use windows::Win32::Graphics::Direct3D12::{ID3D12GraphicsCommandList, ID3D12Resource};
 use windows::core::Interface;
+use monaka_core::sync::Locked;
 
 pub static ENABLED: AtomicBool = AtomicBool::new(false);
 /// The motion-vector rebase (`dlss_fix_motion=0` leaves the game's vectors, to test the viewports
@@ -98,7 +99,7 @@ struct Counters {
 static COUNTERS: Counters = Counters { options: AtomicU64::new(0), frames: AtomicU64::new(0), fixed: AtomicU64::new(0), passed: AtomicU64::new(0) };
 
 fn state() -> std::sync::MutexGuard<'static, State> {
-    STATE.lock().unwrap_or_else(|e| e.into_inner())
+    STATE.locked()
 }
 
 /// Each eye's viewport: the game's handle with the eye in the top bits of its value.

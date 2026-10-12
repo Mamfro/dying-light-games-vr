@@ -1,7 +1,11 @@
-//! What this game crate declares about itself, for the launcher, the loader and its own config
-//! (`monaka_core::manifest`). Built from that module alone: the launcher compiles this file too.
+//! The Beast's game info, for the launcher and the loader (`monaka_core::manifest`). Its options are
+//! those of the components ([`crate::Beast`], `monaka_producer::game::options`).
 
+use crate::Beast;
 use monaka_core::manifest::*;
+use monaka_producer::game::{options, options_len};
+
+const BEAST: [Opt; options_len::<Beast>("beast")] = options::<Beast, { options_len::<Beast>("beast") }>("beast");
 
 pub const MANIFESTS: &[Manifest] = &[Manifest {
     id: "beast",
@@ -16,64 +20,8 @@ pub const MANIFESTS: &[Manifest] = &[Manifest {
     launch: Launch::Manual,
     refused_arguments: &[],
     before: "Use DirectX 12 with the game's own Frame Generation and motion blur off. Start the game and load into gameplay first.",
-    options: &[
-        aim(&[AIM_MOTION, AIM_LOOK, AIM_POINT, AIM_MOUSE], aims::HAND_RIG),
-        AIM_HAND,
-        render_size("The headset's size runs much better.").eye_size_note("Click into the game: it switches to {size} once it has focus, and VR shows it from then on."),
-        WORLD_HUD,
-        FINGER_TRACKING,
-        opt("room_scale", "Room-scale movement", "Your real steps and leans move your character; walls and enemies still stop it.", Kind::Switch { default: true })
-            .on(Shown::Game)
-            .only_when("aim", "hand_rig"),
-        // The tools (left) and weapons (right) wheels stay open while the d-pad is held, picked with
-        // A, B, X, Y; the viewer holds them for a hand reached over that shoulder (its default). Part
-        // of the controls, not a setting.
-        dpad_hold(&["--dpad-hold", "left,right"]).on(Shown::Line),
-        // The wheels pick with the right stick (not the face buttons): the reaching hand's flick
-        // goes to the game as that stick.
-        line("menu_pick_stick", "Wheels picked by stick", "The reaching hand's flick reaches the game as its right stick.", Kind::Switch { default: true })
-            .launcher()
-            .viewer_args("1", &["--menu-pick", "stick"]),
-        // Monaka's own setting (on its tab, for every game), read here.
-        DISABLE_VIEW_BOBBING,
-        opt("disable_zombie_grabs", "Disable zombie grabs", "Zombies never grab you. Off: they grab and bite until you break free, as in the game.", Kind::Switch { default: true })
-            .on(Shown::Game),
-        BINARY_FINGERS,
-        opt("mode", "Rendering", "Smooth adds in-between frames.", choice(&[("standard", "Standard"), ("framegen", "Smooth")], "standard")).on(Shown::Engine),
-        line("eye_size", "Render size (WxH)", "A render size of your own; replaces render_size.", Kind::Size).launcher(),
-        line("stereo", "Stereo", "Off: the probes only, the game as it plays on the monitor.", Kind::Switch { default: true }),
-        LATENCY,
-        EYE_SEPARATION,
-        CONTROLLER_PROXY, OTHER_BUILDS, EXTRA,
-    ],
+    options: &BEAST,
     licences: &[],
     left_hand_aims: true,
     weapon_ring: true,
 }];
-
-#[cfg(test)]
-mod tests {
-    use monaka_core::capability::{Capabilities, FEATURES, unbacked};
-
-    /// What this game's producer supplies (`monaka_core::capability`): the eye cameras, the arms
-    /// with their fingers, what the hand holds, the look it steers, the buttons it presses, the
-    /// character's step, the HUD at a depth and in pieces, DLSS per eye. It reports no situations.
-    const CAPABILITIES: Capabilities = Capabilities::EYE_CAMERA
-        .with(Capabilities::SKELETON)
-        .with(Capabilities::FINGER_BONES)
-        .with(Capabilities::HELD_ITEM)
-        .with(Capabilities::LOOK_SINK)
-        .with(Capabilities::ACTION_PRESS)
-        .with(Capabilities::CHARACTER_STEP)
-        .with(Capabilities::HUD_LAYER)
-        .with(Capabilities::HUD_PIECES)
-        .with(Capabilities::PER_EYE_HISTORY);
-
-    #[test]
-    fn every_shared_option_offered_is_one_the_game_can_carry() {
-        for manifest in super::MANIFESTS {
-            let unbacked = unbacked(manifest, CAPABILITIES, FEATURES);
-            assert!(unbacked.is_empty(), "{}: {unbacked:?}", manifest.id);
-        }
-    }
-}

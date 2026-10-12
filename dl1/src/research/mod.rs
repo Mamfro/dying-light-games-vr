@@ -32,8 +32,9 @@ pub mod widget;
 
 use monaka_hook::Hooks;
 use monaka_hook::module::Module;
-use monaka_producer::{Rejection, enable_hooks, log, require_build};
-use std::path::PathBuf;
+use monaka_producer::Rejection;
+use monaka_producer::research::Research;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 /// What this run probes.
@@ -148,13 +149,13 @@ impl Options {
     }
 }
 
-static OPTIONS: OnceLock<Options> = OnceLock::new();
+pub static PROBES: Research<Options> = Research::new(Options::from_options);
 /// Where probes write files (the DLL copy's folder).
 static DIR: OnceLock<PathBuf> = OnceLock::new();
 
 /// This run's probes (none before [`configure`]).
 pub fn options() -> &'static Options {
-    OPTIONS.get_or_init(Options::default)
+    PROBES.get()
 }
 
 /// Where probes write files.
@@ -163,77 +164,63 @@ pub fn dir() -> PathBuf {
 }
 
 /// Reads the run's probe options; `dir` takes the probes' files.
-pub fn configure(options: &monaka_core::options::Options, dir: &std::path::Path) {
-    let options = Options::from_options(options);
-    if options.targets {
+pub fn configure(read: &monaka_core::options::Options, dir: &Path) {
+    PROBES.configure(read);
+    let _ = DIR.set(dir.to_path_buf());
+    if options().targets {
         targets::enable();
     }
-    if let Some(items) = &options.give {
+    if let Some(items) = &options().give {
         give::configure(items);
     }
-    log!("research: {options:?}");
-    let _ = OPTIONS.set(options);
-    let _ = DIR.set(dir.to_path_buf());
-}
-
-/// `flat=1`: only the gameplay probes' hooks, on the game as it plays on the monitor, and with
-/// `flat_buttons=1` the adapter's own that need no headset (`buttons`). `None` without `flat`.
-pub fn flat(engine_module: &Module, buttons: impl FnOnce(&mut Hooks) -> Result<(), Rejection>) -> Option<Result<(), Rejection>> {
-    options().flat.then(|| {
-        let mut hooks = Hooks::default();
-        install_gameplay(&mut hooks, engine_module)?;
-        if options().flat_buttons {
-            buttons(&mut hooks)?;
-        }
-        log!("flat: probes only, no stereo");
-        enable_hooks(&crate::HOOKS, hooks)
-    })
 }
 
 /// The gameplay probes' hooks.
-fn install_gameplay(hooks: &mut Hooks, engine_module: &Module) -> Result<(), Rejection> {
+fn install_gameplay(hooks: &mut Hooks, engine_module: &Module, gamedll: &Module) -> Result<(), Rejection> {
     let o = options();
     if o.melee {
         melee::install(hooks, engine_module)?;
     }
     if o.sweep {
-        let gamedll = require_build(crate::engine::GAMEDLL, crate::engine::GAMEDLL_SHA256)?;
-        sweep::install(hooks, engine_module, &gamedll)?;
+        sweep::install(hooks, engine_module, gamedll)?;
     }
     if o.resize {
-        resize::install(hooks, &require_build(crate::engine::GAMEDLL, crate::engine::GAMEDLL_SHA256)?)?;
+        resize::install(hooks, gamedll)?;
     }
     if o.throw {
-        throw::install(hooks, &require_build(crate::engine::GAMEDLL, crate::engine::GAMEDLL_SHA256)?, engine_module)?;
+        throw::install(hooks, gamedll, engine_module)?;
     }
     if o.bindings {
-        bindings::install(hooks, &require_build(crate::engine::GAMEDLL, crate::engine::GAMEDLL_SHA256)?)?;
+        bindings::install(hooks, gamedll)?;
     }
     // The game-frame callback is one; `probe_video` takes it when on.
     if give::wanted() && !o.video {
-        let gamedll = require_build(crate::engine::GAMEDLL, crate::engine::GAMEDLL_SHA256)?;
-        // SAFETY: the game DLL is the build `engine.rs` describes (hash checked above); the export's
-        // type is `float IGame::GetGameTimeDelta() const`.
-        unsafe { eng_chr::game::hook(hooks, &gamedll)? };
+        // SAFETY: the game DLL is the build `engine.rs` describes (hash checked); the export's type
+        // is `float IGame::GetGameTimeDelta() const`.
+        unsafe { eng_chr::game::hook(hooks, gamedll)? };
         eng_chr::game::observe(give::frame);
     }
     Ok(())
 }
 
-/// The probes' own hooks, beside the adapter's; `size` is the back buffer's.
+/// The probes' own hooks, beside the adapter's; `size` is the back buffer's (none in a flat run).
 ///
 /// # Safety
 /// The engine and game DLL are the builds `engine.rs` describes (hash checked).
-pub unsafe fn install(hooks: &mut Hooks, engine_module: &Module, size: (u32, u32)) -> Result<(), Rejection> {
+pub unsafe fn install(hooks: &mut Hooks, engine_module: &Module, gamedll: &Module, size: Option<(u32, u32)>) -> Result<(), Rejection> {
     let o = options();
-    if o.video {
-        video::set_size(size.0, size.1);
-        let gamedll = require_build(crate::engine::GAMEDLL, crate::engine::GAMEDLL_SHA256)?;
+    if o.video
+        && let Some((width, height)) = size
+    {
+        video::set_size(width, height);
         // SAFETY: the caller's guarantee; the export's type is `float IGame::GetGameTimeDelta() const`.
-        unsafe { eng_chr::game::hook(hooks, &gamedll)? };
+        unsafe { eng_chr::game::hook(hooks, gamedll)? };
         eng_chr::game::observe(video::probe_frame);
     }
-    install_gameplay(hooks, engine_module)?;
+    install_gameplay(hooks, engine_module, gamedll)?;
+    if o.flat {
+        return Ok(());
+    }
     if o.walk {
         walk::install(hooks, engine_module, o.walk_push)?;
     }

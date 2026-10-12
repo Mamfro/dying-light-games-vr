@@ -1,6 +1,6 @@
-//! Alternate-eye stereo, in place: the player camera stays on the game's view. The shared present
-//! loop ([`monaka_stereo::driver`], `DRIVER`) chooses the next eye and head pose after each present
-//! (DL1's own work around that: [`after_present`]); the view setup stage moves the cached render
+//! Alternate-eye stereo, in place: the player camera stays on the game's view. Monaka's present
+//! loop (`monaka_stereo::feature`, its `DRIVER`) chooses the next eye and head pose after each
+//! present (DL1's own work around that: [`after_present`]); the view setup stage moves the cached render
 //! camera to that eye just before the renderer reads it ([`view_setup`]); the frame then shows
 //! `latency` presents later, where the driver's publisher copies it and, with its partner eye,
 //! publishes it with the poses both were rendered from (the upscaler and the hybrid publish
@@ -10,26 +10,19 @@ use crate::player::aim;
 use crate::config::{Config, widened_fov};
 use crate::engine::{self, Camera, CameraWriter, SetFovFn, ViewStageFn};
 use crate::hud::draws;
-use monaka_channel::ChannelName;
 use monaka_channel::hands::HandChannel;
-use monaka_channel::pose::PoseChannel;
 use monaka_core::alternate::Schedule;
 use monaka_core::camera::{self, Frustum, Mat34, apply_head, distance, parallel_eyes, rigid_inverse};
 use monaka_core::protocol::{HandPose, HeadPose, LEFT_HAND, RIGHT_HAND};
 use monaka_hook::{InFlight, Original, mem};
 use monaka_producer::log;
 use monaka_core::depth::DepthMapping;
-use monaka_stereo::alternate::AlternatePublisher;
-use monaka_stereo::driver::{Driver, Install, Publisher};
+use monaka_stereo::driver::Driver;
+use monaka_stereo::feature::DRIVER;
 use monaka_stereo::hybrid::EyeCameras;
-use monaka_stereo::present::PresentFn;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering::*};
 use std::sync::{Mutex, OnceLock};
 use windows::Win32::Graphics::Dxgi::IDXGISwapChain;
-use windows::core::HRESULT;
-
-/// The present loop: the game's swapchain, the eye and pose of the next frame, the pairs.
-pub static DRIVER: Driver = Driver::new();
 
 /// Whether the run captures (eyes are chosen at presents).
 pub fn capturing() -> bool {
@@ -44,26 +37,13 @@ pub fn eye() -> i32 {
 pub struct Setup {
     pub config: Config,
     pub camera: CameraWriter,
-    pub channel: ChannelName,
 }
 
 static SETUP: OnceLock<Setup> = OnceLock::new();
 
-pub fn install(setup: Setup, pose_channel: Option<PoseChannel>, hand_channel: Option<HandChannel>) {
-    let publisher = AlternatePublisher::new(setup.channel.clone(), setup.config.schedule);
+/// The run's setup, and the controllers' block for pointing aim (read at each present).
+pub fn install(setup: Setup, hand_channel: Option<HandChannel>) {
     *HANDS.lock().unwrap_or_else(|e| e.into_inner()) = HandsCell(hand_channel);
-    DRIVER.install(Install {
-        shared: setup.config.shared,
-        publisher: Publisher::D3D11(publisher),
-        poses: pose_channel,
-        frame_end: Some(draws::frame_end),
-        report: Some(report),
-        work: ("camera shifts", &COUNTERS.shifts),
-        before: Some(before_present),
-        after: Some(after_present),
-        adjust_pose: None,
-        finish: Some(finish),
-    });
     let _ = SETUP.set(setup);
 }
 
@@ -262,8 +242,10 @@ fn remember<T: Copy>(list: &mut Vec<Changed<T>>, object: usize, now: u64, captur
 }
 static IN_PLACE_VIEW: AtomicUsize = AtomicUsize::new(0);
 
+/// Render cameras moved to an eye (the loop's rate line).
+pub static SHIFTS: AtomicU64 = AtomicU64::new(0);
+
 struct Counters {
-    shifts: AtomicU64,
     shift_failures: AtomicU64,
     head_applied: AtomicU64,
     head_reapplied: AtomicU64,
@@ -271,7 +253,6 @@ struct Counters {
     widened_fov_bits: AtomicU32,
 }
 static COUNTERS: Counters = Counters {
-    shifts: AtomicU64::new(0),
     shift_failures: AtomicU64::new(0),
     head_applied: AtomicU64::new(0),
     head_reapplied: AtomicU64::new(0),
@@ -279,20 +260,13 @@ static COUNTERS: Counters = Counters {
     widened_fov_bits: AtomicU32::new(0),
 };
 
-pub static PRESENT_ORIGINAL: Original<PresentFn> = Original::new();
 pub static VIEW_SETUP_ORIGINAL: Original<ViewStageFn> = Original::new();
 pub static SET_FOV_ORIGINAL: Original<SetFovFn> = Original::new();
-
-/// `IDXGISwapChain::Present`.
-pub unsafe extern "system" fn present(swap: *mut core::ffi::c_void, interval: u32, flags: u32) -> HRESULT {
-    // SAFETY: the game passes its live swapchain; the original is DXGI's Present.
-    unsafe { DRIVER.present(swap, interval, flags, PRESENT_ORIGINAL.get()) }
-}
 
 /// The pose each eye of a published pair goes out with: the frustum each image was actually
 /// rendered with (the engine's own without the headset projection, the centred envelope with the
 /// symmetric experiment) and the eye distance used.
-fn report(_: &Driver, used: &mut HeadPose) {
+pub fn report(_: &Driver, used: &mut HeadPose) {
     let config = &setup().config;
     let frustum = VIEW.lock().map(|v| v.frustum).unwrap_or_default();
     used.ipd = config.separation_for(used);
@@ -312,7 +286,7 @@ fn report(_: &Driver, used: &mut HeadPose) {
 
 /// Before present `n`: the upscaler and the hybrid publish their own pairs (true); otherwise the
 /// driver's publisher copies this frame's eye.
-fn before_present(driver: &Driver, chain: &IDXGISwapChain, n: u64) -> bool {
+pub fn before_present(driver: &Driver, chain: &IDXGISwapChain, n: u64) -> bool {
     monaka_producer::situation::report(monaka_producer::situation::Situation::WorldHidden, !world_drawn_recently(), 500);
     let config = &setup().config;
     let report = |used: &mut HeadPose| report(driver, used);
@@ -466,7 +440,7 @@ fn note_label(n: u64, schedule: Schedule) {
 /// After present `n`, with the pair's head `pose` chosen and recorded by the driver: the
 /// culling relaxed again, the stick kept from the game, the controllers read, the live camera
 /// turned to the view, and what the next view setup draws from.
-fn after_present(_: &Driver, n: u64, pose: &HeadPose) {
+pub fn after_present(_: &Driver, n: u64, pose: &HeadPose) {
     let setup = setup();
     apply_mesh_culling(setup.config.mesh_cull_scale);
     if setup.config.aim.head {
@@ -827,7 +801,7 @@ fn shift_render_camera(level: usize, view: usize) {
     if let Some(zoom) = config.detail_zoom {
         mem::write(state + engine::STATE_ZOOM, [zoom, zoom * zoom, 1.0 / zoom, 1.0 / (zoom * zoom)]);
     }
-    COUNTERS.shifts.fetch_add(1, Relaxed);
+    SHIFTS.fetch_add(1, Relaxed);
 }
 
 /// `IBaseCamera::SetFOV`: on the player camera, asks for a field of view containing both eyes.
@@ -877,7 +851,7 @@ fn apply_mesh_culling(scale: f32) {
 
 /// Gives back everything the run changed, once, from whichever thread retires the eye (the
 /// driver's finish).
-fn finish(driver: &Driver) {
+pub fn finish(driver: &Driver) {
     log!("presents by how far back the camera they show was chosen [0, 1, 2, 3, 4, 5+]: {:?}", LABEL_LAGS.each_ref().map(|c| c.load(Relaxed)));
     log!(
         "view centre steps back while moving, by eye [made like the frame before, made the other way] of frames moving: left {:?} of {}, right {:?} of {}",
@@ -950,7 +924,7 @@ fn finish(driver: &Driver) {
     let c = &COUNTERS;
     log!(
         "run ended: pairs={pairs} publish_failures={failures} camera_shifts={} shift_failures={} head_applied={} head_reapplied={} live_turns={} widened_fov={} hud_draws_shifted={} draws_seen={} scene_copies={} hud_layer_draws={}",
-        c.shifts.load(Relaxed),
+        SHIFTS.load(Relaxed),
         c.shift_failures.load(Relaxed),
         c.head_applied.load(Relaxed),
         c.head_reapplied.load(Relaxed),
@@ -963,9 +937,8 @@ fn finish(driver: &Driver) {
     );
 }
 
-/// Releases the channel and the pose block after the hooks are off.
+/// Releases the controllers' block and the outputs after the hooks are off.
 pub fn release() {
-    DRIVER.release();
     HANDS.lock().unwrap_or_else(|e| e.into_inner()).0 = None;
     crate::output::hybrid::release();
     crate::research::release();

@@ -25,6 +25,7 @@
 //! comes a little after the swing that starts it: the fastest of the right hand's last
 //! [`SWING_WINDOW`] is the throw.
 
+use monaka_core::math::length;
 use crate::player::{hand_world, hands};
 use monaka_core::camera::Mat34;
 use monaka_hook::module::Module;
@@ -50,8 +51,6 @@ const SPAWN: usize = 0x6fa610;
 const STATE: usize = 0x38;
 const RELEASE_TIME: usize = 0x60;
 const THROWING: [u32; 2] = [3, 4];
-/// The controller's player (its vfunc +0x20).
-const PLAYER_SLOT: usize = 0x20;
 /// In the controller: whether it holds an item, the item; the item's object and its kind (vfunc
 /// +0x1c0): 0x1f a thrown object (the one kind whose velocity the throw writes at +0x100).
 const HOLDS: usize = 0x90;
@@ -96,7 +95,6 @@ type SetStateFn = unsafe extern "C" fn(*mut c_void, u32);
 type ThrowFn = unsafe extern "C" fn(*mut c_void);
 type SpawnFn = unsafe extern "C" fn(usize, usize, u32) -> usize;
 type SetPositionFn = unsafe extern "system" fn(usize, *const [f32; 3]);
-type GetterFn = unsafe extern "system" fn(*mut c_void) -> usize;
 type KindFn = unsafe extern "C" fn(usize) -> u32;
 type AimPointFn = unsafe extern "C" fn(*mut c_void, *mut [f32; 3], u8) -> usize;
 type MeleeThrowFn = unsafe extern "C" fn(*mut c_void);
@@ -147,21 +145,13 @@ pub fn install(hooks: &mut Hooks, gamedll: &Module, engine_module: &Module) -> R
     Ok(())
 }
 
-/// Whether the controller is the player's (the arms the rig poses).
-fn players(controller: usize) -> bool {
-    let ours = hands::arms_model();
-    let getter = mem::read::<usize>(controller).and_then(|vtable| mem::read::<usize>(vtable + PLAYER_SLOT));
-    let Some(getter) = getter.filter(|&g| Module::find(crate::engine::GAMEDLL).is_some_and(|m| m.contains(g))) else { return false };
-    // SAFETY: the controller's own player getter, on the game thread.
-    ours != 0 && unsafe { std::mem::transmute::<usize, GetterFn>(getter)(controller as *mut c_void) } == ours
-}
 
 unsafe extern "C" fn set_state(controller: *mut c_void, state: u32) {
     let _flight = InFlight::enter();
     // SAFETY: forwards the game's own call.
     unsafe { SET_STATE_ORIGINAL.get()(controller, state) };
     let at = controller as usize;
-    if !players(at) {
+    if !hands::players(at) {
         return;
     }
     let busy = mem::read::<u32>(at + STATE).is_some_and(|s| s != 0);
@@ -185,7 +175,7 @@ unsafe extern "C" fn set_state(controller: *mut c_void, state: u32) {
     let hand = throwing_hand();
     let n = RELEASES.fetch_add(1, Relaxed) + 1;
     if n <= 30 {
-        let speed = |fastest: fn(usize, std::time::Duration) -> Option<[f32; 3]>| fastest(hand_world::LEFT, RELEASE_WINDOW).map_or(f32::NAN, hand_world::length);
+        let speed = |fastest: fn(usize, std::time::Duration) -> Option<[f32; 3]>| fastest(hand_world::LEFT, RELEASE_WINDOW).map_or(f32::NAN, length);
         log!(
             "throwing by hand: release {n} (state {state}): fastest over {RELEASE_WINDOW:?}: the left controller {:.2} m/s, the left hand {:.2} m/s",
             speed(hand_world::controller_fastest),
@@ -205,7 +195,7 @@ unsafe extern "C" fn set_state(controller: *mut c_void, state: u32) {
 /// the throw).
 fn throwing_hand() -> Option<([f32; 3], [f32; 3])> {
     let fastest = hand_world::controller_fastest(HAND, RELEASE_WINDOW)?;
-    let speed = hand_world::length(fastest);
+    let speed = length(fastest);
     let direction = hand_world::controller_stroke(HAND, RELEASE_WINDOW, STROKE_BEFORE, STROKE_AFTER).unwrap_or_else(|| if speed > 0.0 { fastest.map(|c| c / speed) } else { DOWN });
     hand_world::position(HAND).map(|position| (position, direction.map(|c| c * speed)))
 }
@@ -233,7 +223,7 @@ pub fn place_tool(vis: usize) {
     let Some(tool) = crate::player::hands::weapon_model(vis, 0) else { return };
     let (Some(left), Some(right), Some(holder), Some(world)) = (hand_world::element(c"L_Hand"), hand_world::element(c"R_Hand"), hand_world::element(c"R_HandHolder"), tool.world(0)) else { return };
     let at = |m: &Mat34| [m[3], m[7], m[11]];
-    let apart = hand_world::length([0, 1, 2].map(|k| at(&world)[k] - at(&holder)[k]));
+    let apart = length([0, 1, 2].map(|k| at(&world)[k] - at(&holder)[k]));
     if apart > AT_HOLDER {
         static SKIPPED: AtomicU64 = AtomicU64::new(0);
         if SKIPPED.fetch_add(1, Relaxed) < 5 {
@@ -275,7 +265,7 @@ fn kind(controller: usize) -> Option<u32> {
 
 unsafe extern "C" fn throw(controller: *mut c_void) {
     let _flight = InFlight::enter();
-    let players = players(controller as usize);
+    let players = hands::players(controller as usize);
     let kind = kind(controller as usize);
     if players && kind == Some(KNIVES) {
         let release = RELEASE.lock().ok().and_then(|mut r| r.take());
@@ -318,7 +308,7 @@ unsafe extern "C" fn throw(controller: *mut c_void) {
     let release = RELEASE.lock().ok().and_then(|mut r| r.take());
     // One object: a tool thrown by hand (the knives' throw at several targets keeps the game's aim).
     let ([object], Some((position, velocity))) = (made.as_slice(), release) else { return };
-    let speed = hand_world::length(velocity);
+    let speed = length(velocity);
     move_to(*object, position);
     let thrown = velocity.map(|c| c * GAIN);
     for (k, c) in thrown.iter().enumerate() {
@@ -351,7 +341,7 @@ unsafe extern "C" fn launch(object: usize, velocity: *const [f32; 3], target: *c
     move_to(object, position);
     let n = BY_HAND.fetch_add(1, Relaxed) + 1;
     if n <= 20 {
-        log!("throwing by hand: launch {n} from {position:.2?} at {thrown:.1?} ({:.1} m/s)", hand_world::length(thrown));
+        log!("throwing by hand: launch {n} from {position:.2?} at {thrown:.1?} ({:.1} m/s)", length(thrown));
     }
     // SAFETY: the game's own call with the hand's velocity in place of a zero one.
     unsafe { LAUNCH_ORIGINAL.get()(object, &thrown, target) };
@@ -374,7 +364,7 @@ unsafe extern "C" fn spawn(item: usize, player: usize, mode: u32) -> usize {
 fn steered(release: Option<([f32; 3], [f32; 3])>, run: impl FnOnce()) {
     // Along the hand's motion, as far as it was fast; a hand at rest drops it.
     let steer = release.map(|(position, velocity)| {
-        let speed = hand_world::length(velocity);
+        let speed = length(velocity);
         let direction = if speed > STILL { velocity.map(|c| c / speed) } else { DOWN };
         (position, direction, (speed * REACH_PER_SPEED).clamp(NEAREST, FARTHEST))
     });
@@ -389,7 +379,7 @@ fn steered(release: Option<([f32; 3], [f32; 3])>, run: impl FnOnce()) {
 
 unsafe extern "C" fn melee_throw(controller: *mut c_void) {
     let _flight = InFlight::enter();
-    let release = players(controller as usize)
+    let release = hands::players(controller as usize)
         .then(|| hand_world::position(WEAPON_HAND).zip(hand_world::controller_fastest(WEAPON_HAND, SWING_WINDOW)))
         .flatten();
     // SAFETY: forwards the game's own call.
@@ -403,7 +393,7 @@ unsafe extern "C" fn aim_point(controller: *mut c_void, out: *mut [f32; 3], focu
     let steer = STEER.lock().ok().and_then(|s| *s);
     let (Some((from, direction, reach)), Some(point)) = (steer, mem::read::<[f32; 3]>(out as usize)) else { return target };
     let to = [0, 1, 2].map(|k| point[k] - from[k]);
-    let distance = hand_world::length(to);
+    let distance = length(to);
     // A target locked on to stays when the hand threw at it.
     if target != 0 && distance > 1e-3 {
         let cos = (0..3).map(|k| to[k] / distance * direction[k]).sum::<f32>();

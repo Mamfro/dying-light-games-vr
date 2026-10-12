@@ -4,6 +4,7 @@
 //! engine's element getters ([`sample`]). A short trail of each (`monaka_core::trail`) gives its
 //! velocity.
 
+use monaka_core::math::{cross, unit};
 use crate::player::hands;
 use monaka_core::trail::Trail;
 use monaka_hook::mem;
@@ -13,7 +14,6 @@ use std::ffi::{CStr, c_void};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-const ELEMENT_ID: &str = "?GetElementID@IModelObject@@QEBAHPEBD@Z";
 type ElementIdFn = unsafe extern "system" fn(usize, *const i8) -> i32;
 
 /// The hands' elements, by side (`LEFT`, `RIGHT`).
@@ -48,7 +48,7 @@ pub fn resolve(engine_module: &Module) -> Result<(), Rejection> {
     // SAFETY: each export has the signature its mangled name states, on x64.
     let getters = unsafe {
         Getters {
-            element_id: std::mem::transmute::<usize, ElementIdFn>(find(ELEMENT_ID)?),
+            element_id: std::mem::transmute::<usize, ElementIdFn>(find(crate::engine::ELEMENT_ID)?),
             world: std::mem::transmute::<usize, crate::engine::ElementWorldFn>(find(crate::engine::ELEMENT_WORLD)?),
         }
     };
@@ -152,18 +152,10 @@ pub fn string_point() -> Option<[f32; 3]> {
     }
 }
 
-pub fn length(v: [f32; 3]) -> f32 {
-    (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt()
-}
-
 /// `m` with its 3x3 part made a rotation (the game's arm and weapon matrices carry a squash),
 /// keeping its x axis and the plane of x and y.
 pub fn rigid(m: &[f32; 12]) -> [f32; 12] {
-    let unit = |v: [f32; 3]| {
-        let l = length(v);
-        if l > 1e-9 { v.map(|c| c / l) } else { v }
-    };
-    let cross = |a: [f32; 3], b: [f32; 3]| [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+    let unit = |v: [f32; 3]| unit(v).unwrap_or(v);
     let x = unit([m[0], m[4], m[8]]);
     let z = unit(cross(x, [m[1], m[5], m[9]]));
     let y = cross(z, x);

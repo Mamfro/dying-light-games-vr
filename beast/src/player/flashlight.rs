@@ -19,6 +19,7 @@ use std::collections::HashMap;
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::*};
 use std::sync::{Mutex, OnceLock};
+use monaka_core::sync::Locked;
 
 /// `void CVarlist::Set(ttl::string_const<char> name, float value)` (engine; not exported): the
 /// name by pointer to the string constant (a tagged pointer: the top byte a tag, the rest the
@@ -53,6 +54,26 @@ pub struct Settings {
     /// The light's source offset (the game's: 0.2, -0.05), if set.
     pub source: Option<[f32; 2]>,
     pub probe: bool,
+}
+
+impl Settings {
+    /// `flashlight_steady` (default on) and `flashlight_shadows=1` (keeps them), with stereo;
+    /// `flashlight_source=x,y`, `flashlight_shadow_offset=`, `probe_flashlight=1`.
+    pub fn from_options(options: &monaka_core::options::Options) -> Self {
+        let stereo = options.switch("stereo", true);
+        Self {
+            steady: stereo && options.switch("flashlight_steady", true),
+            shadow_offset: options.value::<f32>("flashlight_shadow_offset").filter(|v| v.is_finite() && v.abs() <= 2.0),
+            shadow_scale: (stereo && !options.switch("flashlight_shadows", false)).then_some(0.0),
+            source: options.floats::<2>("flashlight_source", 3.0),
+            probe: options.switch("probe_flashlight", false),
+        }
+    }
+
+    /// Whether anything is changed or probed.
+    pub fn any(&self) -> bool {
+        self.steady || self.source.is_some() || self.shadow_offset.is_some() || self.shadow_scale.is_some() || self.probe
+    }
 }
 
 static SETTINGS: OnceLock<Settings> = OnceLock::new();
@@ -137,7 +158,7 @@ fn decide(varlist: usize, tagged: u64) -> Action {
         return Action::Set(source[axis]);
     }
     if settings.probe && name.starts_with(PROBED) {
-        let mut names = PROBED_NAMES.lock().unwrap_or_else(|e| e.into_inner());
+        let mut names = PROBED_NAMES.locked();
         names.push((name, 0));
         return Action::Log(names.len() - 1);
     }
@@ -151,7 +172,7 @@ unsafe extern "C" fn set(varlist: *mut c_void, name: *const u64, value: f32) {
     let action = if tagged == 0 {
         Action::Keep
     } else {
-        let mut actions = ACTIONS.lock().unwrap_or_else(|e| e.into_inner());
+        let mut actions = ACTIONS.locked();
         let map = actions.get_or_insert_with(HashMap::new);
         match map.get(&tagged) {
             Some(action) => *action,
@@ -191,7 +212,7 @@ unsafe extern "C" fn set(varlist: *mut c_void, name: *const u64, value: f32) {
             }
         }
         Action::Log(index) => {
-            let mut names = PROBED_NAMES.lock().unwrap_or_else(|e| e.into_inner());
+            let mut names = PROBED_NAMES.locked();
             if let Some((text, seen)) = names.get_mut(index) {
                 *seen += 1;
                 if *seen <= 3 || seen.is_power_of_two() {

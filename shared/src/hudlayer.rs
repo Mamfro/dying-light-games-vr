@@ -29,6 +29,7 @@ use std::sync::Mutex;
 use windows::Win32::Graphics::Direct3D12::*;
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_R8G8B8A8_UNORM;
 use windows::core::{BOOL, Interface};
+use monaka_core::sync::Locked;
 
 /// `ID3D12CommandQueue` and `ID3D12GraphicsCommandList` vtable slots (`windows` 0.62's layouts).
 mod slot {
@@ -164,7 +165,7 @@ impl Layer {
 }
 
 fn with_list<R>(list: usize, f: impl FnOnce(&mut ListState) -> R) -> R {
-    let mut lists = LISTS.lock().unwrap_or_else(|e| e.into_inner());
+    let mut lists = LISTS.locked();
     if let Some((_, state)) = lists.iter_mut().find(|(l, _)| *l == list) {
         return f(state);
     }
@@ -298,7 +299,7 @@ unsafe extern "system" fn execute_command_lists(queue: *mut c_void, count: u32, 
         }
     }
     if LIST_HOOKED.load(Relaxed) && !lists.is_null() {
-        let mut frame = FRAME.lock().unwrap_or_else(|e| e.into_inner());
+        let mut frame = FRAME.locked();
         for i in 0..count as usize {
             let Some(list) = mem::read::<usize>(lists as usize + i * 8) else { continue };
             let groups = with_list(list, |state| std::mem::take(&mut state.groups));
@@ -318,7 +319,7 @@ unsafe extern "system" fn execute_command_lists(queue: *mut c_void, count: u32, 
 /// probe's frames.
 pub fn frame_end() {
     let n = FRAMES.fetch_add(1, Relaxed) + 1;
-    let groups = std::mem::take(&mut *FRAME.lock().unwrap_or_else(|e| e.into_inner()));
+    let groups = std::mem::take(&mut *FRAME.locked());
     let candidate = groups.iter().rev().find(|g| g.draws >= HUD_DRAWS_AT_LEAST && g.full_screen == 0 && g.target != 0).map_or(0, |g| g.target);
     let before = CANDIDATE.swap(candidate, Relaxed);
     if candidate != 0 && candidate == before && HUD_TARGET.swap(candidate, Relaxed) != candidate {
@@ -365,7 +366,7 @@ unsafe fn hook_list(list: *mut c_void) -> Result<(), String> {
         place(hooks.method(&DRAW_INDEXED_INSTANCED, "DrawIndexedInstanced", list, slot::LIST_DRAW_INDEXED_INSTANCED, draw_indexed_instanced as DrawIndexedInstancedFn), "DrawIndexedInstanced")?;
     }
     hooks.enable().map_err(|e| e.to_string())?;
-    *LIST_HOOKS.lock().unwrap_or_else(|e| e.into_inner()) = Some(hooks);
+    *LIST_HOOKS.locked() = Some(hooks);
     Ok(())
 }
 
@@ -377,7 +378,7 @@ pub fn take_layer(queue: &ID3D12CommandQueue, size: (u32, u32)) -> Option<ID3D12
     if LAYER_FAILED.load(Relaxed) || REMOVED.load(Relaxed) || !LIST_HOOKED.load(Relaxed) || size.0 == 0 || size.1 == 0 {
         return None;
     }
-    let mut slot = LAYER.lock().unwrap_or_else(|e| e.into_inner());
+    let mut slot = LAYER.locked();
     if slot.as_ref().is_none_or(|l| l.size != size) {
         LAYER_VIEW.store(0, Relaxed);
         if let Some(old) = slot.take() {
@@ -417,7 +418,7 @@ pub fn take_layer(queue: &ID3D12CommandQueue, size: (u32, u32)) -> Option<ID3D12
 /// After the producer is done with the layer: cleared and a render target again, for the next
 /// frame's HUD draws.
 pub fn return_layer(queue: &ID3D12CommandQueue) {
-    let mut slot = LAYER.lock().unwrap_or_else(|e| e.into_inner());
+    let mut slot = LAYER.locked();
     let Some(layer) = slot.as_mut() else { return };
     if layer.render_target {
         return;
@@ -464,7 +465,7 @@ pub unsafe fn install(hooks: &mut Hooks, queue: &ID3D12CommandQueue, redirect: b
     PROBING.store(probe, Relaxed);
     REDIRECT.store(redirect, Relaxed);
     REMOVED.store(false, Relaxed);
-    *PROBE_CHANNEL.lock().unwrap_or_else(|e| e.into_inner()) = channel;
+    *PROBE_CHANNEL.locked() = channel;
     // SAFETY: the caller's guarantee; the detour has the method's type.
     unsafe {
         hooks.method_noted(&EXECUTE, "ExecuteCommandLists", queue.as_raw(), slot::QUEUE_EXECUTE_COMMAND_LISTS, execute_command_lists as ExecuteFn, |why| {
@@ -480,14 +481,14 @@ pub fn remove(idle_ms: u64) {
     REMOVED.store(true, Relaxed);
     LAYER_VIEW.store(0, Relaxed);
     HUD_TARGET.store(0, Relaxed);
-    if let Some(mut hooks) = LIST_HOOKS.lock().unwrap_or_else(|e| e.into_inner()).take() {
+    if let Some(mut hooks) = LIST_HOOKS.locked().take() {
         if let Err(e) = hooks.disable() {
             log!("hud layer: command list hooks left in place: {e}");
         }
         InFlight::wait_idle(idle_ms);
     }
     LIST_HOOKED.store(false, Relaxed);
-    if let Some(layer) = LAYER.lock().unwrap_or_else(|e| e.into_inner()).take() {
+    if let Some(layer) = LAYER.locked().take() {
         layer.recorder.idle(2000);
     }
     log!(

@@ -255,6 +255,19 @@ pub fn arms_model() -> usize {
     ARMS_MODEL.load(Relaxed) as usize
 }
 
+/// A game controller's (a weapon's, a bow's, a throw's) getter for its player: vtable slot 0x20.
+const PLAYER_SLOT: usize = 0x20;
+
+/// Whether `controller` is the player's: its player is the arms model the rig poses (its getter
+/// in the game DLL; called on the game thread).
+pub fn players(controller: usize) -> bool {
+    let ours = arms_model();
+    let getter = mem::read::<usize>(controller).and_then(|vtable| mem::read::<usize>(vtable + PLAYER_SLOT));
+    let Some(getter) = getter.filter(|&g| monaka_hook::module::Module::find(crate::engine::GAMEDLL).is_some_and(|m| m.contains(g))) else { return false };
+    // SAFETY: the controller's own player getter, on the game thread.
+    ours != 0 && unsafe { std::mem::transmute::<usize, unsafe extern "system" fn(usize) -> usize>(getter)(controller) } == ours
+}
+
 /// Arms callbacks so far (the rig poses the arms once per callback).
 pub fn rig_calls() -> u64 {
     fpp::calls()

@@ -1,9 +1,9 @@
-//! What the launcher can set, from `dl2-options.txt` beside the DLL copy: the shared settings
-//! ([`Shared`], the manifest's defaults) and this game's own.
+//! The stereo's settings for the run, read once at the start ([`set`]) for the hooks to ask
+//! ([`get`], [`debug`]): the shared settings (the manifest's defaults), the rendering mode and
+//! the PC checks' debug flags. The components read their own options at their install.
 
 use crate::manifest::MANIFESTS;
-use monaka_arms::aim::AimSettings;
-use monaka_arms::{melee, roomscale};
+use monaka_core::manifest::Manifest;
 use monaka_core::options::{Options, Shared};
 use std::ops::Deref;
 use std::sync::OnceLock;
@@ -66,24 +66,6 @@ enum Mode {
 #[derive(Clone, Copy, Debug)]
 pub struct Config {
     pub shared: Shared,
-    /// What aims (`monaka_arms::aim`): the shared aim plus `melee_aim_head` and `tool_aim`.
-    pub arms_aim: AimSettings,
-    /// Swinging a controller like the melee weapon it holds (or punching, bare-handed) attacks
-    /// (with the hand rig; `swing_attack=0` turns it off, `swing_speed=` tunes it).
-    pub melee: melee::Settings,
-    /// Physical melee (with the hand rig; `eng_chr::melee`). DL2 starts a light attack on the
-    /// press (DL1 on the release), so swings keep the shared press.
-    pub physical_melee: Option<melee::Physical>,
-    /// Room-scale following (with the hand rig; `monaka_arms::roomscale`).
-    pub room_scale: Option<roomscale::Settings>,
-    /// What the hands do with the game's own throw, bow, reload and lockpick (with the hand rig, part
-    /// of it: `motion_throw=0`, `motion_bow=0` (`bow_string=0` only the string drawn by hand), `manual_reload=0`, `motion_lockpick=0` turn one off
-    /// for a test; `eng_chr::handwork`).
-    pub handwork: eng_chr::handwork::Options,
-    /// Grabs never land on the player (`disable_zombie_grabs`; `eng_chr::grabs`).
-    pub disable_zombie_grabs: bool,
-    /// The view stays level instead of bobbing with the steps (`eng_chr::view_bob`).
-    pub disable_view_bobbing: bool,
     /// The headset's recommended eye size (`eye_size=WxH`, from the OpenXR runtime).
     pub eye_size: Option<(u32, u32)>,
     /// One render per frame, eyes taking turns (`mode=alternate`, D3D12).
@@ -113,29 +95,15 @@ impl Deref for Config {
 
 impl Default for Config {
     fn default() -> Self {
-        Self::from_options(&Options::default())
+        Self::from_options(&Options::default(), &MANIFESTS[0])
     }
 }
 
 impl Config {
-    pub fn from_options(options: &Options) -> Self {
-        let shared = Shared::from_options(options, &MANIFESTS[0]);
+    pub fn from_options(options: &Options, manifest: &Manifest) -> Self {
         let mode = options.choice("mode", MODES, Mode::FrameGen);
         Self {
-            shared,
-            arms_aim: AimSettings::from_options(options, shared.aim, true),
-            melee: melee::Settings::from_options(options, shared.aim.side),
-            physical_melee: melee::Physical::from_options(options, shared.aim.rig, false),
-            room_scale: roomscale::Settings::from_options(options, &shared),
-            disable_zombie_grabs: options.switch("disable_zombie_grabs", true),
-            disable_view_bobbing: options.switch("disable_view_bobbing", true),
-            handwork: eng_chr::handwork::Options {
-                throw: options.switch("motion_throw", true) && shared.aim.rig,
-                bow: options.switch("motion_bow", true) && shared.aim.rig,
-                bow_string: options.switch("bow_string", true),
-                reload: options.switch("manual_reload", true) && shared.aim.rig,
-                lockpick: options.switch("motion_lockpick", true) && shared.aim.rig,
-            },
+            shared: Shared::from_options(options, manifest),
             eye_size: options.size("eye_size"),
             alternate_eye: mode == Mode::Alternate,
             depth_stereo: mode == Mode::Depth,
@@ -172,37 +140,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn reads_every_manifest_option() {
-        let unread = monaka_core::manifest::unread_options(&MANIFESTS[0], |options| {
-            Config::from_options(options);
-        });
-        assert!(unread.is_empty(), "not read: {unread:?}");
-    }
-
-    #[test]
     fn modes_and_defaults() {
         let config = Config::default();
         assert!(config.framegen && !config.depth_stereo && !config.alternate_eye, "Smooth, as the manifest says");
         assert!(config.aim.head && config.aim.hand && config.aim.rig && config.hud.world && config.hud.markers);
         assert_eq!(config.hud.scale, 0.55);
         assert_eq!(config.once_skip, ONCE_SKIP_DEFAULT);
-        let depth = Config::from_options(&Options::parse("mode=depth\nhud_scale=0.4\naim=off\nlock_pitch=1\ndebug_flags=5\nonce_skip=3"));
+        let read = |text: &str| Config::from_options(&Options::parse(text), &MANIFESTS[0]);
+        let depth = read("mode=depth\nhud_scale=0.4\naim=off\nlock_pitch=1\ndebug_flags=5\nonce_skip=3");
         assert!(depth.depth_stereo && !depth.framegen && !depth.aim.head && depth.lock_pitch);
         assert_eq!((depth.hud.scale, depth.debug, depth.once_skip), (0.4, 5, 3));
         assert!(depth.has(debug::MONO) && !depth.has(debug::SHOW_LEFT));
-        let same = Config::from_options(&Options::parse("mode=same\nsynthetic_yaw=30\nsynthetic_pitch=-10"));
+        let same = read("mode=same\nsynthetic_yaw=30\nsynthetic_pitch=-10");
         assert!(!same.framegen && !same.depth_stereo && !same.alternate_eye);
         assert_eq!(same.synthetic, Some((30.0, -10.0)));
-        assert!(Config::from_options(&Options::parse("mode=alternate")).alternate_eye);
+        assert!(read("mode=alternate").alternate_eye);
     }
 
     #[test]
     fn probes_are_research() {
         use crate::research::Options as Probes;
         let none = Probes::from_options(&Options::default());
-        assert!(!none.hands && !none.markers && !none.gui && !none.cameras && !none.hud && !none.aim_log);
-        let all = Probes::from_options(&Options::parse("probe_hands=1\nprobe_markers=1\nprobe_gui=1\nprobe_cameras=1\nprobe_hud=1\ndebug_flags=16389"));
-        assert!(all.hands && all.markers && all.gui && all.cameras && all.hud && all.aim_log);
+        assert!(!none.hands && !none.markers && !none.cameras && !none.aim_log);
+        let all = Probes::from_options(&Options::parse("probe_hands=1\nprobe_markers=1\nprobe_cameras=1\ndebug_flags=16389"));
+        assert!(all.hands && all.markers && all.cameras && all.aim_log);
         assert!(!Probes::from_options(&Options::parse("debug_flags=5")).aim_log);
     }
 }

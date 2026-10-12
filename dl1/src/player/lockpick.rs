@@ -9,6 +9,7 @@
 //! points) as the pick's direction, the right hand's as the screwdriver's left or right. A stick
 //! pushed wins over the hands.
 
+use monaka_core::math::{cross, dot};
 use crate::view::stereo;
 use monaka_core::math::{Quat, forward_axis, right_axis};
 use monaka_core::protocol::{LEFT_HAND, RIGHT_HAND};
@@ -60,14 +61,6 @@ pub fn install(hooks: &mut Hooks, gamedll: &Module) -> Result<(), Rejection> {
     unsafe { hooks.inline_decoded(&READ_ORIGINAL, "lockpicking input", gamedll.at(READ), read as ReadFn)? };
     log!("lockpicking by hand: the left hand's twist turns the pick, the right hand's the screwdriver");
     Ok(())
-}
-
-fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
-
-fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
 }
 
 /// How far `now` is rolled from `reference` about where `now` points (radians, positive clockwise

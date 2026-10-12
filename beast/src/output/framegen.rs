@@ -35,6 +35,7 @@ use windows::Win32::Graphics::Dxgi::IDXGISwapChain3;
 use windows::core::Interface;
 
 pub use monaka_framegen::{enable, enabled};
+use monaka_core::sync::Locked;
 
 struct Counters {
     collected: [AtomicU64; 2],
@@ -88,7 +89,7 @@ pub fn at_constants(constants: *const u8, eye: Option<usize>) {
     if !enabled() || constants.is_null() {
         return;
     }
-    let mut c = COLLECTING.lock().unwrap_or_else(|e| e.into_inner());
+    let mut c = COLLECTING.locked();
     (c.eye, c.camera, c.depth, c.motion) = (None, None, None, None);
     let Some(eye) = eye.filter(|&e| e < 2) else { return };
     let Some(read) = monaka_streamline::Constants::read(constants) else { return };
@@ -102,7 +103,7 @@ pub fn at_tags(tags: &[Tag]) {
     if !enabled() {
         return;
     }
-    let mut c = COLLECTING.lock().unwrap_or_else(|e| e.into_inner());
+    let mut c = COLLECTING.locked();
     if c.eye.is_none() {
         return;
     }
@@ -122,7 +123,7 @@ pub fn at_evaluate(native_list: Option<ID3D12GraphicsCommandList>) {
     if !enabled() {
         return;
     }
-    let mut c = COLLECTING.lock().unwrap_or_else(|e| e.into_inner());
+    let mut c = COLLECTING.locked();
     let (Some(eye), Some(camera), Some((depth, depth_state)), Some((motion, motion_state))) = (c.eye, c.camera, c.depth, c.motion) else {
         // A frame without its inputs breaks the chain.
         c.previous_eye = None;
@@ -160,7 +161,7 @@ pub fn at_evaluate(native_list: Option<ID3D12GraphicsCommandList>) {
         let d = unsafe { p.GetDesc() };
         c.previous_eye == Some(1 - eye) && d.Width == motion_desc.Width && d.Height == motion_desc.Height
     });
-    let mut inputs = INPUTS.lock().unwrap_or_else(|e| e.into_inner());
+    let mut inputs = INPUTS.locked();
     let inputs = inputs[eye].get_or_insert_with(EyeInputs::default);
     let Some(depth_copy) = d3d12::fitting(&mut inputs.depth, &device, depth_desc.Width, depth_desc.Height, DXGI_FORMAT_R32_TYPELESS, D3D12_RESOURCE_FLAG_NONE) else { return };
     let Some(motion_copy) = d3d12::fitting(&mut inputs.motion, &device, motion_desc.Width, motion_desc.Height, DXGI_FORMAT_R16G16B16A16_FLOAT, D3D12_RESOURCE_FLAG_NONE) else { return };
@@ -215,14 +216,14 @@ static CHANNEL: Mutex<Option<monaka_channel::ChannelName>> = Mutex::new(None);
 
 /// The channel pairs go out on (set at start).
 pub fn set_channel(channel: monaka_channel::ChannelName) {
-    *CHANNEL.lock().unwrap_or_else(|e| e.into_inner()) = Some(channel);
+    *CHANNEL.locked() = Some(channel);
 }
 
 /// Generates eye `eye`'s frame halfway between its previous one and `real` (its current one) on
 /// `list`. True when the result is usable.
 fn generate(state: &mut State, list: &ID3D12GraphicsCommandList, device: &ID3D12Device, eye: usize, real: &ID3D12Resource, frame: &D3D12_RESOURCE_DESC, sequence_broken: bool) -> bool {
     let (inputs, reset) = {
-        let mut inputs = INPUTS.lock().unwrap_or_else(|e| e.into_inner());
+        let mut inputs = INPUTS.locked();
         let Some(inputs) = inputs[eye].as_mut() else { return skip("no inputs yet") };
         let fresh = std::mem::take(&mut inputs.fresh);
         let Some(frame_inputs) = FrameInputs::fresh(fresh, inputs.depth.as_ref(), inputs.motion.as_ref(), inputs.camera, state.streams[eye].as_mut()) else { return false };
@@ -242,7 +243,7 @@ fn generate(state: &mut State, list: &ID3D12GraphicsCommandList, device: &ID3D12
 /// The state, made on first use (command lists on the game queue's device, the channel's publisher).
 fn state_for<'a>(guard: &'a mut Option<State>, queue: &ID3D12CommandQueue) -> Option<&'a mut State> {
     if guard.is_none() {
-        let channel = CHANNEL.lock().unwrap_or_else(|e| e.into_inner()).clone()?;
+        let channel = CHANNEL.locked().clone()?;
         let device = d3d12::device_of(queue).ok()?;
         match Recorder::new(&device, 6) {
             Ok(recorder) => {
@@ -273,7 +274,7 @@ pub fn present(swap: &IDXGISwapChain3, queue: &ID3D12CommandQueue, eye: usize, p
     // SAFETY: COM calls on the game's live swapchain, on the thread that presents it.
     let Ok(buffer) = (unsafe { swap.GetBuffer::<ID3D12Resource>(swap.GetCurrentBackBufferIndex()) }) else { return Step::Failed };
     let Ok(device) = d3d12::device_of(queue) else { return Step::Failed };
-    let mut guard = STATE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut guard = STATE.locked();
     let Some(state) = state_for(&mut guard, queue) else { return Step::Failed };
     if !state.publisher.ready_for(&buffer, queue) {
         return Step::Failed;
@@ -328,7 +329,7 @@ pub fn present(swap: &IDXGISwapChain3, queue: &ID3D12CommandQueue, eye: usize, p
 pub fn present_unlabelled(swap: &IDXGISwapChain3, queue: &ID3D12CommandQueue, head: &HeadSource, report: impl Fn(&mut HeadPose)) -> Step {
     // SAFETY: COM calls on the game's live swapchain, on the thread that presents it.
     let Ok(buffer) = (unsafe { swap.GetBuffer::<ID3D12Resource>(swap.GetCurrentBackBufferIndex()) }) else { return Step::Failed };
-    let mut guard = STATE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut guard = STATE.locked();
     let Some(state) = state_for(&mut guard, queue) else { return Step::Failed };
     // A lone unlabelled frame in play is skipped (a flat frame would flash); a menu has none for long.
     if state.last_labelled.is_some_and(|t| t.elapsed().as_millis() < 200) {
@@ -352,15 +353,15 @@ fn order<'a>(eye: usize, this: (&'a ID3D12Resource, HeadPose), other: (&'a ID3D1
 
 /// Frees everything once the GPU is done with it (after the hooks are out).
 pub fn close() {
-    let Some(mut state) = STATE.lock().unwrap_or_else(|e| e.into_inner()).take() else { return };
+    let Some(mut state) = STATE.locked().take() else { return };
     log!("frame generation: {} pairs published, {} failures", state.publisher.pairs(), state.publisher.failures());
     state.publisher.close();
     monaka_framegen::free_when_idle(state, |s| &s.recorder);
     {
-        let mut c = COLLECTING.lock().unwrap_or_else(|e| e.into_inner());
+        let mut c = COLLECTING.locked();
         (c.composer, c.previous_motion, c.previous_eye) = (None, None, None);
     }
-    *INPUTS.lock().unwrap_or_else(|e| e.into_inner()) = [None, None];
+    *INPUTS.locked() = [None, None];
 }
 
 pub fn report() -> String {

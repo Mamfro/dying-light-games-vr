@@ -22,6 +22,7 @@
 //! engine's input pass, and a press let go before repairing starts ([`TAP`]) presses the heal's
 //! own spare button code ([`HEAL_KEY`]) once.
 
+use monaka_core::math::{length};
 use crate::engine;
 use crate::player::hand_world;
 use monaka_core::gesture::{Duck, DuckRules, TouchAway, TouchAwayRules};
@@ -139,21 +140,12 @@ static PADS: Mutex<Vec<(usize, bool)>> = Mutex::new(Vec::new());
 /// The head's height against the highest it has stood at (tracking space).
 static HEAD: Mutex<Duck> = Mutex::new(Duck::new());
 
-fn action_matches(gamedll: &Module, (entry, name, id): (usize, &str, u32)) -> Result<(), String> {
-    let at = gamedll.at(entry);
-    let found = mem::read::<usize>(at).and_then(|text| mem::read_c_string(text, 64));
-    let found_id = mem::read::<u32>(at + 0x10);
-    if found.as_deref() != Some(name) || found_id != Some(id) {
-        return Err(format!("action table entry {entry:#x} is {found:?} id {found_id:?}, not {name} id {id}"));
-    }
-    Ok(())
-}
 
 fn actions_match(gamedll: &Module) -> Result<(), String> {
     for action in [DUCK_TOGGLE, DUCK, HEAL, FLASHLIGHT, LOOKBACK, RELOAD] {
-        action_matches(gamedll, action)?;
+        engine::action_matches(gamedll, action)?;
     }
-    match action_matches(gamedll, VEHICLE_HEAL) {
+    match engine::action_matches(gamedll, VEHICLE_HEAL) {
         Ok(()) => VEHICLE_HEAL_KNOWN.store(true, Relaxed),
         Err(why) => log!("VR buttons: the buggy's heal is left on the d-pad: {why}"),
     }
@@ -328,7 +320,7 @@ fn reload_gestured() -> bool {
     }
     // The controllers, not the arms: with a gun held two-handed the left hand rides the gun.
     let (Some(left), Some(right)) = (hand_world::controller(hand_world::LEFT), hand_world::controller(hand_world::RIGHT)) else { return false };
-    let apart = hand_world::length([0, 1, 2].map(|k| left[k] - right[k]));
+    let apart = length([0, 1, 2].map(|k| left[k] - right[k]));
     GESTURE.lock().is_ok_and(|mut gesture| gesture.feed(hand_world::now(), apart, &RELOAD_TOUCH))
 }
 

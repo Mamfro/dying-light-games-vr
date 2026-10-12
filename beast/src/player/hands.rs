@@ -9,8 +9,9 @@
 //! Head aim steers the character from here too ([`aim::steer`]): the callback gets the arms visual,
 //! which leads to the character (the camera setter only sees the renderer's camera).
 //!
-//! Its probe (`probe_hands`: the skeleton's elements and the weapon visuals' classes, logged by
-//! [`eng_chr::rig`]) takes its flag from `research::options()`.
+//! The callback is hooked for head aim ([`hook`]); the arms go on the controllers once the run's
+//! options say so ([`configure`]: the rig, or its probe `probe_hands`, logging the skeleton's
+//! elements and the weapon visuals' classes).
 
 use crate::player::aim;
 use crate::engine;
@@ -33,14 +34,18 @@ pub static RIG: Rig = Rig::new(Facts {
     camera_key_at: Some(engine::CAMERA_RENDERER),
 });
 
-/// Installs the arms hook when the engine has the skeleton access and the vis vtable slot names the
-/// expected callback.
+/// Hooks the arms visual's callback, once the vis vtable slot names it.
 ///
 /// # Safety
 /// `gamedll` is the inspected build (hash checked by the caller).
-pub unsafe fn install(hooks: &mut monaka_hook::Hooks, engine_module: &Module, gamedll: &Module, settings: Settings) -> Result<(), Rejection> {
+pub unsafe fn hook(hooks: &mut monaka_hook::Hooks, gamedll: &Module) -> Result<(), Rejection> {
     // SAFETY: the caller's guarantee; the detour has the callback's type.
-    unsafe { RIG.install(hooks, engine_module, gamedll, settings, &CAMERA_TARGET, camera_target) }
+    unsafe { RIG.hook(hooks, gamedll, &CAMERA_TARGET, camera_target) }
+}
+
+/// The arms on the controllers (or their probe), once the engine has the skeleton access.
+pub fn configure(engine_module: &Module, settings: Settings) -> Result<(), Rejection> {
+    RIG.configure(engine_module, settings)
 }
 
 /// `PlayerFppVis_PH`'s camera-target callback `(ICameraTarget base, camera)`.
@@ -50,9 +55,10 @@ unsafe extern "system" fn camera_target(target: usize, camera: usize) {
     let original = || unsafe { CAMERA_TARGET.get()(target, camera) };
     let active = crate::view::stereo::running();
     let head = crate::view::stereo::HEAD.current();
-    // Head aim steers here: this callback has the arms visual, and so the character.
-    if active && aim::AIM.is_arms_target(target) {
-        aim::steer(target, head);
+    // Head aim steers here: this callback has the arms visual, and so the character. Once stereo
+    // stops, with no head, it hands the head's share back.
+    if aim::AIM.is_arms_target(target) {
+        aim::steer(target, head.filter(|_| active));
     }
     RIG.around(&aim::AIM, target, camera, active, head, None, original);
 }

@@ -35,6 +35,7 @@ use windows::Win32::Graphics::Dxgi::Common::{
     DXGI_FORMAT, DXGI_FORMAT_R8G8B8A8_TYPELESS, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R16G16_FLOAT, DXGI_FORMAT_R16G16_TYPELESS,
     DXGI_FORMAT_R32_TYPELESS,
 };
+use monaka_core::sync::Locked;
 
 pub static GENERATED: AtomicU64 = AtomicU64::new(0);
 pub static REAL: AtomicU64 = AtomicU64::new(0);
@@ -97,7 +98,7 @@ fn fitting(slot: &mut Option<ID3D12Resource>, source: &D3D12_RESOURCE_DESC, form
 /// of the frame-generation call, `late`) kept to be copied at the eye's present.
 pub fn copy_input(list: &ID3D12GraphicsCommandList, input: Input, source: &ID3D12Resource, state: D3D12_RESOURCE_STATES, late: bool) {
     let Some(eye) = render_eye() else { return };
-    let mut inputs = INPUTS.lock().unwrap_or_else(|e| e.into_inner());
+    let mut inputs = INPUTS.locked();
     let inputs = inputs[eye].get_or_insert_with(Inputs::default);
     // SAFETY: reads a descriptor.
     let desc = unsafe { source.GetDesc() };
@@ -138,7 +139,7 @@ pub fn copy_input(list: &ID3D12GraphicsCommandList, input: Input, source: &ID3D1
 /// The camera the eye rendering now was drawn with (the DLSS constants).
 pub fn set_camera(camera: Camera) {
     let Some(eye) = render_eye() else { return };
-    INPUTS.lock().unwrap_or_else(|e| e.into_inner())[eye].get_or_insert_with(Inputs::default).camera = Some(camera);
+    INPUTS.locked()[eye].get_or_insert_with(Inputs::default).camera = Some(camera);
     CAMERAS[eye].fetch_add(1, Ordering::Relaxed);
 }
 
@@ -232,7 +233,7 @@ fn eye_present(state: &mut State, queue: &ID3D12CommandQueue, eye: usize, buffer
     let overlay_ready = matches!(state.overlay, Some(Ok(_)));
     let hud = hud.filter(|_| overlay_ready);
     let (inputs, motion_format, hud_free, late_depth, late_motion) = {
-        let mut inputs = INPUTS.lock().unwrap_or_else(|e| e.into_inner());
+        let mut inputs = INPUTS.locked();
         let Some(inputs) = inputs[index].as_mut() else { return skip("no inputs yet") };
         let fresh = inputs.fresh_depth && inputs.fresh_motion;
         // The frame-generation call's depth and motion vectors: copied now (below), on the queue
@@ -343,7 +344,7 @@ pub enum Outcome {
 
 /// The left eye's present.
 pub fn left(queue: &ID3D12CommandQueue, buffer: &ID3D12Resource, hud: Option<&Hud>) -> Outcome {
-    let mut guard = STATE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut guard = STATE.locked();
     if guard.is_none() {
         match device().map(|d| Recorder::new(&d, 6)) {
             Some(Ok(recorder)) => {
@@ -374,7 +375,7 @@ pub fn left(queue: &ID3D12CommandQueue, buffer: &ID3D12Resource, hud: Option<&Hu
 
 /// The right eye's present: the generated pair now, the real pair half a frame later.
 pub fn right(queue: &ID3D12CommandQueue, buffer: &ID3D12Resource, pose: HeadPose, hud: Option<&Hud>) -> Outcome {
-    let mut guard = STATE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut guard = STATE.locked();
     let Some(state) = guard.as_mut() else { return Outcome::Unavailable };
     state.generated[1] = eye_present(state, queue, 2, buffer, hud);
     let slot = state.slot;
@@ -430,7 +431,7 @@ pub fn right(queue: &ID3D12CommandQueue, buffer: &ID3D12Resource, pose: HeadPose
 
 /// Stops the pacing thread and frees everything once the GPU is done with it.
 pub fn close() {
-    let Some(mut state) = STATE.lock().unwrap_or_else(|e| e.into_inner()).take() else { return };
+    let Some(mut state) = STATE.locked().take() else { return };
     if let Some((sender, thread)) = state.pacer.take() {
         drop(sender);
         let _ = thread.join();

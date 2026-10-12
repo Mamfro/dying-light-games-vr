@@ -13,6 +13,7 @@ use std::sync::Mutex;
 use windows::Win32::Graphics::Direct3D12::*;
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT;
 use windows::core::s;
+use monaka_core::sync::Locked;
 
 const SOURCE: &str = include_str!("hudfix12.hlsl");
 
@@ -92,16 +93,16 @@ fn clamp(rect: [f32; 4], size: (u32, u32)) -> Option<D3D12_BOX> {
 /// Takes the pieces `rects` (x, y, width, height in frame pixels) out of `frame` (in `state`,
 /// a back buffer) using the UI layer `ui` (in COMMON), on `queue`. Returns whether it was recorded.
 pub fn take_out(queue: &ID3D12CommandQueue, frame: &ID3D12Resource, state: D3D12_RESOURCE_STATES, ui: &ID3D12Resource, rects: &[[f32; 4]]) -> bool {
-    if rects.is_empty() || *FAILED.lock().unwrap_or_else(|e| e.into_inner()) {
+    if rects.is_empty() || *FAILED.locked() {
         return false;
     }
-    let mut slot = FIX.lock().unwrap_or_else(|e| e.into_inner());
+    let mut slot = FIX.locked();
     if slot.is_none() {
         match d3d12::device_of(queue).map_err(|e| e.to_string()).and_then(|device| Fix::new(&device)) {
             Ok(fix) => *slot = Some(fix),
             Err(why) => {
                 log!("dynamic HUD: pieces stay in the eyes: {why}");
-                *FAILED.lock().unwrap_or_else(|e| e.into_inner()) = true;
+                *FAILED.locked() = true;
                 return false;
             }
         }
@@ -164,7 +165,7 @@ pub fn take_out(queue: &ID3D12CommandQueue, frame: &ID3D12Resource, state: D3D12
 
 /// The end of a run: waits for the GPU and lets the textures go.
 pub fn close() {
-    if let Some(fix) = FIX.lock().unwrap_or_else(|e| e.into_inner()).take() {
+    if let Some(fix) = FIX.locked().take() {
         fix.recorder.idle(2000);
     }
 }

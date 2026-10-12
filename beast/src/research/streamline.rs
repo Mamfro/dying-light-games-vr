@@ -9,6 +9,7 @@ use monaka_producer::log;
 use monaka_streamline::{Constants, Tag, constants as at, viewport_id};
 use std::ffi::c_void;
 use windows::core::Interface;
+use monaka_core::sync::Locked;
 
 const LOGGED_CALLS: u64 = 12;
 
@@ -95,7 +96,7 @@ static LAST_VIEW_PROJECTION: std::sync::Mutex<Option<[f32; 16]>> = std::sync::Mu
 /// matches the game's (as given, or transposed): the check before giving each eye its own previous.
 fn check_clip_to_prev(constants: &Constants, n: u64) {
     let Some(now) = constants.view_projection() else { return };
-    let previous = LAST_VIEW_PROJECTION.lock().unwrap_or_else(|e| e.into_inner()).replace(now);
+    let previous = LAST_VIEW_PROJECTION.locked().replace(now);
     let (Some(previous), game) = (previous, constants.matrix(at::CLIP_TO_PREV_CLIP)) else { return };
     let Some(inverse) = monaka_core::depth::invert(&now) else { return };
     let mine = monaka_core::depth::multiply(&inverse, &previous);

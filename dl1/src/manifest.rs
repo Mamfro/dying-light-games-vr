@@ -1,7 +1,23 @@
-//! What this game crate declares about itself, for the launcher, the loader and its own config
-//! (`monaka_core::manifest`). Built from that module alone: the launcher compiles this file too.
+//! Dying Light's game info, for the launcher and the loader (`monaka_core::manifest`). Its options
+//! are those of the components ([`crate::Dl1`], `monaka_producer::game::options`), then the
+//! launcher's own for starting it through Steam.
 
+use crate::Dl1;
 use monaka_core::manifest::*;
+use monaka_producer::game::{options, options_len};
+
+const COMPONENTS: usize = options_len::<Dl1>("dl1");
+const DL1: [Opt; COMPONENTS + 2] = {
+    let components: [Opt; COMPONENTS] = options::<Dl1, COMPONENTS>("dl1");
+    let mut all = [LAUNCH; COMPONENTS + 2];
+    let mut i = 0;
+    while i < COMPONENTS {
+        all[i] = components[i];
+        i += 1;
+    }
+    all[COMPONENTS + 1] = settle(120.0, 20.0);
+    all
+};
 
 pub const MANIFESTS: &[Manifest] = &[Manifest {
     id: "dl1",
@@ -16,79 +32,8 @@ pub const MANIFESTS: &[Manifest] = &[Manifest {
     launch: Launch::Auto { settle_seconds: 20 },
     refused_arguments: &[("/3dtv", "Remove /3dtv from the game's launch options in Steam; VR uses the normal renderer.")],
     before: "In the game's video options, turn off NVIDIA HBAO+, depth of field and PCSS shadows (in VR they make shadows slide).",
-    options: &[
-        aim(&[AIM_MOTION, AIM_LOOK, AIM_POINT, AIM_MOUSE], aims::HAND_RIG),
-        AIM_HAND,
-        render_size("If the game crashes, reset its resolution."),
-        WORLD_HUD,
-        HUD_SIZE.default_number(0.36),
-        HUD_DISTANCE,
-        FINGER_TRACKING,
-        opt("room_scale", "Room-scale movement", "Your real steps and leans move your character; walls and enemies still stop it.", Kind::Switch { default: true })
-            .on(Shown::Game)
-            .only_when("aim", "hand_rig"),
-        opt("disable_zombie_grabs", "Disable zombie grabs", "Zombies never grab you. Off: they grab and bite until you break free, as in the game.", Kind::Switch { default: true })
-            .on(Shown::Game),
-        opt("vr_buttons", "VR buttons", "B turns the flashlight on and off, tap Y to heal (hold Y still repairs), and duck in your room to crouch. Off: the game's own buttons.", Kind::Switch { default: true })
-            .on(Shown::Game),
-        BINARY_FINGERS,
-        opt("fsr", "FSR upscaling", "Renders each eye smaller, then upscales it (needs the headset resolution and Dying Light 2's FidelityFX DLLs).", Kind::Switch { default: false })
-            .on(Shown::Engine)
-            // Upscales to the eye size, with the FidelityFX runtime Dying Light 2 installs (Monaka ships none).
-            .needs_eye_size()
-            .needs_steam_files(SteamFiles {
-                game_folder: "Dying Light 2",
-                path: r"ph\work\bin\x64",
-                file: "amd_fidelityfx_upscaler_dx12.dll",
-                line: "fsr_dlls",
-                missing: "FSR is off: it needs AMD's FidelityFX DLLs, which come with Dying Light 2 (not installed).",
-            }),
-        opt("fsr_scale", "FSR quality", "How much smaller each eye renders.", choice(&[("1.5", "Quality"), ("1.7", "Balanced"), ("2", "Performance"), ("3", "Ultra performance")], "1.5"))
-            .on(Shown::Engine)
-            .only_when("fsr", "1"),
-        opt("fsr_sharpness", "FSR sharpness", "0 turns sharpening off.", Kind::Number { min: 0.0, max: 1.0, step: 0.05, default: 0.3 }).on(Shown::Engine).only_when("fsr", "1"),
-        EYE_SEPARATION,
-        // The tools (left) and weapons (right) stay open while the d-pad is held; picked with A, B, X, Y.
-        dpad_hold(&["--dpad-hold", "left,right"]),
-        menu_reach("Rest your left hand over your left shoulder for the tools, your right hand over your right shoulder for the weapons. Flick a stick toward the one you want; bring the hand back to close."),
-        MENU_REACH_DEPTH,
-        CONTROLLER_PROXY, OTHER_BUILDS, EXTRA,
-        LAUNCH,
-        settle(120.0, 20.0),
-    ],
+    options: &DL1,
     licences: &[],
     left_hand_aims: true,
     weapon_ring: true,
 }];
-
-#[cfg(test)]
-mod tests {
-    use monaka_core::capability::{Capabilities, FEATURES, unbacked};
-    use monaka_core::situation::Situation;
-
-    /// What this game's producer supplies (`monaka_core::capability`): the eye cameras, the arms
-    /// with their fingers, what the hand holds, the facing it steers, the buttons it presses, the
-    /// character's step, the HUD at a depth and in pieces, FSR per eye; and the cutscenes
-    /// (`IsObjectOnSomeMovie`), the world not drawn (a loading screen) and climbing it reports.
-    const CAPABILITIES: Capabilities = Capabilities::EYE_CAMERA
-        .with(Capabilities::SKELETON)
-        .with(Capabilities::FINGER_BONES)
-        .with(Capabilities::HELD_ITEM)
-        .with(Capabilities::LOOK_SINK)
-        .with(Capabilities::ACTION_PRESS)
-        .with(Capabilities::CHARACTER_STEP)
-        .with(Capabilities::HUD_LAYER)
-        .with(Capabilities::HUD_PIECES)
-        .with(Capabilities::PER_EYE_HISTORY)
-        .with(Capabilities::reports(Situation::CameraTaken))
-        .with(Capabilities::reports(Situation::WorldHidden))
-        .with(Capabilities::reports(Situation::Traversal));
-
-    #[test]
-    fn every_shared_option_offered_is_one_the_game_can_carry() {
-        for manifest in super::MANIFESTS {
-            let unbacked = unbacked(manifest, CAPABILITIES, FEATURES);
-            assert!(unbacked.is_empty(), "{}: {unbacked:?}", manifest.id);
-        }
-    }
-}

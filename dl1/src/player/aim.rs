@@ -63,15 +63,7 @@ static PITCH_INPUTS_BLOCKED: AtomicU64 = AtomicU64::new(0);
 
 /// Checks DL1's vertical look actions against the game's own action table (name and id).
 pub fn look_actions_match(gamedll: &Module) -> Result<(), String> {
-    for (entry, name, id) in engine::LOOK_ACTIONS {
-        let at = gamedll.at(entry);
-        let found = mem::read::<usize>(at).and_then(|text| mem::read_c_string(text, 64));
-        let found_id = mem::read::<u32>(at + 0x10);
-        if found.as_deref() != Some(name) || found_id != Some(id) {
-            return Err(format!("action table entry {entry:#x} is {found:?} id {found_id:?}, not {name} id {id}"));
-        }
-    }
-    Ok(())
+    engine::LOOK_ACTIONS.into_iter().try_for_each(|action| engine::action_matches(gamedll, action))
 }
 
 /// The game's input-action converter. While head aim steers the character, the head alone

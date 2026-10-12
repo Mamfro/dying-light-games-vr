@@ -20,7 +20,6 @@ const DETECT: usize = 0xdb4410;
 /// Builds the damage info from a hit entry and deals it: `(out, attacker, entry, weapon, flags,
 /// damage multiplier, force, extra)`.
 const DEAL: usize = 0xc4d920;
-const ELEMENT_ID: &str = "?GetElementID@IModelObject@@QEBAHPEBD@Z";
 /// The controller's tracks, as offsets into it.
 const TRACKS: [(usize, &str); 2] = [(0x6f0, "first"), (0x728, "second")];
 /// The controller's attack type.
@@ -55,7 +54,7 @@ pub fn install(hooks: &mut Hooks, engine_module: &Module, gamedll: &Module) -> R
     // SAFETY: each export has the signature its mangled name states, on x64.
     let resolved = unsafe {
         Engine {
-            element_id: std::mem::transmute::<usize, ElementIdFn>(find(ELEMENT_ID)?),
+            element_id: std::mem::transmute::<usize, ElementIdFn>(find(crate::engine::ELEMENT_ID)?),
             world: std::mem::transmute::<usize, engine::ElementWorldFn>(find(engine::ELEMENT_WORLD)?),
         }
     };
@@ -137,10 +136,6 @@ fn tip_motion(model: usize) -> Option<[f32; 3]> {
     Some(local)
 }
 
-fn vec3(at: usize) -> [f32; 3] {
-    mem::read::<[f32; 3]>(at).unwrap_or([f32::NAN; 3])
-}
-
 unsafe extern "C" fn detect(controller: *mut c_void, track: *mut c_void, mode: i32) -> usize {
     let _flight = InFlight::enter();
     let n = SWEEPS.fetch_add(1, Relaxed);
@@ -162,7 +157,7 @@ unsafe extern "C" fn detect(controller: *mut c_void, track: *mut c_void, mode: i
             "sweep probe: {} ms sweep {n} track {track_name} mode {mode} attack type {} direction {:.2?} | object {object:#x} ({}) {} arms model {arms:#x} | hand {} | arms hand {} | tip motion in the hand's axes {motion} | rig calls since last sweep {rig_since}",
             ms(),
             mem::read::<i32>(ctrl + ATTACK_TYPE).unwrap_or(-1),
-            vec3(ctrl + ATTACK_DIRECTION),
+            crate::player::walk::vec3(ctrl + ATTACK_DIRECTION),
             class_name(object).unwrap_or_else(|| "?".into()),
             if object == arms { "IS the" } else { "is not the" },
             fmt(hand_holder(object)),
@@ -188,7 +183,7 @@ unsafe extern "C" fn deal(
     if n < LINES && !entry.is_null() {
         let at = entry as usize;
         let victim = mem::read::<usize>(at).unwrap_or(0);
-        let point = vec3(at + 0x18);
+        let point = crate::player::walk::vec3(at + 0x18);
         // How far out the blade the hit is: from the hand element, along it and off it.
         let reach = hand_holder(hands::arms_model()).map_or("hand unknown".to_owned(), |(hand, along)| {
             let d = [0, 1, 2].map(|k| point[k] - hand[k]);
@@ -203,7 +198,7 @@ unsafe extern "C" fn deal(
             mem::read::<i32>(at + 0x08).unwrap_or(-1),
             mem::read::<i32>(at + 0x30).unwrap_or(-1),
             point,
-            vec3(at + 0x0c),
+            crate::player::walk::vec3(at + 0x0c),
             mem::read::<f32>(at + 0x38).unwrap_or(f32::NAN),
         );
     }

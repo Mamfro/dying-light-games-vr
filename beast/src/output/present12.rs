@@ -51,7 +51,7 @@ pub unsafe extern "system" fn present_request(object: usize) -> usize {
             // SAFETY: COM calls on the game's live swapchain, on the thread that presents it.
             && let Ok(buffer) = unsafe { swap.GetBuffer::<ID3D12Resource>(swap.GetCurrentBackBufferIndex()) }
         {
-            let rects = match (crate::WORLD_HUD.load(Relaxed), crate::view::stereo::channel()) {
+            let rects = match (eng_chr::feature::panels_on(), crate::view::stereo::channel()) {
                 (true, Some(channel)) => eng_chr::panels::publish(queue, layer, &channel, monaka_channel::tick()),
                 _ => Vec::new(),
             };

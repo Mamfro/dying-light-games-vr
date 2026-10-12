@@ -1,0 +1,297 @@
+//! The Chrome Engine's features as ready-made components, for the games on it. A game implements
+//! [`Chrome`] once (its modules, its queue, the facts of its build) and lists the components it
+//! carries, saying what each works on top of by struct update:
+//! `Component { needs: &[&ARMS], ..eng_chr::feature::melee() }`. A fact its build has not been read
+//! for leaves that component off for the run, said in the log.
+
+use crate::{grabs, gui, handwork, hudfix, hudlayer, hudover, melee, melee_reach, panels, view_bob, walk};
+use monaka_arms::roomscale;
+use monaka_core::feature::Feature;
+use monaka_core::manifest::{DISABLE_VIEW_BOBBING, Kind, Manifest, Opt, ROOM_SCALE, Shown, WORLD_HUD, opt};
+use monaka_core::options::{Options, Shared};
+use monaka_hook::module::Module;
+use monaka_producer::game::{Component, Game, Lack, On, Run, Start};
+use monaka_producer::{Rejection, log};
+use std::sync::atomic::{AtomicBool, Ordering::*};
+use windows::Win32::Graphics::Direct3D12::ID3D12CommandQueue;
+
+/// A game on the Chrome Engine, as its ready-made components see it.
+pub trait Chrome: Game {
+    /// What this game's build has been read for.
+    const FACTS: Facts;
+    /// The engine module.
+    fn engine(build: &Self::Build) -> &Module;
+    /// The game DLL, when it is the build the facts describe (what needs it stays off otherwise).
+    fn gamedll(build: &Self::Build) -> Option<&Module>;
+    /// The game's direct queue, once its present request knows it (none on D3D11).
+    fn game_queue() -> Option<ID3D12CommandQueue>;
+    /// Whether VR shows the game now: the gui tree's pieces and menus count only then.
+    fn showing() -> bool;
+}
+
+/// One build's facts for the ready-made components (none where the build has not been read).
+pub struct Facts {
+    pub view_bob: Option<view_bob::Build>,
+    pub grabs: Option<grabs::Build>,
+    pub walk: Option<walk::Build>,
+    pub melee: Option<melee::Build>,
+    /// With physical melee, a weapon's swing attacks only when its blade is about to reach
+    /// something.
+    pub melee_reach: Option<melee_reach::Build>,
+    /// The game starts a light attack when its button is let go (Dying Light 1, The Beast): a swing
+    /// presses briefly.
+    pub attacks_on_release: bool,
+    pub handwork: Option<handwork::Builds>,
+    pub gui: Option<gui::Build>,
+    /// The HUD's pieces the dynamic HUD takes, by the game's widget names.
+    pub pieces: &'static [gui::Piece],
+    /// The game's present lays the HUD layer over the eyes whenever the HUD is shown (The Beast);
+    /// otherwise the layer is made only for the dynamic HUD (Dying Light 2's eyes draw the HUD in).
+    pub hud_over_eyes: bool,
+}
+
+/// The game DLL a component hooks, or why it stays off.
+fn gamedll<'a, G: Chrome>(start: &Start<'a, G>) -> Result<&'a Module, Lack> {
+    G::gamedll(start.build).ok_or_else(|| Lack::Missing("the game DLL is not the inspected build".to_owned()))
+}
+
+/// A fact of this build, or why the component needing it stays off.
+fn fact<T>(fact: Option<T>, what: &str) -> Result<T, Lack> {
+    fact.ok_or_else(|| Lack::Missing(format!("{what} is not read for this build")))
+}
+
+fn missing(why: Rejection) -> Lack {
+    Lack::Missing(why.reason)
+}
+
+// ---- View bob ----
+
+/// The view stays level instead of bobbing with the steps (Monaka's own setting): the player's
+/// head bob held at zero while head aim steers the character (`view_bob`, held at each of its
+/// updates), so a game lists it on top of its look.
+pub const fn view_bob<G: Chrome>() -> Component<G> {
+    Component { name: "view bob", options: &[DISABLE_VIEW_BOBBING], settings: read_view_bob, on: view_bob_on::<G>, install: install_view_bob::<G>, ..Component::NONE }
+}
+
+fn read_view_bob(options: &Options, _: &Manifest) {
+    options.switch("disable_view_bobbing", true);
+}
+
+fn view_bob_on<G: Chrome>(run: &Run<'_, G>) -> On {
+    On::when(run.options.switch("disable_view_bobbing", true), "the view bobs as in the game")
+}
+
+fn install_view_bob<G: Chrome>(start: &mut Start<'_, G>) -> Result<(), Lack> {
+    view_bob::install(gamedll(start)?, fact(G::FACTS.view_bob, "the head bob")?);
+    Ok(())
+}
+
+// ---- Grabs ----
+
+pub const DISABLE_ZOMBIE_GRABS: Opt =
+    opt("disable_zombie_grabs", "Disable zombie grabs", "Zombies never grab you. Off: they grab and bite until you break free, as in the game.", Kind::Switch { default: true })
+        .on(Shown::Game);
+
+/// Grabs never land on the player (`grabs`).
+pub const fn grabs<G: Chrome>() -> Component<G> {
+    Component { name: "grabs", options: &[DISABLE_ZOMBIE_GRABS], settings: read_grabs, on: grabs_on::<G>, install: install_grabs::<G>, release: grabs::report, ..Component::NONE }
+}
+
+fn read_grabs(options: &Options, _: &Manifest) {
+    options.switch("disable_zombie_grabs", true);
+}
+
+fn grabs_on<G: Chrome>(run: &Run<'_, G>) -> On {
+    On::when(run.options.switch("disable_zombie_grabs", true), "zombies grab as in the game")
+}
+
+fn install_grabs<G: Chrome>(start: &mut Start<'_, G>) -> Result<(), Lack> {
+    let gamedll = gamedll(start)?;
+    grabs::install(start.hooks, gamedll, fact(G::FACTS.grabs, "the grab conditions")?).map_err(missing)
+}
+
+// ---- Room-scale ----
+
+/// The character follows the player's real steps (`monaka_arms::roomscale` at the player's
+/// movement step, `walk`), with the hand rig.
+pub const fn room_scale<G: Chrome>() -> Component<G> {
+    Component {
+        name: "room scale",
+        features: &[Feature::RoomScale],
+        options: &[ROOM_SCALE],
+        settings: read_room_scale,
+        on: room_scale_on::<G>,
+        install: install_room_scale::<G>,
+        quiet: roomscale::stop,
+        release: walk::report,
+        ..Component::NONE
+    }
+}
+
+fn read_room_scale(options: &Options, manifest: &Manifest) {
+    roomscale::Settings::from_options(options, &Shared::from_options(options, manifest));
+}
+
+fn room_scale_on<G: Chrome>(run: &Run<'_, G>) -> On {
+    On::when(roomscale::Settings::from_options(run.options, run.shared).is_some(), "room-scale movement is off")
+}
+
+fn install_room_scale<G: Chrome>(start: &mut Start<'_, G>) -> Result<(), Lack> {
+    let settings = fact(roomscale::Settings::from_options(start.options, start.shared), "room-scale movement")?;
+    let gamedll = gamedll(start)?;
+    walk::install(start.hooks, G::engine(start.build), gamedll, fact(G::FACTS.walk, "the movement step")?).map_err(missing)?;
+    roomscale::install(settings);
+    Ok(())
+}
+
+// ---- Physical melee ----
+
+/// Physical melee (`melee`): a swing hits where the weapon in the hand is, through the game's own
+/// hit detection; with the game's reach check (`melee_reach`), a weapon's swing attacks only when
+/// its blade is about to reach something (`melee_on_reach=0` lets every swing attack, for a test).
+/// The swing that presses the attack is the hand rig's.
+pub const fn melee<G: Chrome>() -> Component<G> {
+    Component { name: "melee", features: &[Feature::Melee], on: melee_on::<G>, install: install_melee::<G>, release: melee_reach::report, ..Component::NONE }
+}
+
+fn physical<G: Chrome>(options: &Options, shared: &Shared) -> Option<monaka_arms::melee::Physical> {
+    monaka_arms::melee::Physical::from_options(options, shared.aim.rig, G::FACTS.attacks_on_release)
+}
+
+fn melee_on<G: Chrome>(run: &Run<'_, G>) -> On {
+    On::when(physical::<G>(run.options, run.shared).is_some(), "physical melee is off")
+}
+
+fn install_melee<G: Chrome>(start: &mut Start<'_, G>) -> Result<(), Lack> {
+    let physical = fact(physical::<G>(start.options, start.shared), "physical melee")?;
+    let gamedll = gamedll(start)?;
+    melee::install(start.hooks, gamedll, fact(G::FACTS.melee, "the melee code")?, physical).map_err(missing)?;
+    if let Some(reach) = G::FACTS.melee_reach
+        && start.options.switch("melee_on_reach", true)
+        && let Err(why) = melee_reach::install(G::engine(start.build), gamedll, reach)
+    {
+        log!("every swing attacks: {}", why.reason);
+    }
+    Ok(())
+}
+
+// ---- Handwork ----
+
+/// What the hands do with the game's own throw, bow, reload and lockpick (`handwork`), with the
+/// hand rig. Each part is the rig's, not a setting: its option stays readable for tests only.
+pub const fn handwork<G: Chrome>() -> Component<G> {
+    Component { name: "handwork", features: handwork_features::<G>(), on: handwork_on::<G>, install: install_handwork::<G>, release: handwork::report, ..Component::NONE }
+}
+
+/// The parts this build has been read for.
+const fn handwork_features<G: Chrome>() -> &'static [Feature] {
+    match G::FACTS.handwork {
+        Some(handwork::Builds { lockpick: Some(_), .. }) => &[Feature::Throw, Feature::Bow, Feature::Reload, Feature::Lockpick],
+        Some(_) => &[Feature::Throw, Feature::Bow, Feature::Reload],
+        None => &[],
+    }
+}
+
+/// `motion_throw=0`, `motion_bow=0` (`bow_string=0`: only the string drawn by hand),
+/// `manual_reload=0`, `motion_lockpick=0` turn one part off, for a test.
+fn handwork_options(options: &Options, rig: bool) -> handwork::Options {
+    handwork::Options {
+        throw: options.switch("motion_throw", true) && rig,
+        bow: options.switch("motion_bow", true) && rig,
+        bow_string: options.switch("bow_string", true),
+        reload: options.switch("manual_reload", true) && rig,
+        lockpick: options.switch("motion_lockpick", true) && rig,
+    }
+}
+
+fn handwork_on<G: Chrome>(run: &Run<'_, G>) -> On {
+    On::when(handwork_options(run.options, run.shared.aim.rig) != handwork::Options::default(), "aim is not motion controls")
+}
+
+fn install_handwork<G: Chrome>(start: &mut Start<'_, G>) -> Result<(), Lack> {
+    let builds = fact(G::FACTS.handwork, "the hands' actions")?;
+    let gamedll = gamedll(start)?;
+    handwork::install(start.hooks, gamedll, &builds, handwork_options(start.options, start.shared.aim.rig));
+    Ok(())
+}
+
+// ---- HUD ----
+
+/// The gui tree is hooked this run (the dynamic HUD's pieces can be read).
+static GUI: AtomicBool = AtomicBool::new(false);
+/// The dynamic HUD runs: the pieces go onto the hands at each present.
+static PANELS: AtomicBool = AtomicBool::new(false);
+
+/// Whether the dynamic HUD runs ([`panels`]).
+pub fn panels_on() -> bool {
+    PANELS.load(Acquire)
+}
+
+/// The HUD as a layer of its own, from the game's command lists (`hudlayer`; `probe_hud=1` probes
+/// it): laid over the eyes in front of them, or kept for the dynamic HUD's pieces. The gui tree
+/// comes with it (`gui`; `probe_gui=1` probes it), telling when a menu is open (shown flat).
+pub const fn hud<G: Chrome>() -> Component<G> {
+    Component { name: "hud", features: &[Feature::HudLayer], on: hud_on::<G>, install: install_hud::<G>, give_back: remove_hud, release: close_hud, ..Component::NONE }
+}
+
+fn hud_on<G: Chrome>(run: &Run<'_, G>) -> On {
+    let hud = run.shared.hud;
+    On::when(hud.world || (G::FACTS.hud_over_eyes && hud.shown), "the HUD stays as the game draws it")
+}
+
+fn install_hud<G: Chrome>(start: &mut Start<'_, G>) -> Result<(), Lack> {
+    let queue = G::game_queue().ok_or_else(|| Lack::Missing("the game queue is not known (D3D11, or no present yet)".to_owned()))?;
+    let hud = start.shared.hud;
+    // Kept out of the frame where it is laid back over the eyes; drawn in too where only its
+    // pieces are taken out.
+    let redirect = hud.shown || !G::FACTS.hud_over_eyes;
+    // SAFETY: the game's live direct queue.
+    unsafe { hudlayer::install(start.hooks, &queue, redirect, start.options.switch("probe_hud", false), start.channel().ok().cloned()) }.map_err(|e| Lack::Missing(format!("{e}")))?;
+    let probe_gui = start.options.switch("probe_gui", false);
+    let gui = match G::FACTS.gui {
+        Some(build) => gui::install(start.hooks, G::engine(start.build), &build).map_err(|why| why.reason),
+        None => Err("not read for this build".to_owned()),
+    };
+    match gui {
+        Ok(()) => {
+            gui::configure(probe_gui, &[], G::showing);
+            GUI.store(true, Release);
+        }
+        Err(why) => log!("gui tree unavailable (no dynamic HUD, menus not shown flat): {why}"),
+    }
+    Ok(())
+}
+
+fn remove_hud() {
+    hudlayer::remove(1000);
+}
+
+fn close_hud() {
+    GUI.store(false, Release);
+    panels::close();
+    hudfix::close();
+    hudover::close();
+    gui::report();
+}
+
+/// The dynamic HUD: the HUD's pieces read from the gui tree and put on the hands, out of the eyes.
+pub const fn panels<G: Chrome>() -> Component<G> {
+    Component {
+        name: "panels",
+        features: &[Feature::HudPanels],
+        options: &[WORLD_HUD],
+        on: |run| On::when(run.shared.hud.world, "the dynamic HUD is off"),
+        install: install_panels::<G>,
+        arm: || PANELS.store(true, Release),
+        quiet: || PANELS.store(false, Release),
+        ..Component::NONE
+    }
+}
+
+fn install_panels<G: Chrome>(start: &mut Start<'_, G>) -> Result<(), Lack> {
+    if !GUI.load(Acquire) {
+        return Err(Lack::Missing("no gui tree to read the pieces from".to_owned()));
+    }
+    gui::configure(start.options.switch("probe_gui", false), G::FACTS.pieces, G::showing);
+    Ok(())
+}

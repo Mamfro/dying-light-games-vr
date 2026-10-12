@@ -17,6 +17,7 @@ use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use windows::Win32::Graphics::Direct3D12::*;
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT, DXGI_FORMAT_R8G8B8A8_UNORM};
 use windows::core::s;
+use monaka_core::sync::Locked;
 
 const SOURCE: &str = include_str!("hudover12.hlsl");
 /// Most pieces left out.
@@ -115,16 +116,16 @@ impl Over {
 /// Lays the UI layer `ui` (in COMMON, the frame's size) over `frame` (in `state`, a back buffer)
 /// as `params` say, on `queue`. Returns whether it was recorded (otherwise the frame has no HUD).
 pub fn lay(queue: &ID3D12CommandQueue, frame: &ID3D12Resource, state: D3D12_RESOURCE_STATES, ui: &ID3D12Resource, params: &Params) -> bool {
-    if *FAILED.lock().unwrap_or_else(|e| e.into_inner()) {
+    if *FAILED.locked() {
         return false;
     }
-    let mut slot = OVER.lock().unwrap_or_else(|e| e.into_inner());
+    let mut slot = OVER.locked();
     if slot.is_none() {
         match d3d12::device_of(queue).map_err(|e| e.to_string()).and_then(|device| Over::new(&device)) {
             Ok(over) => *slot = Some(over),
             Err(why) => {
                 log!("HUD lay-over unavailable: {why}");
-                *FAILED.lock().unwrap_or_else(|e| e.into_inner()) = true;
+                *FAILED.locked() = true;
                 return false;
             }
         }
@@ -194,7 +195,7 @@ pub fn lay(queue: &ID3D12CommandQueue, frame: &ID3D12Resource, state: D3D12_RESO
 
 /// The end of a run: waits for the GPU and lets the textures go.
 pub fn close() {
-    if let Some(over) = OVER.lock().unwrap_or_else(|e| e.into_inner()).take() {
+    if let Some(over) = OVER.locked().take() {
         over.recorder.idle(2000);
     }
     let laid = LAID.load(Relaxed);

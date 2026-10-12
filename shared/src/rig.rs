@@ -16,6 +16,7 @@ use monaka_hook::module::Module;
 use monaka_hook::{Hooks, Original, mem};
 use monaka_producer::Rejection;
 use std::sync::Mutex;
+use monaka_core::sync::Locked;
 
 /// Where a game keeps its arms (RVAs in the game DLL, offsets in objects).
 #[derive(Clone, Copy, Debug)]
@@ -63,16 +64,31 @@ impl Rig {
         self.options.lock().ok().and_then(|o| *o)
     }
 
-    /// Installs the callback hook (`detour` forwards to [`Rig::around`]) with `options`, once the
-    /// engine has the skeleton access and the vis vtable slot names the callback.
+    /// Installs the callback hook with `options` ([`Rig::configure`], [`Rig::hook`]).
     ///
     /// # Safety
     /// `gamedll` is the build the [`Facts`] describe (hash checked by the caller).
     pub unsafe fn install(&self, hooks: &mut Hooks, engine: &Module, gamedll: &Module, options: Options, original: &'static Original<CameraTargetFn>, detour: CameraTargetFn) -> Result<(), Rejection> {
+        self.configure(engine, options)?;
+        // SAFETY: the caller's guarantee.
+        unsafe { self.hook(hooks, gamedll, original, detour) }
+    }
+
+    /// The run's `options`, once the engine has the skeleton access they need.
+    pub fn configure(&self, engine: &Module, options: Options) -> Result<(), Rejection> {
         if options.rig || options.probe {
             crate::coskeleton::resolve(engine, &self.facts.skeleton)?;
         }
-        *self.options.lock().unwrap_or_else(|e| e.into_inner()) = Some(options);
+        *self.options.locked() = Some(options);
+        Ok(())
+    }
+
+    /// Hooks the callback (`detour` forwards to [`Rig::around`]) once the vis vtable slot names it;
+    /// without options it only forwards.
+    ///
+    /// # Safety
+    /// `gamedll` is the build the [`Facts`] describe (hash checked by the caller).
+    pub unsafe fn hook(&self, hooks: &mut Hooks, gamedll: &Module, original: &'static Original<CameraTargetFn>, detour: CameraTargetFn) -> Result<(), Rejection> {
         // SAFETY: the caller's guarantee; the detour has the callback's type.
         unsafe { fpp::hook(hooks, gamedll, &self.facts.callback, original, detour) }
     }

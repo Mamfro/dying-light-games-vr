@@ -22,6 +22,7 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release};
 use std::sync::atomic::{AtomicBool, AtomicU32};
 use windows::Win32::System::Memory::{MEM_COMMIT, MEMORY_BASIC_INFORMATION, PAGE_GUARD, PAGE_NOACCESS, PAGE_READWRITE, VirtualQuery};
+use monaka_core::sync::Locked;
 
 /// The latest camera position written for each eye (world units).
 static EYE_POSITION: [[AtomicF32; 3]; 2] = [const { [const { AtomicF32::zero() }; 3] }; 2];
@@ -178,7 +179,7 @@ fn scan() {
         .map(|(&(address, stride), _)| Candidate { address, stride, shown: 0, other: 0, neither: 0 })
         .collect();
     log!("history probe: {} places alternate between the eyes; sampling them at {} presents", kept.len(), PRESENTS_TO_SAMPLE);
-    *SAMPLES.lock().unwrap_or_else(|e| e.into_inner()) = kept;
+    *SAMPLES.locked() = kept;
     PRESENTS_SAMPLED.store(0, Relaxed);
     ARMED.store(true, Release);
 }
@@ -189,7 +190,7 @@ fn at_present(shown: usize) {
         return;
     }
     let eyes = eyes();
-    let mut samples = SAMPLES.lock().unwrap_or_else(|e| e.into_inner());
+    let mut samples = SAMPLES.locked();
     for c in samples.iter_mut() {
         match read_position(c.address, c.stride).and_then(|v| which(v, &eyes)) {
             Some(e) if e == shown => c.shown += 1,
@@ -210,7 +211,7 @@ pub fn report_if_done() {
     if !DONE.swap(false, AcqRel) {
         return;
     }
-    let samples = SAMPLES.lock().unwrap_or_else(|e| e.into_inner());
+    let samples = SAMPLES.locked();
     let mut report: Vec<&Candidate> = samples.iter().collect();
     report.sort_by_key(|c| std::cmp::Reverse(c.shown.max(c.other)));
     log!("history probe: per place, presents holding the eye shown / the other eye / neither");
@@ -237,7 +238,7 @@ struct Dump {
 /// Arms the dumps (`spec` as `address:length` pairs in hex, comma-separated).
 fn arm_dump(spec: &str) {
     let parse = |s: &str| usize::from_str_radix(s.trim().trim_start_matches("0x"), 16).ok();
-    let mut dumps = DUMPS.lock().unwrap_or_else(|e| e.into_inner());
+    let mut dumps = DUMPS.locked();
     for one in spec.split(',') {
         match one.split_once(':').and_then(|(a, l)| Some((parse(a)?, parse(l)?))) {
             Some((address, length)) if (8..=0x4000).contains(&length) => {
@@ -251,7 +252,7 @@ fn arm_dump(spec: &str) {
 
 /// At a present showing eye `shown`: one copy of each object (one read each).
 fn dump_at_present(shown: usize) {
-    for d in DUMPS.lock().unwrap_or_else(|e| e.into_inner()).iter_mut() {
+    for d in DUMPS.locked().iter_mut() {
         if d.frames.len() < DUMP_PRESENTS {
             let mut bytes = vec![0u8; d.length];
             if mem::read_bytes(d.address, &mut bytes) {
@@ -264,7 +265,7 @@ fn dump_at_present(shown: usize) {
 /// Once the copies are in (reporter thread): every float that differs between them, by offset,
 /// each eye's position components marked, and the fields that hold another field's last value.
 pub fn report_dump() {
-    let mut dumps = DUMPS.lock().unwrap_or_else(|e| e.into_inner());
+    let mut dumps = DUMPS.locked();
     let eyes = eyes();
     for d in dumps.iter_mut().filter(|d| d.frames.len() == DUMP_PRESENTS && !d.reported) {
         d.reported = true;
@@ -327,7 +328,7 @@ fn arm_vp(spec: &str) {
     match usize::from_str_radix(spec.trim().trim_start_matches("0x"), 16) {
         Ok(source) => {
             log!("view-projection probe armed on {source:#x} ({})", owner(source));
-            *VP.lock().unwrap_or_else(|e| e.into_inner()) = Some(VpProbe { source, copies: Vec::new(), frames: Vec::new(), armed: false, reported: false });
+            *VP.locked() = Some(VpProbe { source, copies: Vec::new(), frames: Vec::new(), armed: false, reported: false });
         }
         Err(_) => log!("vp_probe={spec}: expected a hex address"),
     }
@@ -335,7 +336,7 @@ fn arm_vp(spec: &str) {
 
 /// The scan (reporter thread): every place holding the source's first two rows' rotation part.
 fn scan_vp() {
-    let Some(source) = VP.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|p| p.source) else { return };
+    let Some(source) = VP.locked().as_ref().map(|p| p.source) else { return };
     let Some(key) = mem::read::<[f32; 16]>(source + SHADER_VIEWPROJ_UNJITTERED) else {
         log!("view-projection probe: source unreadable");
         return;
@@ -376,7 +377,7 @@ fn scan_vp() {
         address = base + size.max(0x1000);
     }
     log!("view-projection probe: {} copies in {:.1} s; sampling {} presents", copies.len(), began.elapsed().as_secs_f64(), VP_PRESENTS);
-    if let Some(p) = VP.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+    if let Some(p) = VP.locked().as_mut() {
         p.copies = copies;
         p.armed = true;
     }
@@ -384,7 +385,7 @@ fn scan_vp() {
 
 /// At a present (render thread): the source and every copy, once each.
 fn vp_at_present() {
-    let mut vp = VP.lock().unwrap_or_else(|e| e.into_inner());
+    let mut vp = VP.locked();
     let Some(p) = vp.as_mut().filter(|p| p.armed && p.frames.len() < VP_PRESENTS) else { return };
     let read = |at: usize| mem::read::<[f32; 16]>(at).unwrap_or([f32::NAN; 16]);
     let source = [read(p.source + SHADER_VIEWPROJ), read(p.source + SHADER_VIEWPROJ_UNJITTERED)];
@@ -395,7 +396,7 @@ fn vp_at_present() {
 /// Once sampled (reporter thread): per copy, how often it held the source's jittered or unjittered
 /// matrix of this present or of the one before.
 pub fn report_vp() {
-    let mut vp = VP.lock().unwrap_or_else(|e| e.into_inner());
+    let mut vp = VP.locked();
     let Some(p) = vp.as_mut().filter(|p| p.frames.len() == VP_PRESENTS && !p.reported) else { return };
     p.reported = true;
     let same = |a: &[f32; 16], b: &[f32; 16]| a.iter().zip(b).all(|(x, y)| (x - y).abs() <= 1e-4 * x.abs().max(y.abs()).max(1.0));
@@ -444,7 +445,7 @@ struct FrameProbe {
 
 fn arm_frames(renderer_base: usize) {
     log!("frame-data probe armed");
-    *FRAMES.lock().unwrap_or_else(|e| e.into_inner()) = Some(FrameProbe { renderer_base, rows: Vec::new(), reported: false });
+    *FRAMES.locked() = Some(FrameProbe { renderer_base, rows: Vec::new(), reported: false });
 }
 
 /// The main view camera's eye for a frame-data pointer.
@@ -454,7 +455,7 @@ fn frame_eye(frame: usize) -> Option<usize> {
 }
 
 fn frames_at_present(shown: usize) {
-    let mut frames = FRAMES.lock().unwrap_or_else(|e| e.into_inner());
+    let mut frames = FRAMES.locked();
     let Some(p) = frames.as_mut().filter(|p| p.rows.len() < FRAME_PRESENTS) else { return };
     let Some(renderer) = mem::read::<usize>(p.renderer_base + RENDERER_GLOBAL) else { return };
     let row = FRAME_FIELDS.iter().map(|&f| mem::read::<usize>(renderer + f).unwrap_or(0)).map(|v| (v, frame_eye(v))).collect();
@@ -462,7 +463,7 @@ fn frames_at_present(shown: usize) {
 }
 
 pub fn report_frames() {
-    let mut frames = FRAMES.lock().unwrap_or_else(|e| e.into_inner());
+    let mut frames = FRAMES.locked();
     let Some(p) = frames.as_mut().filter(|p| p.rows.len() == FRAME_PRESENTS && !p.reported) else { return };
     p.reported = true;
     log!("frame-data probe: per present, the shown eye, then each field's pointer (and its main view's eye)");

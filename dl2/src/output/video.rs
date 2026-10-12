@@ -14,6 +14,7 @@ use crate::{engine, game};
 use monaka_hook::mem;
 use monaka_producer::log;
 use std::sync::Mutex;
+use monaka_core::sync::Locked;
 
 struct Video {
     settings: usize,
@@ -50,7 +51,7 @@ fn request_video_mode(settings: usize, mode: u32, width: u32, height: u32) {
 /// first time.
 pub fn at_headset_size(width: u32, height: u32) -> bool {
     let Some((eye_width, eye_height)) = config::get().eye_size else { return true };
-    let mut video = VIDEO.lock().unwrap_or_else(|e| e.into_inner());
+    let mut video = VIDEO.locked();
     if video.gave_up || (width, height) == (eye_width, eye_height) {
         return true;
     }
@@ -82,7 +83,7 @@ pub fn at_headset_size(width: u32, height: u32) -> bool {
 
 /// Asks for the original mode and size back, if they were changed.
 pub fn restore() {
-    let mut video = VIDEO.lock().unwrap_or_else(|e| e.into_inner());
+    let mut video = VIDEO.locked();
     if video.changed {
         video.changed = false;
         request_video_mode(video.settings, video.original_mode, video.original_size.0, video.original_size.1);

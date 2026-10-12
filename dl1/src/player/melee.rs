@@ -57,7 +57,6 @@ const LEAST_HEIGHT: f32 = 0.4;
 const ACTIVE_LEVEL: &str = "?GetActiveLevel@IGame@@QEAAPEAVILevel@@XZ";
 const FIND_IN_RADIUS: &str = "?FindObjectsInRadius@ILevel@@QEAA_NPEAV?$vector@PEAVIControlObject@@@ttl@@AEBVvec3@@MPEBVCRTTI@@_NPEAH@Z";
 const EXTENTS: &str = "?GetExtentsInWorld@IControlObject@@QEBAAEBVextents@@XZ";
-const ELEMENT_ID: &str = "?GetElementID@IModelObject@@QEBAHPEBD@Z";
 /// `IControlObject::TakeDamage(SDamageInfo const&)`: every hit passes it before the victim reacts.
 const TAKE_DAMAGE: &str = "?TakeDamage@IControlObject@@UEAAXAEBUSDamageInfo@@@Z";
 /// In the damage info: the attacker (for the player's melee hits, the player object plus 0x28) and
@@ -131,7 +130,6 @@ static DAMAGE_SEEN: AtomicU64 = AtomicU64::new(0);
 static MARKERS: Mutex<Vec<(usize, bool)>> = Mutex::new(Vec::new());
 static EDGED: AtomicU64 = AtomicU64::new(0);
 type ReachFn = unsafe extern "C" fn(*mut c_void, *mut c_void) -> f32;
-type GetterFn = unsafe extern "system" fn(*mut c_void) -> *mut c_void;
 
 static ATTACK_START_ORIGINAL: Original<AttackStartFn> = Original::new();
 static REACH_ORIGINAL: Original<ReachFn> = Original::new();
@@ -157,7 +155,7 @@ pub fn install(hooks: &mut Hooks, gamedll: &Module, engine_module: &Module, phys
                 active_level: std::mem::transmute::<usize, ActiveLevelFn>(find(ACTIVE_LEVEL)?),
                 find: std::mem::transmute::<usize, FindInRadiusFn>(find(FIND_IN_RADIUS)?),
                 extents: std::mem::transmute::<usize, ExtentsFn>(find(EXTENTS)?),
-                element_id: std::mem::transmute::<usize, ElementIdFn>(find(ELEMENT_ID)?),
+                element_id: std::mem::transmute::<usize, ElementIdFn>(find(crate::engine::ELEMENT_ID)?),
                 world: std::mem::transmute::<usize, engine::ElementWorldFn>(find(engine::ELEMENT_WORLD)?),
                 targets: gamedll.at(TARGETS),
             }
@@ -370,13 +368,7 @@ unsafe extern "C" fn take_damage(victim: *mut c_void, info: *mut u8) {
 /// model the rig poses, and the arms hold no gun.
 fn player_melee(controller: *mut c_void) -> Option<Held> {
     let held = monaka_arms::melee::held().filter(|&h| h != Held::Gun)?;
-    let get = mem::read::<usize>(controller as usize).and_then(|vtable| mem::read::<usize>(vtable + 0x20))?;
-    if !Module::find(engine::GAMEDLL).is_some_and(|m| m.contains(get)) {
-        return None;
-    }
-    // SAFETY: the controller's own getter for its player, on the game thread inside its update.
-    let player = unsafe { std::mem::transmute::<usize, GetterFn>(get)(controller) } as usize;
-    (player != 0 && player == hands::arms_model()).then_some(held)
+    hands::players(controller as usize).then_some(held)
 }
 
 unsafe extern "C" fn attack_start(controller: *mut c_void, attack: i32) {

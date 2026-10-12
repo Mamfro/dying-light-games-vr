@@ -15,6 +15,7 @@ use monaka_producer::log;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use windows::Win32::Graphics::Direct3D12::*;
+use monaka_core::sync::Locked;
 
 /// The frame's camera as Streamline gets it: `clipToPrevClip` (row vectors) and `mvecScale`.
 #[derive(Clone, Copy)]
@@ -49,13 +50,13 @@ pub fn arm() {
     if !options().motion {
         return;
     }
-    *PROBE.lock().unwrap_or_else(|e| e.into_inner()) = Some(Probe { skip: 120, camera: None, depth: None, motion: None, taken: None, done: false });
+    *PROBE.locked() = Some(Probe { skip: 120, camera: None, depth: None, motion: None, taken: None, done: false });
     log!("motion vector probe armed");
 }
 
 /// This frame's camera constants (`sl::Constants`).
 pub fn at_constants(constants: usize) {
-    let mut probe = PROBE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut probe = PROBE.locked();
     let Some(p) = probe.as_mut().filter(|p| p.taken.is_none()) else { return };
     if let (Some(clip_to_prev), Some(mvec_scale)) = (mem::read::<[f32; 16]>(constants + 224), mem::read::<[f32; 2]>(constants + 360)) {
         p.camera = Some(Camera { clip_to_prev, mvec_scale });
@@ -95,7 +96,7 @@ pub fn at_tag(list: &ID3D12GraphicsCommandList, kind: u32, resource: &ID3D12Reso
     if kind > 1 {
         return;
     }
-    let mut probe = PROBE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut probe = PROBE.locked();
     let Some(p) = probe.as_mut().filter(|p| p.taken.is_none()) else { return };
     if kind == 0 && p.skip > 0 {
         p.skip -= 1;
@@ -131,7 +132,7 @@ pub fn at_tag(list: &ID3D12GraphicsCommandList, kind: u32, resource: &ID3D12Reso
 
 /// A second after the copies (reporter thread): the fit.
 pub fn report() {
-    let mut probe = PROBE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut probe = PROBE.locked();
     let Some(p) = probe.as_mut().filter(|p| !p.done) else { return };
     let (Some((taken, camera)), Some(depth), Some(motion)) = (p.taken, &p.depth, &p.motion) else { return };
     if taken.elapsed() < Duration::from_secs(1) {

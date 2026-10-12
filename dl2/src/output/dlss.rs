@@ -5,6 +5,7 @@ use crate::output::temporal::{DlssMatrices, PACKET_BYTES};
 use monaka_core::Aligned16;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex};
+use monaka_core::sync::Locked;
 
 pub static EYE_CALLS: AtomicU64 = AtomicU64::new(0);
 pub static RESETS: AtomicU64 = AtomicU64::new(0);
@@ -70,7 +71,7 @@ pub unsafe fn eye_packet(packet: usize, eye: u32, viewport: u32) -> Packet {
     unsafe { std::ptr::copy_nonoverlapping(packet as *const u8, copy.0.as_mut_ptr(), PACKET_BYTES) };
     let flag = u32::from_le_bytes(copy.0[0x18..0x1c].try_into().expect("4 bytes"));
     let epoch = TEMPORAL_EPOCH.load(Ordering::Acquire);
-    let mut state = STATE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut state = STATE.locked();
     let reset = state.matrices.apply(&mut copy.0, eye, epoch, viewport, flag != 0).unwrap_or_else(|| {
         MATRIX_FAILURES.fetch_add(1, Ordering::Relaxed);
         true

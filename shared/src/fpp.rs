@@ -201,7 +201,7 @@ pub fn around<S: ArmsSkeleton>(
     // A throw by hand under way: the left hand throws, it does not punch (the game's punch would
     // swing the view).
     let mut swinging = options.palms;
-    if crate::handwork::throwing::throwing_now() {
+    if options.apart {
         swinging[monaka_core::protocol::LEFT_HAND] = None;
     }
     melee::update(if bow { Held::Gun } else { swung }, swinging, &options.melee);
