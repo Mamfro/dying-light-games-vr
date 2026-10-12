@@ -14,34 +14,41 @@
 //! each guarded by its byte signature before use; options come from `dl2-options.txt` beside the
 //! DLL copy. The probes are in `research`.
 //!
-//! The adapter ([`Dl2::ADAPTER`]), in the order its components start, by feature: [`stereo`] (the
-//! pair on the engine side, the eyes leaving the renderer), [`look`] (head aim at the player camera
-//! update, the pitch lock, the level view), [`arms`] (the hand rig, fingers, melee, handwork,
-//! room-scale), [`GRABS`], the [`pad`], the [`hud`] (the layer, its pieces on the hands, the world
-//! markers) and the probes.
+//! The adapter ([`Dl2::ADAPTER`]), in the order its components start, by feature: stereo (the eye
+//! size, Monaka's same-frame loop with the pair on the engine side, frame generation, depth to the
+//! headset, foveation, the frame inputs), look (head aim at the player camera update, the pitch
+//! lock, the level view), the arms (the hand rig, fingers, melee, the bow, throw and lockpick,
+//! reloading by hand, room-scale), [`GRABS`], the pad, the HUD (the layer, its pieces on the hands,
+//! the world markers) and the probes.
+//!
+//! The code is sorted by who should own it: [`providers`] (what only Dying Light 2 knows: its
+//! facts, its hooks, reading and writing the game), [`extras`] (features only this game has) and
+//! [`research`] (the probes); it has no cooking left. The components are listed here, the extras'
+//! beside their features.
 
-mod arms;
 mod config;
-mod engine;
-mod game;
-mod hud;
-mod look;
+mod extras;
 mod manifest;
 #[cfg(test)]
 mod launch_tests;
-mod pad;
+mod providers;
 mod research;
-mod stereo;
 
 use config::Config;
 use eng_chr::feature::{Chrome, Facts as ChromeFacts, Look};
-use eng_chr::headaim::IdLoad;
-use monaka_core::manifest::Manifest;
+use eng_chr::providers::look_fields::IdLoad;
+use eng_chr::providers::rig::Arms;
+use monaka_core::feature::Feature;
+use monaka_core::manifest::{CONTROLLER_PAD, CONTROLLER_PROXY, HEAD_MOVEMENT, Manifest, OWN_EYE_SIZE, RENDER_SIZE};
 use monaka_core::options::Options;
 use monaka_hook::module::Module;
-use monaka_producer::game::{Adapter, Component, Game};
+use monaka_arms::reload::Reloads;
+use monaka_producer::game::{Adapter, Component, Game, Lack, On, Start};
 use monaka_producer::{Rejection, Session, log, require_build};
-use stereo::{framegen, render11, render12};
+use monaka_stereo::eye_size;
+use monaka_stereo::providers::{GameQueue, frame_inputs};
+use monaka_stereo::same_frame::PAIRS;
+use providers::{engine, eye_site, game, present};
 use windows::Win32::Graphics::Direct3D12::ID3D12CommandQueue;
 
 monaka_producer::producer!(game: crate::Dl2);
@@ -62,20 +69,31 @@ impl Game for Dl2 {
     const MANIFESTS: &'static [Manifest] = manifest::MANIFESTS;
     const ADAPTER: Adapter<Dl2> = Adapter {
         components: &[
-            &stereo::EYES,
-            &look::LOOK,
-            &look::PITCH,
-            &arms::ARMS,
-            &arms::FINGERS,
-            &arms::MELEE,
-            &arms::HANDWORK,
-            &arms::ROOM_SCALE,
-            &look::VIEW_BOB,
+            &EYE_SIZE,
+            &PRESENT,
+            &EYES,
+            &FRAMEGEN,
+            &PER_EYE_FRAMEGEN,
+            &DEPTH,
+            &FOVEATION,
+            &INPUTS,
+            &LOOK,
+            &PITCH_LOCK,
+            &ARMS,
+            &FINGERS,
+            &MELEE,
+            &BOW,
+            &THROW,
+            &LOCKPICK,
+            &RELOAD_BY_HAND,
+            &ROOM_SCALE,
+            &VIEW_BOB,
             &GRABS,
-            &pad::GAMEPAD,
-            &hud::HUD,
-            &hud::PANELS,
-            &hud::MARKERS,
+            &ACTIONS,
+            &GAMEPAD,
+            &HUD,
+            &PANELS,
+            &extras::markers::MARKERS,
             &PROBES,
         ],
     };
@@ -92,21 +110,12 @@ impl Game for Dl2 {
         };
         let d3d11 = renderer11.is_some();
         let mut config = Config::from_options(options, manifest);
+        if config::framegen_asked(options) && !config.framegen {
+            log!("frame generation runs with Standard (Same-frame) only in this game; off");
+        }
         if d3d11 && (config.alternate_eye || config.depth_stereo || config.framegen) {
             log!("alternate-eye, depth stereo and frame generation need DirectX 12; using same-frame stereo");
             (config.alternate_eye, config.depth_stereo, config.framegen) = (false, false, false);
-        }
-        if config.framegen {
-            match monaka_framegen::load() {
-                Some(api) => {
-                    framegen::enable(api);
-                    log!("FSR frame generation per eye: on");
-                }
-                None => {
-                    log!("FSR frame generation unavailable ({} not loadable); same-frame stereo without it", monaka_framegen::ffx::LOADER);
-                    config.framegen = false;
-                }
-            }
         }
         config::set(config);
         log!("{config:?}");
@@ -130,7 +139,7 @@ impl Game for Dl2 {
             renderer_enter: engine_function(&engine_module, engine::RENDERER_ENTER, "renderer enter")?,
             renderer_leave: engine_function(&engine_module, engine::RENDERER_LEAVE, "renderer leave")?,
         });
-        if d3d11 && !render11::drain_available(renderer.base()) {
+        if d3d11 && !present::drain_available(renderer.base()) {
             return Err(Rejection::revision("signature mismatch: renderer queue drain"));
         }
         Ok(Facts { engine: engine_module, renderer, d3d11, gamedll })
@@ -139,14 +148,17 @@ impl Game for Dl2 {
 
 impl Chrome for Dl2 {
     const FACTS: ChromeFacts = ChromeFacts {
-        look: Some(Look { aim: &look::AIM, input_action: engine::INPUT_ACTION, pitch_actions: &engine::PITCH_ACTIONS, id_load: IdLoad::MemImm32 }),
+        // The engine does not export the cutscene query: head aim steers through cutscenes.
+        look: Some(Look { aim: &providers::look_fields::AIM, input_action: engine::INPUT_ACTION, pitch_actions: &engine::PITCH_ACTIONS, id_load: IdLoad::MemImm32, cutscenes: false }),
+        arms: Some(Arms { rig: &providers::arms::RIG, moment: providers::arms::moment, head_aim_here: false }),
         view_bob: Some(engine::VIEW_BOB),
         grabs: Some(engine::GRABS),
         walk: Some(engine::WALK),
         melee: Some(engine::MELEE),
         melee_reach: None,
         attacks_on_release: false,
-        handwork: Some(engine::HANDWORK),
+        hands: Some(engine::HANDS),
+        reload: Some(engine::RELOAD),
         gui: Some(engine::GUI_BUILD),
         pieces: &engine::PIECES,
         hud_over_eyes: false,
@@ -160,12 +172,26 @@ impl Chrome for Dl2 {
         build.gamedll.as_ref()
     }
 
+    fn showing() -> bool {
+        PAIRS.publishing()
+    }
+}
+
+impl GameQueue for Dl2 {
     fn game_queue() -> Option<ID3D12CommandQueue> {
-        render12::game_queue()
+        present::game_queue()
+    }
+}
+
+/// Reloading by hand reads the palms the hand rig notes (`HandRig::trail`), at each update of the
+/// player's ready gun, the hook the reload is taken by (`eng_chr::providers::actions`).
+impl Reloads for Dl2 {
+    fn install(start: &mut Start<'_, Self>) -> Result<(), Lack> {
+        eng_chr::feature::hook_reload(start)
     }
 
-    fn showing() -> bool {
-        stereo::scene::publishing()
+    fn report() {
+        eng_chr::providers::actions::report_reload();
     }
 }
 
@@ -179,8 +205,113 @@ fn engine_function<F: Copy>(engine: &Module, (rva, bytes): (usize, &[u8]), name:
     Ok(unsafe { std::mem::transmute_copy(&address) })
 }
 
-/// Zombies' grabs never land on the player (`eng_chr::grabs`).
+// ---- Stereo ----
+
+/// The game renders at the headset's eye size, windowed, while VR runs (`monaka_stereo::eye_size`,
+/// [`providers::video`]): asked for at the first presents, publishing held until the game presents
+/// at it.
+pub const EYE_SIZE: Component<Dl2> = Component { options: &[RENDER_SIZE, OWN_EYE_SIZE], ..eye_size::eye_size() };
+
+/// The same-frame loop (`monaka_stereo::same_frame`): the head, each eye's frame taken at the
+/// present entry ([`providers::present`]) and the pairs published, the eye site installed
+/// ([`providers::eye_site`]).
+pub const PRESENT: Component<Dl2> = monaka_stereo::same_frame::same_frame();
+
+/// Stereo by the method the run picked (`stereo`: Standard (Same-frame), AER (Alt-eye) or
+/// Depth-stereo (synthetic)), on the same-frame loop: the pair on the engine side, each
+/// eye's camera and frustum written into the scene ([`providers::eye_site`]). Always on: menus and
+/// loading go out flat.
+pub const EYES: Component<Dl2> = Component {
+    name: "eyes",
+    features: &[Feature::Stereo, Feature::PerEyeHistory],
+    options: &[config::STEREO, config::FRAMEGEN, HEAD_MOVEMENT],
+    needs: &[&PRESENT],
+    settings: |options, manifest| {
+        Config::from_options(options, manifest);
+    },
+    arm: eye_site::started,
+    give_back: eye_site::give_back,
+    release: eye_site::release,
+    summary: Some(monaka_stereo::same_frame::timing_report),
+    ..Component::NONE
+};
+
+/// FSR frame generation loaded, for Standard (Same-frame) with frame generation
+/// ([`PER_EYE_FRAMEGEN`]).
+pub const FRAMEGEN: Component<Dl2> = Component { needs: &[&EYES], on: |_| On::when(config::get().framegen, "no frame generation for this method"), ..monaka_framegen::feature::framegen() };
+
+/// Standard (Same-frame) with frame generation: per-eye frame generation of the same-frame pairs,
+/// the generated pair between the real ones (`monaka_stereo::framegen12::pairs`).
+pub const PER_EYE_FRAMEGEN: Component<Dl2> = Component { needs: &[&FRAMEGEN], ..monaka_stereo::framegen12::pairs::per_eye_pairs() };
+
+/// Each eye's depth to the headset with its pair (`headset_depth`, on by default): the rendered
+/// eyes' pairs (Standard and AER) carry it (the same-frame loop's D3D12 pairs).
+pub const DEPTH: Component<Dl2> = Component { needs: &[&EYES], ..monaka_stereo::depth_layer::depth_layer() };
+
+/// Foveated rendering on D3D12 (`foveated_rendering`, on by default).
+pub const FOVEATION: Component<Dl2> =
+    Component { needs: &[&EYES], on: |run| On::when(!run.build.d3d11, "foveated rendering needs D3D12"), ..monaka_stereo::foveate12::foveation() };
+
+/// Each eye's inputs for the features that ask (frame generation, depth to the headset,
+/// foveation's render size), from the Streamline calls [`providers::streamline`] hooks (the frame
+/// inputs provider: [`providers::stereo`]).
+pub const INPUTS: Component<Dl2> = frame_inputs();
+
+// ---- Look ----
+
+/// Head aim on the character (`monaka_arms::look_targets`, on DL2's look fields:
+/// [`providers::look_fields`]), steered at the player camera update (`FromForwardUpPos`).
+pub const LOOK: Component<Dl2> = Component { needs: &[&EYES], ..monaka_arms::look_targets::look() };
+
+/// Without head aim, vertical look passes only back toward level (`monaka_arms::pitch_lock`, at the
+/// input-action converter: [`providers::look_fields`]).
+pub const PITCH_LOCK: Component<Dl2> = Component { needs: &[&EYES], ..monaka_arms::pitch_lock::pitch_lock() };
+
+/// The view stays level while head aim steers (`eng_chr::providers::view_bob`).
+pub const VIEW_BOB: Component<Dl2> = Component { needs: &[&LOOK], ..eng_chr::feature::view_bob() };
+
+// ---- The arms ----
+
+/// The arms on the controllers (`eng_chr::feature::arms`, on DL2's rig: [`providers::arms`]),
+/// steered by head aim first.
+pub const ARMS: Component<Dl2> = Component { needs: &[&LOOK], ..eng_chr::feature::arms() };
+
+/// A free hand's fingers on the tracked fingers (the hand rig's, at the arms' pose).
+pub const FINGERS: Component<Dl2> = Component { needs: &[&ARMS], ..monaka_arms::feature::fingers() };
+pub const MELEE: Component<Dl2> = Component { needs: &[&ARMS], ..eng_chr::feature::melee() };
+/// The bow drawn and loosed by the hands (`monaka_arms::bow`, on [`providers::arms`]).
+pub const BOW: Component<Dl2> = Component { needs: &[&ARMS], ..eng_chr::feature::bow() };
+/// A throwable leaves the left hand as it threw it (`monaka_arms::throw`, on [`providers::arms`]).
+pub const THROW: Component<Dl2> = Component { needs: &[&ARMS], ..eng_chr::feature::throw() };
+/// Twisting the wrists picks a lock (`monaka_arms::lockpick`, on [`providers::actions`]).
+pub const LOCKPICK: Component<Dl2> = Component { needs: &[&ARMS], ..eng_chr::feature::lockpick() };
+/// The left hand to the gun and away reloads (`monaka_arms::reload`).
+pub const RELOAD_BY_HAND: Component<Dl2> = Component { needs: &[&ARMS], ..monaka_arms::reload::reload() };
+pub const ROOM_SCALE: Component<Dl2> = Component { needs: &[&ARMS], ..monaka_arms::feature::room_scale() };
+
+/// Zombies' grabs never land on the player (`eng_chr::providers::grabs`).
 pub const GRABS: Component<Dl2> = eng_chr::feature::grabs();
+
+// ---- The pad ----
+
+/// The actions provider ([`providers::actions`]): ready-mades press the game's actions by its
+/// bindings.
+pub const ACTIONS: Component<Dl2> = monaka_pad::feature::actions();
+
+/// The controllers as the game's pad, the whole right stick to the game (head aim and the pitch
+/// lock decide what its pitch does).
+pub const GAMEPAD: Component<Dl2> = Component { options: &[CONTROLLER_PAD, CONTROLLER_PROXY], arm: monaka_pad::feature::whole_stick, ..monaka_pad::feature::gamepad() };
+
+// ---- The HUD ----
+
+/// The HUD layer at DL2's own size, its distance with it (where it goes over each eye: `HudLayer
+/// for Dl2` in [`providers::stereo`], laid over by [`providers::hud`], and Depth-stereo's centre
+/// frame in [`extras::depth_stereo`]).
+pub const HUD: Component<Dl2> = Component { options: &monaka_stereo::hud_layer::options(0.55), needs: &[&EYES], ..eng_chr::feature::hud() };
+/// The HUD's pieces on the hands (`eng_chr::feature`'s ready-made); its world markers are
+/// [`extras::markers`].
+pub const PANELS: Component<Dl2> = Component { needs: &[&HUD], ..eng_chr::feature::panels() };
+
 
 /// The research probes: their hooks and reports. Each probe checks its own option.
 pub const PROBES: Component<Dl2> = Component { install: research::install_probes, release: research::report, ..monaka_producer::game::probes() };

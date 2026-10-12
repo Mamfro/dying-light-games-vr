@@ -1,8 +1,8 @@
-//! The eye cameras' probes, at each view setup (`crate::stereo::eyes`): `probe_frames`,
+//! The eye cameras' probes, at each view setup (`crate::providers::eye_site`): `probe_frames`,
 //! `probe_cutscene` and `probe_rig` (flicker hunting).
 
 use super::options;
-use crate::stereo::eyes::drawing_present;
+use crate::providers::eye_site::drawing_present;
 use monaka_core::camera::{self, Mat34, apply_head, distance, rigid_inverse};
 use monaka_core::protocol::HeadPose;
 use monaka_producer::log;
@@ -25,9 +25,9 @@ pub fn frame(eye: usize, view: usize, state: usize, stale: bool, inverse: &Mat34
     log!(
         "frame {:?} eye {eye} view {view:#x} state {state:#x} stale {stale} aim live {} updates {} baked {:.2} stored {stored:.2} wrote {wrote:.2} pos [{:.3} {:.3} {:.3}] back [{:.3} {:.3} {:.3}]",
         drawing_present(),
-        crate::look::live(),
-        crate::look::updates(),
-        crate::look::baked_yaw().to_degrees(),
+        monaka_arms::owned_facing::FACING.live(),
+        monaka_arms::owned_facing::FACING.updates(),
+        monaka_arms::owned_facing::FACING.baked_yaw().to_degrees(),
         inverse[3],
         inverse[7],
         inverse[11],
@@ -74,7 +74,7 @@ pub fn cutscene(eye: usize, chosen_at: u64, turned: bool, stale: bool, cache: &M
     log!(
         "cs view p{chosen_at} eye {eye} {} stale {stale} cutscene {}: cache [{:.3} {:.3} {:.3}] yaw {:.2} pitch {:.2}; base [{:.3} {:.3} {:.3}] yaw {:.2} pitch {:.2} baked {:.2} -> centre [{:.3} {:.3} {:.3}] yaw {:.2} pitch {:.2}",
         if turned { "turned" } else { "rebuilt" },
-        crate::look::cutscene(),
+        monaka_arms::owned_facing::FACING.cutscene(),
         cache[3],
         cache[7],
         cache[11],

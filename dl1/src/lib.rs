@@ -5,37 +5,39 @@
 //! Game requirements: NVIDIA HBAO+, depth of field and PCSS off (they get the wrong camera and
 //! make shadows slide), and no `/3dtv` launch option.
 //!
-//! The adapter ([`Dl1::ADAPTER`]), in the order its components start, by feature: [`stereo`] (the
-//! eye size first, since the channel, the HUD and the upscaler take the back buffer's size; the
-//! present loop, the eyes, FSR, the depth experiment), the [`hud`] (the back buffer's draws, the
-//! HUD in front of the eyes, its pieces on the hands, the UI kept at the monitor's size), [`look`]
-//! (head aim with the mod-owned facing), [`arms`] (the hand rig, fingers, and what the hands and
-//! steps do), the [`controls`], [`grabs`], the [`pad`] and the probes.
+//! The adapter ([`Dl1::ADAPTER`]), in the order its components start, by feature: stereo (the eye
+//! size first, since the channel, the HUD and the upscaler take the back buffer's size; the present
+//! loop, the eyes, FSR, AFW), the HUD (the back buffer's draws, the HUD in front of the eyes, its
+//! pieces on the hands, the UI kept at the monitor's size), look (head aim with the mod-owned
+//! facing, the pitch lock), the arms (the hand rig, fingers, and what the hands and steps do), the
+//! VR buttons, grabs, the pad and the probes.
+//!
+//! The code is sorted by who should own it: [`providers`] (what only Dying Light 1 knows: its
+//! facts, its hooks, reading and writing the game), [`extras`] (features only this game has),
+//! [`cooking`] (DL1's own versions of features a Monaka ready-made should own, each waiting for a
+//! provider) and [`research`] (the probes). The components are listed here, the extras' beside
+//! their features.
 //!
 //! `flat=1` (research) runs the probes alone on the game as it plays on the monitor: everything
 //! that needs stereo is off; `flat_buttons=1` keeps the buttons and grabs.
 
-mod arms;
 mod config;
-mod controls;
-mod engine;
-mod grabs;
-mod hud;
-mod look;
+mod cooking;
+mod extras;
 mod manifest;
 #[cfg(test)]
 mod launch_tests;
-mod pad;
+mod providers;
 mod research;
-mod stereo;
 
 use config::Config;
-use monaka_core::manifest::Manifest;
+use monaka_core::manifest::{CONTROLLER_PAD, CONTROLLER_PROXY, MENU_REACH_DEPTH, Manifest, OWN_EYE_SIZE, Opt, RENDER_SIZE, dpad_hold, menu_reach};
 use monaka_core::options::Options;
 use monaka_hook::module::{self, Module};
-use monaka_hook::{Hooks, mem};
-use monaka_producer::game::{Adapter, Component, Game, Lack, On, Run, Start};
+use monaka_hook::mem;
+use monaka_producer::game::{Adapter, Component, Game, On, Run, Start, Switch};
 use monaka_producer::{Rejection, Session, log, require_build};
+use providers::engine;
 use std::ffi::c_void;
 use windows::Win32::Graphics::Direct3D11::{ID3D11Device, ID3D11DeviceContext};
 use windows::Win32::Graphics::Dxgi::IDXGISwapChain;
@@ -57,28 +59,32 @@ impl Game for Dl1 {
     const MANIFESTS: &'static [Manifest] = manifest::MANIFESTS;
     const ADAPTER: Adapter<Dl1> = Adapter {
         components: &[
-            &stereo::EYE_SIZE,
-            &stereo::PRESENT,
-            &stereo::EYES,
-            &stereo::UPSCALE,
-            &stereo::HYBRID,
-            &hud::DRAWS,
-            &hud::HUD,
-            &hud::PANELS,
-            &hud::UI_SIZE,
-            &look::LOOK,
-            &arms::ARMS,
-            &arms::FINGERS,
-            &arms::MELEE,
-            &arms::THROW,
-            &arms::BOW,
-            &arms::GRAPPLE,
-            &arms::LOCKPICK,
-            &arms::GUN,
-            &arms::ROOM_SCALE,
-            &controls::CONTROLS,
-            &grabs::GRABS,
-            &pad::GAMEPAD,
+            &EYE_SIZE,
+            &PRESENT,
+            &EYES,
+            &UPSCALE,
+            &AFW,
+            &DRAWS,
+            &HUD,
+            &HUD_PANELS,
+            &extras::ui_size::UI_SIZE,
+            &LOOK,
+            &PITCH_LOCK,
+            &ARMS,
+            &FINGERS,
+            &MELEE,
+            &THROW_BY_HAND,
+            &BOW_BY_HAND,
+            &extras::grapple::GRAPPLE,
+            &LOCKPICK,
+            &GUN,
+            &ROOM_SCALE,
+            &extras::vr_buttons::CONTROLS,
+            &CROUCH_BY_DUCKING,
+            &RELOAD_BY_HAND,
+            &extras::grabs::GRABS,
+            &ACTIONS,
+            &GAMEPAD,
             &PROBES,
         ],
     };
@@ -133,15 +139,188 @@ fn swapchain_parts(renderer: &Module) -> Result<(IDXGISwapChain, ID3D11Device, I
     }
 }
 
-/// [`Hooks::method`] (in the code, the vtable slot as a fallback), logging a fallback.
-///
-/// # Safety
-/// `object` must be a live COM object whose method `index` has type `F`.
-unsafe fn hook_method<F: Copy>(hooks: &mut Hooks, original: &monaka_hook::Original<F>, name: &str, object: *mut c_void, index: usize, detour: F) -> Result<(), Lack> {
-    // SAFETY: the caller's guarantee.
-    unsafe { hooks.method_noted(original, name, object, index, detour, |why| log!("{why}; hooking its vtable slot instead")) }?;
-    Ok(())
+// ---- Stereo ----
+
+/// The game renders at the headset's eye size while VR runs (`monaka_stereo::eye_size`,
+/// [`providers::video`]), switched at its install, waiting for it, before anything takes the back
+/// buffer's size; with FSR, smaller, and the upscaler makes the eye size. Nothing waits at the
+/// presents.
+pub const EYE_SIZE: Component<Dl1> = Component {
+    options: &[RENDER_SIZE, OWN_EYE_SIZE],
+    on: |run| On::when(!research::options().flat && run.options.size("eye_size").is_some(), "the game renders at its own size"),
+    install: providers::video::install_eye_size,
+    ..monaka_stereo::eye_size::eye_size()
+};
+
+/// Each frame to the viewer by Monaka's present loop, with DL1's steps and its eye site
+/// (`Presents for Dl1`, [`providers::present_entry`]).
+pub const PRESENT: Component<Dl1> = Component { on: stereo_on, ..monaka_stereo::feature::present() };
+
+/// Stereo by alternate eyes, in place ([`providers::eye_site`], installed with the present loop):
+/// the view setup moves the cached render camera to the eye the present loop chose, the game asked
+/// for a field of view wide enough for both eyes; with pointing aim, the controllers' block is read
+/// at each present. No `stereo` switch: the present loop's steps are the eyes'.
+pub const EYES: Component<Dl1> = Component {
+    reports: &[monaka_core::situation::Situation::WorldHidden],
+    options: &[config::STEREO, monaka_core::manifest::HEAD_MOVEMENT, monaka_core::manifest::LATENCY, monaka_core::manifest::EYE_SEPARATION],
+    switch: None,
+    needs: &[&PRESENT],
+    settings: |options, manifest| {
+        Config::from_options(options, manifest);
+    },
+    release: providers::present_entry::release,
+    ..monaka_stereo::eye_site::eyes()
+};
+
+/// FSR upscaling (`monaka_stereo::upscaler::fsr11`): each eye rendered smaller, AMD's FSR bringing
+/// it to the eye size, with AMD's DLLs from `fsr_dlls=<folder>` or beside this DLL's copy
+/// ([`providers::fsr`]).
+pub const UPSCALE: Component<Dl1> = Component {
+    options: &[config::FSR, config::FSR_SCALE, config::FSR_SHARPNESS],
+    needs: &[&EYES],
+    on: |run| On::when(Config::from_options(run.options, run.manifest).fsr.is_some(), "FSR is off"),
+    install: providers::fsr::install,
+    ..monaka_stereo::upscaler::fsr11::per_eye()
+};
+
+/// AFW (Frame-warp, `stereo=afw`): alternate-eye rendering with depth, a pair every frame, the other
+/// eye reprojected from the real one (`monaka_stereo::afw11::ready`, on [`providers::depth`]); the
+/// HUD a layer over both eyes.
+pub const AFW: Component<Dl1> = Component {
+    needs: &[&EYES],
+    on: |run| On::when(Config::from_options(run.options, run.manifest).afw, "AER chosen"),
+    ..monaka_stereo::afw11::ready::frame_warping()
+};
+
+// ---- The HUD ----
+
+/// The back buffer's draws tracked on the immediate context ([`providers::hud_draws`]): for the
+/// HUD, the upscaler's and AFW's scene copy, and the probes.
+pub const DRAWS: Component<Dl1> = Component {
+    name: "draws",
+    needs: &[&PRESENT],
+    on: |run| {
+        let config = Config::from_options(run.options, run.manifest);
+        On::when(config.hud_active() || config.afw || config.fsr.is_some() || research::options().draws(), "no draws to follow")
+    },
+    install: providers::hud_draws::install_draws,
+    ..Component::NONE
+};
+
+/// The HUD and menus in front of the eyes (`hud=0`: as the game draws them): the draws after the
+/// world's get a viewport at the HUD's place in each eye ([`providers::hud_draws`], by the frame
+/// labels). On the HUD layer's base (`monaka_stereo::hud_layer`), at DL1's own size.
+pub const HUD: Component<Dl1> = Component { options: &monaka_stereo::hud_layer::options(0.36), needs: &[&DRAWS], ..monaka_stereo::hud_layer::hud_layer() };
+
+/// The dynamic HUD (Monaka's `monaka_stereo::hud_panels`): the pieces of DL1's HUD on the hands,
+/// each HUD draw told apart by the game's UI elements ([`providers::hud_pieces`]).
+pub const HUD_PANELS: Component<Dl1> = Component {
+    needs: &[&HUD],
+    on: |run| On::when(run.shared.hud.world && !Config::from_options(run.options, run.manifest).afw, "the dynamic HUD is off"),
+    install: providers::hud_pieces::install_panels,
+    ..monaka_stereo::hud_panels::hud_panels()
+};
+
+/// The tools (left) and weapons (right) stay open while the d-pad is held; picked with A, B, X, Y.
+const DPAD_HOLD: Opt = dpad_hold(&["--dpad-hold", "left,right"]);
+const MENU_REACH: Opt = menu_reach(
+    "Rest your left hand over your left shoulder for the tools, your right hand over your right shoulder for the weapons. Flick a stick toward the one you want; bring the hand back to close.",
+);
+
+/// The actions provider ([`providers::actions`]): ready-mades press the game's actions by its
+/// bindings.
+pub const ACTIONS: Component<Dl1> = monaka_pad::feature::actions();
+
+/// The controllers as the game's pad, the whole right stick to the game (head aim owns the facing),
+/// with the wheels held open by the d-pad or reached for over a shoulder. `pad_mask_real=1` (a
+/// diagnostic) drops a real pad's input.
+pub const GAMEPAD: Component<Dl1> = Component {
+    options: &[CONTROLLER_PAD, DPAD_HOLD, MENU_REACH, MENU_REACH_DEPTH, CONTROLLER_PROXY],
+    needs: &[&PRESENT],
+    arm: arm_pad,
+    ..monaka_pad::feature::gamepad()
+};
+
+fn arm_pad() {
+    monaka_pad::feature::whole_stick();
+    if providers::eye_site::config().pad_mask_real {
+        monaka_pad::mask_real(true);
+    }
 }
+
+// ---- Look ----
+
+/// Head aim with the mod-owned facing (`monaka_arms::owned_facing`, on DL1's look fields:
+/// [`providers::look_fields`]): the view faces where the player turned it, plus the head; the
+/// character is steered there. Reports the cutscenes that take the camera and the climbs.
+pub const LOOK: Component<Dl1> = Component { needs: &[&EYES], ..monaka_arms::owned_facing::look() };
+
+/// Without head aim steering, vertical look passes only back toward level (`monaka_arms::pitch_lock`,
+/// at the input-action converter: [`providers::look_fields`]).
+pub const PITCH_LOCK: Component<Dl1> = Component { needs: &[&EYES], ..monaka_arms::pitch_lock::pitch_lock() };
+
+// ---- The arms ----
+
+/// The arms on the controllers at the arms visual's camera-target callback (Monaka's hand rig, on
+/// [`providers::skeleton`]), a swing of a held weapon or a fist attacking; what the hands do with
+/// the world's objects from where the rig puts them ([`providers::hand_world`]).
+pub const ARMS: Component<Dl1> = Component {
+    name: "arms",
+    needs: &[&LOOK],
+    install: providers::skeleton::install_arms,
+    give_back: providers::skeleton::give_back,
+    release: || {
+        providers::hand_world::report();
+        monaka_arms::controllers::close();
+    },
+    ..monaka_arms::hand_rig::hand_rig()
+};
+
+/// A free hand's fingers on the tracked fingers (the hand rig's, at the arms' pose).
+pub const FINGERS: Component<Dl1> = Component { needs: &[&ARMS], ..monaka_arms::feature::fingers() };
+
+// ---- What the hands do ----
+
+/// Physical melee (`monaka_arms::melee_hit`, on [`providers::melee`]): a swing hits where the
+/// weapon in the hand is; with `melee_on_reach` a weapon's swing attacks only once the blade is
+/// about to reach something, and with `back_is_blunt` a cutting weapon's hit not led by its edge
+/// lands blunt.
+pub const MELEE: Component<Dl1> = Component { needs: &[&ARMS], ..monaka_arms::melee_hit::physical_melee() };
+
+/// Tools thrown with the left hand's own throw (`monaka_arms::throw`, on
+/// [`providers::throws`]; `throw_by_hand=0`: the game's throw along the view).
+pub const THROW_BY_HAND: Component<Dl1> = Component { needs: &[&ARMS], ..monaka_arms::throw::throw() };
+
+/// The bow drawn by pulling the string hand back, loosed along the bow (`monaka_arms::bow`, on
+/// [`providers::bow`] and [`providers::projectile`]; `bow_by_hand=0`: the game's shot along the
+/// view).
+pub const BOW_BY_HAND: Component<Dl1> = Component { needs: &[&ARMS], ..monaka_arms::bow::bow() };
+
+/// A gun's shots leave its muzzle along its barrel (`monaka_arms::gun`, on
+/// [`providers::projectile`] and the gun's line in the hand, [`providers::skeleton`];
+/// `shoot_from_barrel=0`: from the eye along the aim).
+pub const GUN: Component<Dl1> = Component { needs: &[&ARMS], ..monaka_arms::gun::gun() };
+
+/// Lockpicking by twisting the hands (`monaka_arms::lockpick`, on [`providers::lockpick`];
+/// `lockpick_by_hand=0`: the sticks).
+pub const LOCKPICK: Component<Dl1> = Component { needs: &[&ARMS], ..monaka_arms::lockpick::lockpick() };
+
+/// The character follows the player's real steps (`monaka_arms::feature::room_scale` at DL1's own
+/// walk body, [`providers::steps`], with DL1's waits and step measure,
+/// [`room_scale_rules`](crate::cooking::room_scale_rules)), with the hand rig.
+pub const ROOM_SCALE: Component<Dl1> = Component { needs: &[&ARMS], ..monaka_arms::feature::room_scale() };
+
+/// Crouching by ducking (`monaka_arms::duck`), held on the VR button layout's hold-to-crouch
+/// ([`extras::vr_buttons`]): the eye site hands it the head's height.
+pub const CROUCH_BY_DUCKING: Component<Dl1> = Component { needs: &[&extras::vr_buttons::CONTROLS], ..monaka_arms::duck::duck() };
+
+/// Reloading by hand (`monaka_arms::reload`), with the hand rig (`reload_gesture=0` turns it off):
+/// read and pressed on the VR button layout's input pass ([`extras::vr_buttons`]).
+pub const RELOAD_BY_HAND: Component<Dl1> = Component {
+    needs: &[&ARMS, &extras::vr_buttons::CONTROLS],
+    switch: Some(Switch::new("reload_gesture", true, "reloading by hand is off")),
+    ..monaka_arms::reload::reload()
+};
 
 /// The research probes: their hooks, each checking its own option; the look and arms probes take
 /// their component's hook when it is off.

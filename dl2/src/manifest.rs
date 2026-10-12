@@ -31,9 +31,10 @@ pub const MANIFESTS: &[Manifest] = &[Manifest {
     run_prefix: "dl2",
     launch: Launch::Auto { settle_seconds: 30 },
     refused_arguments: &[],
-    before: "In the game's options, use DirectX 12. The game's own Frame Generation can be on or off (Monaka VR holds it off while VR runs); for Smooth, turn it OFF.",
+    before: "In the game's options, use DirectX 12. The game's own Frame Generation can be on or off (Monaka VR holds it off while VR runs); for Monaka's frame generation, turn it OFF.",
     options: &DL2,
     licences: &["DyingLight2VR-LICENSE.txt"],
     left_hand_aims: true,
     weapon_ring: true,
+    controls: &[],
 }];

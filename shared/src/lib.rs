@@ -1,37 +1,25 @@
 //! Techland's Chrome Engine as Dying Light 2 and The Beast run it (and Dying Light 1 where
-//! noted): head aim on the player character ([`headaim`]), the first-person arms on the
-//! controllers ([`rig`] around the arms callback [`fpp`], their skeleton component
-//! [`coskeleton`], tracked fingers on it [`fingers`], the palms in the world [`hands`]), what
-//! the hands do with the game's own throw, bow, reload and lockpick ([`handwork`], a held
-//! weapon's model [`model`]), grabs held off the player ([`grabs`]), the game object behind the
-//! video settings ([`game`]), the HUD as a layer and its pieces ([`hudlayer`], [`gui`],
-//! [`panels`], [`hudfix`]), physical melee ([`melee`]) and the player's movement step for
-//! room-scale following ([`walk`]), and the D3D12 renderer's present request and queue
-//! ([`rd3d12`]). Each game crate supplies the addresses of its own build. The features as
-//! ready-made components, for a game that implements [`feature::Chrome`]: [`feature`].
+//! noted), shared by the three game crates; each supplies the addresses of its own build.
+//!
+//! The code is sorted by who should own it: [`providers`] (what only the Chrome Engine knows: the
+//! arms skeleton and the callback that poses it, the rig's glue, the palms in the world, what the
+//! hands hold and the actions on the pad for each game's providers, the look fields, a held
+//! weapon's model, grabs held off the player, the game object behind the video settings, the HUD as
+//! a layer and its pieces, its place over each eye, the player's movement step, view bobbing, the
+//! hooks behind melee hits, the throw, the bow, the reload and the lockpick, and the D3D12
+//! renderer's present request and queue) and [`cooking`] (the engine's own versions of features a
+//! Monaka ready-made should own, each waiting for a provider: head aim's steering and the dynamic
+//! HUD), and [`research`] (the probes the games share).
+//!
+//! The features as ready-made components, for a game that implements [`feature::Chrome`] (the
+//! Chrome facts its build has been read for): [`feature`]. It stays at the crate's root: it is the
+//! engine's component list, the provider trait every Chrome game implements beside the components
+//! it lists, and not one provider or one piece of cooking.
 
-pub mod coskeleton;
+pub mod cooking;
 pub mod feature;
-pub mod fingers;
-pub mod framepass;
-pub mod fpp;
-pub mod game;
-pub mod grabs;
-pub mod gui;
-pub mod hands;
-pub mod handwork;
-pub mod headaim;
-pub mod hudfix;
-pub mod hudover;
-pub mod hudlayer;
-pub mod melee;
-pub mod melee_reach;
-pub mod model;
-pub mod panels;
-pub mod rd3d12;
-pub mod rig;
-pub mod view_bob;
-pub mod walk;
+pub mod providers;
+pub mod research;
 
 /// The engine DLL (all three games).
 pub const ENGINE: &str = "engine_x64_rwdi.dll";

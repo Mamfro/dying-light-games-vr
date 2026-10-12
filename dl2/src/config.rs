@@ -1,10 +1,11 @@
 //! The stereo's settings for the run, read once at the start ([`set`]) for the hooks to ask
-//! ([`get`], [`debug`]): the shared settings (the manifest's defaults), the rendering mode and
-//! the PC checks' debug flags. The components read their own options at their install.
+//! ([`get`], [`debug`]): the shared settings (the manifest's defaults), the stereo method and frame
+//! generation, and the PC checks' debug flags. The components read their own options at their install.
 
 use crate::manifest::MANIFESTS;
-use monaka_core::manifest::Manifest;
+use monaka_core::manifest::{Manifest, Opt};
 use monaka_core::options::{Options, Shared};
+use monaka_core::rendering::{self, FrameGenerator, STEREO_OFF, StereoMethod};
 use std::ops::Deref;
 use std::sync::OnceLock;
 
@@ -51,28 +52,28 @@ pub mod debug {
 /// The DXRT commands (`engine::ONCE_COMMANDS` 10 to 13).
 pub const ONCE_SKIP_DEFAULT: u32 = 0b1111 << 10;
 
-/// The launcher's `mode` choice (`framegen`, `same`, `depth`, `alternate`; `auto` is settled by
-/// the launcher before it gets here).
-const MODES: &[(&str, Mode)] = &[("framegen", Mode::FrameGen), ("same", Mode::Same), ("depth", Mode::Depth), ("alternate", Mode::Alternate), ("auto", Mode::FrameGen)];
+/// The stereo methods DL2 offers (`monaka_core::rendering`): Standard (Same-frame) by default, AER
+/// (Alt-eye), Depth-stereo (synthetic). Depth-stereo shows the hands no nearer than its nearest
+/// comfortable depth: the panels on them too.
+pub const STEREO: Opt = rendering::stereo_method(&[StereoMethod::SameFrame.offer(), StereoMethod::Aer.offer(), StereoMethod::DepthStereo.offer(), STEREO_OFF], StereoMethod::SameFrame).viewer_args("depth", &["--panel-nearest", "0.5"]);
+/// The frame generators DL2 offers: FSR's by default (per eye on the same-frame pairs), off.
+pub const FRAMEGEN: Opt = rendering::frame_generation(&[FrameGenerator::Off.offer(), FrameGenerator::Fsr.offer()], FrameGenerator::Fsr);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Mode {
-    Same,
-    Alternate,
-    Depth,
-    FrameGen,
+/// Whether the run asks for frame generation (`framegen=fsr`, the default), whichever method it
+/// picked.
+pub fn framegen_asked(options: &Options) -> bool {
+    FrameGenerator::chosen(&FRAMEGEN, options) == FrameGenerator::Fsr
 }
 
 #[derive(Clone, Copy, Debug)]
 pub struct Config {
     pub shared: Shared,
-    /// The headset's recommended eye size (`eye_size=WxH`, from the OpenXR runtime).
-    pub eye_size: Option<(u32, u32)>,
-    /// One render per frame, eyes taking turns (`mode=alternate`, D3D12).
+    /// One render per frame, eyes taking turns (`stereo=aer`, D3D12).
     pub alternate_eye: bool,
-    /// One centre render per frame, both eyes from its depth (`mode=depth`, D3D12).
+    /// One centre render per frame, both eyes from its depth (`stereo=depth`, D3D12).
     pub depth_stereo: bool,
-    /// FSR frame generation per eye (`mode=framegen`; same-frame stereo, D3D12).
+    /// FSR frame generation per eye (`framegen=fsr` with `stereo=same`, D3D12; with the other
+    /// methods DL2 has none).
     pub framegen: bool,
     pub debug: u32,
     /// Which of `engine::ONCE_COMMANDS` the right eye skips (bit per index; `once_skip=`).
@@ -99,13 +100,12 @@ impl Default for Config {
 
 impl Config {
     pub fn from_options(options: &Options, manifest: &Manifest) -> Self {
-        let mode = options.choice("mode", MODES, Mode::FrameGen);
+        let method = StereoMethod::chosen(&STEREO, options);
         Self {
             shared: Shared::from_options(options, manifest),
-            eye_size: options.size("eye_size"),
-            alternate_eye: mode == Mode::Alternate,
-            depth_stereo: mode == Mode::Depth,
-            framegen: mode == Mode::FrameGen,
+            alternate_eye: method == StereoMethod::Aer,
+            depth_stereo: method == StereoMethod::DepthStereo,
+            framegen: method == StereoMethod::SameFrame && framegen_asked(options),
             debug: options.value::<u32>("debug_flags").unwrap_or(0),
             once_skip: options.value::<u32>("once_skip").unwrap_or(ONCE_SKIP_DEFAULT),
         }
@@ -133,34 +133,6 @@ pub fn debug(flag: u32) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn modes_and_defaults() {
-        let config = Config::default();
-        assert!(config.framegen && !config.depth_stereo && !config.alternate_eye, "Smooth, as the manifest says");
-        assert!(config.aim.head && config.aim.hand && config.aim.rig && config.hud.world && config.hud.markers);
-        assert_eq!(config.hud.scale, 0.55);
-        assert_eq!(config.once_skip, ONCE_SKIP_DEFAULT);
-        let read = |text: &str| Config::from_options(&Options::parse(text), &MANIFESTS[0]);
-        let depth = read("mode=depth\nhud_scale=0.4\naim=off\nlock_pitch=1\ndebug_flags=5\nonce_skip=3");
-        assert!(depth.depth_stereo && !depth.framegen && !depth.aim.head);
-        assert_eq!((depth.hud.scale, depth.debug, depth.once_skip), (0.4, 5, 3));
-        assert!(depth.has(debug::MONO) && !depth.has(debug::SHOW_LEFT));
-        let same = read("mode=same\nsynthetic_yaw=30\nsynthetic_pitch=-10");
-        assert!(!same.framegen && !same.depth_stereo && !same.alternate_eye);
-        assert_eq!(same.synthetic, Some((30.0, -10.0)));
-        assert!(read("mode=alternate").alternate_eye);
-    }
-
-    #[test]
-    fn probes_are_research() {
-        use crate::research::Options as Probes;
-        let none = Probes::from_options(&Options::default());
-        assert!(!none.hands && !none.markers && !none.cameras && !none.aim_log);
-        let all = Probes::from_options(&Options::parse("probe_hands=1\nprobe_markers=1\nprobe_cameras=1\ndebug_flags=16389"));
-        assert!(all.hands && all.markers && all.cameras && all.aim_log);
-        assert!(!Probes::from_options(&Options::parse("debug_flags=5")).aim_log);
-    }
-}
+mod lift_checks;
+#[cfg(test)]
+mod tests;

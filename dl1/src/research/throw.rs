@@ -20,13 +20,13 @@ const THROW: usize = 0xdd1ad0;
 /// `PlayerDI`'s drop or throw of an item (its vtable slot +0xa28): `(player, slot, item, flag,
 /// target point or null vector, ...)`, returning the world object.
 const DROP_OR_THROW: usize = 0xb9eef0;
-/// Makes the world object for an inventory item: `(item, player, mode)`.
+/// Makes the dropped world object for an inventory item: `(item, player, drop reason)`.
 const SPAWN: usize = 0x6fa610;
 /// In the throw controller: its state, and whether it holds an item (then the item at +0x98).
 const STATE: usize = 0x38;
 const HOLDS: usize = 0x90;
 const HELD: usize = 0x98;
-/// The item's object (at +0x58) and its kind (vfunc +0x1c0).
+/// The item's object (at +0x58) and its item type (vfunc +0x1c0; 0x1f a flare, 0x28 throwing stars).
 const ITEM_OBJECT: usize = 0x58;
 const KIND_SLOT: usize = 0x1c0;
 /// In a world object: its control object (+0x18), and the vector the throw writes (+0x100).
@@ -35,11 +35,12 @@ const VELOCITY: usize = 0x100;
 /// `WeaponBowController`'s loosing of an arrow: `(controller)`; the draw (0 to 1) at +0x6c.
 const BOW_FIRE: usize = 0xd9cf40;
 const BOW_DRAW: usize = 0x6c;
-/// A projectile's firing: `(projectile)`; its start at +0x3c, its velocity at +0x48.
+/// A bullet's start (arrows and gun shots): `(bullet)`; its start at +0x3c, its velocity at +0x48.
 const PROJECTILE_FIRE: usize = 0x7128c0;
 const PROJECTILE_START: usize = 0x3c;
 const PROJECTILE_VELOCITY: usize = 0x48;
-/// `ThrowableObject`'s launch: `(object, velocity or a zero vector, target point or null)`.
+/// `ThrowableObject`'s throw impulse: `(object, velocity or a zero vector for the player's own,
+/// target point or null)`.
 const LAUNCH: usize = 0xeea9f0;
 const GET_WORLD_POSITION: &str = "?GetWorldPosition@IControlObject@@QEBA?AVvec3@@XZ";
 
@@ -77,7 +78,7 @@ fn position(object: usize) -> [f32; 3] {
 }
 
 fn describe(object: usize) -> String {
-    format!("{object:#x} ({}) at {:.2?}, +0x100 {:.2?}", class_name(object).unwrap_or_default(), position(object), crate::arms::walk::vec3(object + VELOCITY))
+    format!("{object:#x} ({}) at {:.2?}, +0x100 {:.2?}", class_name(object).unwrap_or_default(), position(object), crate::providers::steps::vec3(object + VELOCITY))
 }
 
 fn begin(name: &'static str) {
@@ -112,7 +113,7 @@ unsafe extern "C" fn throw(controller: *mut c_void) {
 
 unsafe extern "C" fn drop_or_throw(player: *mut c_void, slot: u32, item: usize, flag: u8, target: *const f32, a: usize, b: usize, c: usize, d: usize) -> usize {
     let _flight = InFlight::enter();
-    let point = if target.is_null() { [f32::NAN; 3] } else { crate::arms::walk::vec3(target as usize) };
+    let point = if target.is_null() { [f32::NAN; 3] } else { crate::providers::steps::vec3(target as usize) };
     begin("drop");
     // SAFETY: forwards the game's own call.
     let object = unsafe { DROP_ORIGINAL.get()(player, slot, item, flag, target, a, b, c, d) };
@@ -139,10 +140,10 @@ unsafe extern "C" fn projectile_fire(projectile: *mut c_void) {
     let _flight = InFlight::enter();
     let at = projectile as usize;
     if let Some(draw) = LOOSING.lock().ok().and_then(|l| *l) {
-        let velocity = crate::arms::walk::vec3(at + PROJECTILE_VELOCITY);
+        let velocity = crate::providers::steps::vec3(at + PROJECTILE_VELOCITY);
         let speed = (velocity[0] * velocity[0] + velocity[1] * velocity[1] + velocity[2] * velocity[2]).sqrt();
         let n = ARROWS.fetch_add(1, Relaxed) + 1;
-        log!("probe_throw: arrow {n}: draw {draw:.2}, start {:.2?}, velocity {velocity:.2?} ({speed:.1} m/s)", crate::arms::walk::vec3(at + PROJECTILE_START));
+        log!("probe_throw: arrow {n}: draw {draw:.2}, start {:.2?}, velocity {velocity:.2?} ({speed:.1} m/s)", crate::providers::steps::vec3(at + PROJECTILE_START));
     }
     // SAFETY: forwards the game's own call.
     unsafe { PROJECTILE_FIRE_ORIGINAL.get()(projectile) }
@@ -154,7 +155,7 @@ unsafe extern "C" fn launch(object: usize, velocity: *const [f32; 3], target: *c
     let point = (!target.is_null()).then(|| mem::read::<[f32; 3]>(target as usize)).flatten();
     // SAFETY: forwards the game's own call.
     unsafe { LAUNCH_ORIGINAL.get()(object, velocity, target) };
-    let after = crate::arms::walk::vec3(object + VELOCITY);
+    let after = crate::providers::steps::vec3(object + VELOCITY);
     let speed = (after[0] * after[0] + after[1] * after[1] + after[2] * after[2]).sqrt();
     let n = LAUNCHES.fetch_add(1, Relaxed) + 1;
     log!("probe_throw: launch {n}: {} given {given:.2?}, target {point:.2?}; after {after:.2?} ({speed:.1} m/s)", describe(object));
@@ -180,14 +181,14 @@ pub fn install(hooks: &mut Hooks, gamedll: &Module, engine_module: &Module) -> R
     // Functions the throwing and bow features hook already are left to them.
     unsafe {
         hooks.inline_decoded(&DROP_ORIGINAL, "player drop or throw", gamedll.at(DROP_OR_THROW), drop_or_throw as DropFn)?;
-        if crate::arms::throwing::installed() {
+        if crate::providers::throws::installed() {
             log!("probe_throw: throwing by hand is on: its throw and spawn hooks are not doubled");
         } else {
             hooks.inline_decoded(&THROW_ORIGINAL, "throw controller throw", gamedll.at(THROW), throw as ThrowFn)?;
             hooks.inline_decoded(&SPAWN_ORIGINAL, "item object spawn", gamedll.at(SPAWN), spawn as SpawnFn)?;
             hooks.inline_decoded(&LAUNCH_ORIGINAL, "throwable launch", gamedll.at(LAUNCH), launch as LaunchFn)?;
         }
-        if crate::arms::projectile::installed() {
+        if crate::providers::projectile::installed() {
             log!("probe_throw: the bow by hand or shooting from the barrel is on: the loose and fire hooks are not doubled");
         } else {
             hooks.inline_decoded(&BOW_FIRE_ORIGINAL, "bow loose", gamedll.at(BOW_FIRE), bow_fire as ThrowFn)?;

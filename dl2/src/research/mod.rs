@@ -6,8 +6,8 @@
 //! at once when it is off. The options (`probe_*` and the traces that serve them) come from the
 //! same options file as the adapter's and are never shown by the launcher.
 //!
-//! The shared Chrome engine crate has probes of its own (`eng_chr::fpp`, here `probe_hands`;
-//! `probe_hud` and `probe_gui`, read by its HUD component).
+//! The shared Chrome engine crate has probes of its own (`eng_chr::providers::fpp`, here
+//! `probe_hands`; `probe_hud` and `probe_gui`, read by its HUD component).
 //!
 //! A probe that has found its answer is a candidate for deletion: its finding belongs in the
 //! research notes, its facts in `engine.rs`.
@@ -17,7 +17,8 @@ pub mod cameras;
 pub mod markers;
 pub mod melee;
 
-use crate::{Dl2, arms, hud};
+use crate::extras;
+use crate::{ARMS, Dl2};
 use monaka_producer::game::{Lack, Start};
 use monaka_producer::log;
 use monaka_producer::research::Research;
@@ -25,7 +26,8 @@ use monaka_producer::research::Research;
 /// What this run probes.
 #[derive(Clone, Debug, Default)]
 pub struct Options {
-    /// `probe_hands`: log the arms skeleton's elements and the weapon visuals (`eng_chr::fpp`).
+    /// `probe_hands`: log the arms skeleton's elements and the weapon visuals
+    /// (`eng_chr::providers::fpp`).
     pub hands: bool,
     /// `probe_markers`: log the HUD's world-marker projections and dump the UI layer ([`markers`]).
     pub markers: bool,
@@ -65,14 +67,14 @@ pub(crate) fn install_probes(start: &mut Start<'_, Dl2>) -> Result<(), Lack> {
     let probes = options();
     let Some(gamedll) = start.build.gamedll.as_ref() else { return Ok(()) };
     if probes.hands
-        && !start.is_on(&arms::ARMS)
-        && let Err(Lack::Missing(why)) = arms::install_hands(start, false)
+        && !start.is_on(&ARMS)
+        && let Err(Lack::Missing(why)) = eng_chr::feature::install_rig(start, false)
     {
         log!("arms probe off: {why}");
     }
-    if probes.markers && !start.is_on(&hud::MARKERS) {
+    if probes.markers && !start.is_on(&extras::markers::MARKERS) {
         // SAFETY: the game DLL's hash was checked.
-        if let Err(why) = unsafe { hud::markers::install(start.hooks, gamedll) } {
+        if let Err(why) = unsafe { extras::markers::install(start.hooks, gamedll) } {
             log!("markers probe off: {}", why.reason);
         }
     }

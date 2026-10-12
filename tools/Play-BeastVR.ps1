@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param([ValidateRange(0,8)][int]$Latency=2,[ValidateRange(0.04,0.09)][double]$EyeSeparation=0.064,[switch]$HeadsetResolution,[switch]$GameResolution,
     [ValidatePattern('^\d+x\d+$')][string]$EyeSize,
-    [switch]$FrameGen,[ValidateSet('Hand','Controller','Head','Mouse')][string]$Aim='Hand',[switch]$HeadAim,[switch]$NoHeadAim,[switch]$HandAim,[switch]$HandRig,[ValidateSet('left','right')][string]$AimHand='right',[switch]$FingerBinary,[switch]$FlatHud,
+    [ValidateSet('aer','afw')][string]$Stereo='aer',[ValidateSet('off','fsr')][string]$FrameGen='off',[ValidateSet('Hand','Controller','Head','Mouse')][string]$Aim='Hand',[switch]$HeadAim,[switch]$NoHeadAim,[switch]$HandAim,[switch]$HandRig,[ValidateSet('left','right')][string]$AimHand='right',[switch]$FingerBinary,[switch]$FlatHud,
     [ValidatePattern('^[a-z_0-9]+=[\w.,:\-]+$')][string[]]$Experiment=@())
 # Play Dying Light: The Beast in head-tracked stereo on the headset until the game exits, with the Rust viewer: this runs
 # monaka_play, which attaches the Beast producer (beast) to the running game, shows it with monaka_viewer, and
@@ -9,7 +9,8 @@ param([ValidateRange(0,8)][int]$Latency=2,[ValidateRange(0.04,0.09)][double]$Eye
 # Build first: cargo build --release -p monaka -p monaka_viewer -p monaka_beast
 # Requirements: SteamVR up with the headset connected; the game running on DirectX 12 with its own Frame Generation and
 # motion blur off.
-# Alternate-eye stereo: each rendered frame is one eye, so the headset gets half the game's frame rate per eye. The view
+# -Stereo aer (default, AER): each rendered frame is one eye, so the headset gets half the game's frame rate per eye.
+# -Stereo afw (AFW): each frame also warped into the other eye with its depth, so both eyes change every frame. The view
 # keeps the game's field of view; the head turns and moves it on top of the mouse/stick look.
 # -EyeSeparation is used when the headset reports no IPD.
 # The game renders at the headset's eye size (windowed) while VR runs (default; -GameResolution keeps the game's own size), so no work goes into pixels the headset
@@ -27,8 +28,9 @@ param([ValidateRange(0,8)][int]$Latency=2,[ValidateRange(0.04,0.09)][double]$Eye
 #   Mouse       the mouse and stick aim and turn as on a monitor; the head only moves the view.
 # The older switches still work: -NoHeadAim is -Aim Mouse, -HeadAim -Aim Head, -HandAim -Aim Controller (-HandRig is the
 # default anyway).
-# -FrameGen: per-eye FSR frame generation, each eye's frame of the other eye's moment generated, so both eyes change
-# every frame (keep the game's own frame generation and motion blur off).
+# -FrameGen fsr: FSR frame generation (default off). With AER each eye's frame of the other eye's moment is generated,
+# so both eyes change every frame; with AFW in-between pairs go out between the warped ones (keep the game's own frame
+# generation and motion blur off).
 # -Experiment passes extra producer options (key=value; see beast\src\lib.rs).
 # The session itself is monaka_launch (crates\launch): this script only turns its parameters into monaka_play options,
 # passing every one so its defaults stay these (monaka_play list shows them).
@@ -44,5 +46,5 @@ $render=if ($HeadsetResolution -or -not $GameResolution) { 'headset' } else { 'g
 if ($NoHeadAim) { $Aim='Mouse' } elseif ($HeadAim) { $Aim='Head' } elseif ($HandAim) { $Aim='Controller' } elseif ($HandRig) { $Aim='Hand' }
 $aim=@{ Hand='hand_rig'; Controller='controller'; Head='head'; Mouse='off' }[$Aim]
 & $play beast "render_size=$render" "eye_size=$EyeSize" "latency=$Latency" "eye_separation=$($EyeSeparation.ToString($invariant))" `
-    "aim=$aim" "aim_hand=$AimHand" "world_hud=$(if ($FlatHud) { 'off' } else { 'on' })" "finger_binary=$(if ($FingerBinary) { 'on' } else { 'off' })" "mode=$(if ($FrameGen) { 'framegen' } else { 'standard' })" "extra=$($Experiment -join ' ')"
+    "aim=$aim" "aim_hand=$AimHand" "world_hud=$(if ($FlatHud) { 'off' } else { 'on' })" "finger_binary=$(if ($FingerBinary) { 'on' } else { 'off' })" "stereo=$Stereo" "framegen=$FrameGen" "extra=$($Experiment -join ' ')"
 exit $LASTEXITCODE

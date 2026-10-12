@@ -106,7 +106,7 @@ pub fn bound(count: u32, views: *const *mut core::ffi::c_void, depth: bool) {
         }
     }
     drop(probe);
-    if let Some(motion) = crate::stereo::upscale::motion_target(count, views, depth) {
+    if let Some(motion) = crate::providers::fsr::motion_target(count, views, depth) {
         let mut gbuffer = GBUFFER.lock().unwrap_or_else(|e| e.into_inner());
         if gbuffer.0.as_ref().is_none_or(|known| known.as_raw() != motion.as_raw()) {
             gbuffer.0 = Some(motion);

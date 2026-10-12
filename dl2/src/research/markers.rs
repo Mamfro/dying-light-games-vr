@@ -1,4 +1,4 @@
-//! The HUD world markers' probe (`crate::hud::markers`).
+//! The HUD world markers' probe (`crate::extras::markers`).
 //!
 //! `probe_markers`: logs the HUD's projector calls (world point, the game's result, the camera it
 //! projected with) against the frame's camera from the DLSS constants, and dumps the UI layer
@@ -6,7 +6,7 @@
 //! big markers are drawn.
 
 use super::options;
-use crate::hud::markers::{Call, Marker};
+use crate::extras::markers::{Call, Marker};
 use monaka_core::bmp;
 use monaka_hook::mem;
 use monaka_producer::log;
@@ -90,13 +90,13 @@ pub fn ui(queue: &ID3D12CommandQueue, ui: &ID3D12Resource) {
     if !options().markers {
         return;
     }
-    let present = crate::stereo::PRESENTS.load(Relaxed);
+    let present = monaka_stereo::same_frame::PAIRS.presents();
     let done = DUMPS.load(Relaxed) as usize;
     if done >= DUMP_AT.len() || present < DUMP_AT[done] {
         return;
     }
     DUMPS.fetch_add(1, Relaxed);
-    let calls = crate::hud::markers::recent();
+    let calls = crate::extras::markers::recent();
     match monaka_channel::d3d12::read_texture(queue, ui, D3D12_RESOURCE_STATE_COMMON) {
         Ok((w, _, row_bytes, _)) if row_bytes != w as usize * 4 => log!("UI dump: {row_bytes} bytes per row of {w}, not 8-bit RGBA"),
         Ok((w, h, _, pixels)) => {

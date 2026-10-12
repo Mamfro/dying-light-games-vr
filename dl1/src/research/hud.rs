@@ -1,4 +1,4 @@
-//! The HUD's probes, at the HUD draws (`crate::hud::panels`): `probe_hud` logs one frame's HUD draws in
+//! The HUD's probes, at the HUD draws (`crate::providers::hud_pieces`): `probe_hud` logs one frame's HUD draws in
 //! order (vertices, viewport, scissor, blending, pixel shader, the textures read), how one draw
 //! gets its geometry, and dumps the panels; `hud_hide=a-b` leaves the frame's HUD draws `a` to
 //! `b` undrawn.
@@ -27,9 +27,13 @@ pub fn draw(context: &ID3D11DeviceContext, frame: u64, index: u32, vertices: u32
 }
 
 /// A HUD draw about to run into a panel: draw `index` of frame `frame`.
-pub fn panel_draw(context: &ID3D11DeviceContext, device: &ID3D11Device, frame: u64, index: u32) {
-    if options().hud && frame == PROBE_VERTICES_FRAME {
-        probe_vertices(context, device, index);
+pub fn panel_draw(context: &ID3D11DeviceContext, frame: u64, index: u32) {
+    // SAFETY: a COM call on the game's live context.
+    if options().hud
+        && frame == PROBE_VERTICES_FRAME
+        && let Ok(device) = unsafe { context.GetDevice() }
+    {
+        probe_vertices(context, &device, index);
     }
 }
 
@@ -64,7 +68,7 @@ fn dump_panel(context: &ID3D11DeviceContext, device: &ID3D11Device, out: &ID3D11
 /// arguments, the input assembler's buffers, the first vertices it uses (as floats) and the start
 /// of the vertex shader's first constant buffer. Reads the buffers back at once.
 fn probe_vertices(ctx: &ID3D11DeviceContext, device: &ID3D11Device, index: u32) {
-    let args = crate::hud::draws::draw_args();
+    let args = crate::providers::hud_draws::draw_args();
     let mut vbs = [None];
     let (mut strides, mut offsets) = ([0u32], [0u32]);
     let mut ib = None;

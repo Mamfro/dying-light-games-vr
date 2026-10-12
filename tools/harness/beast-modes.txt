@@ -1,0 +1,42 @@
+# Dying Light: The Beast: one motion for comparing the stereo methods and frame generation (stereo=aer
+# or afw, each with framegen=off or fsr) and the depth and foveation switches. In gameplay, unpaused, the game window in front,
+# nothing touched. The head holds, sweeps 30 degrees left and back, then looks up; frames are saved
+# held, during each sweep and after. The producer log's 2-second report lines give the rates.
+0     head 0 0
+0     pad none 0 0
+0     stick 0 0 0 0
+0     hand right 0.2 -0.3 -0.35 0 0
+0     hand left -0.2 -0.3 -0.35 0 0
+500   focus DyingLightGame_TheBeast_x64_rwdi.exe
+8000  save held
+9000  head 3 0
+9100  head 6 0
+9200  head 9 0
+9300  head 12 0
+9400  head 15 0
+9450  save sweep-left
+9500  head 18 0
+9600  head 21 0
+9700  head 24 0
+9800  head 27 0
+9900  head 30 0
+11000 save left
+12000 head 27 0
+12100 head 24 0
+12200 head 21 0
+12300 head 18 0
+12400 head 15 0
+12450 save sweep-back
+12500 head 12 0
+12600 head 9 0
+12700 head 6 0
+12800 head 3 0
+12900 head 0 0
+14000 save back
+15000 head 0 5
+15100 head 0 10
+15200 head 0 15
+16000 save up
+17000 head 0 0
+24000 save settled
+25000 end

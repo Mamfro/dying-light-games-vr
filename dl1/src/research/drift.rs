@@ -1,7 +1,7 @@
 //! How far the head is horizontally from the character: the view is the game camera plus the
 //! tracked head's position, so a step the character does not follow puts the eyes (and the arms,
 //! which follow the controllers) away from the body enemies reach for. With room-scale following
-//! ([`crate::arms::roomscale`]) this is the gap it has not closed yet. Counted per eye view and logged
+//! ([`crate::cooking::room_scale_rules`]) this is the gap it has not closed yet. Counted per eye view and logged
 //! now and then.
 
 use monaka_producer::log;

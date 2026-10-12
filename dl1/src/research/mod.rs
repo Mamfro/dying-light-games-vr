@@ -1,7 +1,7 @@
 //! Research: the probes that find out how Dying Light 1 works, kept apart from the adapter.
 //!
-//! The adapter calls in here at the moments a probe watches (`research::look::seen(..)` in the
-//! camera hook, `research::hud::draw(..)` at a HUD draw, ...), one line each, and never says
+//! The adapter calls in here at the moments a probe watches (`research::look::steered(..)` as head
+//! aim steers, `research::hud::draw(..)` at a HUD draw, ...), one line each, and never says
 //! which probes listen: each checks its own option ([`options`]) and returns at once when it is
 //! off. The options (`probe_*` and the experiments that serve them) come from the same options
 //! file as the adapter's and are never shown by the launcher.
@@ -21,11 +21,9 @@ pub mod layer;
 pub mod look;
 pub mod melee;
 pub mod pad;
-pub mod resize;
 pub mod sweep;
 pub mod targets;
 pub mod throw;
-pub mod video;
 pub mod view;
 pub mod walk;
 pub mod widget;
@@ -42,8 +40,7 @@ use std::sync::OnceLock;
 /// What this run probes.
 #[derive(Clone, Debug, Default)]
 pub struct Options {
-    /// `probe_look`: the player camera's call sites, the classes around it and the fields holding
-    /// its pitch (look up and down with the mouse before attaching).
+    /// `probe_look` (with head aim): how head aim steers the character.
     pub look: bool,
     /// `probe_depth`: the depth buffers bound before the scene reaches the back buffer.
     pub depth: bool,
@@ -52,8 +49,6 @@ pub struct Options {
     pub backbuffer: bool,
     /// `probe_targets`: every render target drawn into each frame, in order (motion-vector hunting).
     pub targets: bool,
-    /// `probe_video`: where the game keeps the current resolution.
-    pub video: bool,
     /// `probe_frames`: the camera each view setup sees, for 1500 calls (flicker hunting).
     pub frames: bool,
     /// `probe_rig`: for 600 eye frames, where the hand rig's palm sits against each eye and how far
@@ -66,13 +61,11 @@ pub struct Options {
     pub hud: bool,
     /// `hud_hide=a-b`: the frame's HUD draws `a` to `b` (counted from 0) left undrawn.
     pub hud_hide: Option<(u32, u32)>,
-    /// `probe_widget=<name>` (with the in-world HUD): the named HUD widget's first drawn part at
+    /// `probe_widget=<name>` (with the in-world HUD): the named HUD panel widget's first drawn part at
     /// every snapshot, with the eye being rendered.
     pub widget: Option<String>,
     /// `probe_pad`: what the engine asks SDL about game controllers.
     pub pad: bool,
-    /// `probe_resize`: each call of the levels' resolution-change handler, with its callers.
-    pub resize: bool,
     /// `probe_layer` (with FSR): every few seconds the back buffer, the upscaled eye and the HUD
     /// layer as PNG, to see what the game drew and where the HUD went.
     pub layer: bool,
@@ -111,7 +104,6 @@ impl Options {
             depth: options.switch("probe_depth", false),
             backbuffer: options.switch("probe_backbuffer", false),
             targets: options.switch("probe_targets", false),
-            video: options.switch("probe_video", false),
             frames: options.switch("probe_frames", false),
             rig: options.switch("probe_rig", false),
             cutscene: options.switch("probe_cutscene", false),
@@ -122,7 +114,6 @@ impl Options {
             }),
             widget: options.text("probe_widget").map(str::to_owned),
             pad: options.switch("probe_pad", false),
-            resize: options.switch("probe_resize", false),
             layer: options.switch("probe_layer", false),
 
             melee: options.switch("probe_melee", false),
@@ -175,6 +166,8 @@ pub fn configure(read: &monaka_core::options::Options, dir: &Path) {
     if let Some(items) = &options().give {
         give::configure(items);
     }
+    // Head aim's updates, for `probe_look`, `probe_cutscene` and `probe_frames`.
+    monaka_arms::owned_facing::observe(monaka_arms::owned_facing::Observer { traced: look::traced, steered: look::steered });
 }
 
 /// The gameplay probes' hooks.
@@ -186,39 +179,27 @@ fn install_gameplay(hooks: &mut Hooks, engine_module: &Module, gamedll: &Module)
     if o.sweep {
         sweep::install(hooks, engine_module, gamedll)?;
     }
-    if o.resize {
-        resize::install(hooks, gamedll)?;
-    }
     if o.throw {
         throw::install(hooks, gamedll, engine_module)?;
     }
     if o.bindings {
         bindings::install(hooks, gamedll)?;
     }
-    // The game-frame callback is one; `probe_video` takes it when on.
-    if give::wanted() && !o.video {
+    if give::wanted() {
         // SAFETY: the game DLL is the build `engine.rs` describes (hash checked); the export's type
         // is `float IGame::GetGameTimeDelta() const`.
-        unsafe { eng_chr::game::hook(hooks, gamedll)? };
-        eng_chr::game::observe(give::frame);
+        unsafe { eng_chr::providers::game::hook(hooks, gamedll)? };
+        eng_chr::providers::game::observe(give::frame);
     }
     Ok(())
 }
 
-/// The probes' own hooks, beside the adapter's; `size` is the back buffer's (none in a flat run).
+/// The probes' own hooks, beside the adapter's.
 ///
 /// # Safety
 /// The engine and game DLL are the builds `engine.rs` describes (hash checked).
-pub unsafe fn install(hooks: &mut Hooks, engine_module: &Module, gamedll: &Module, size: Option<(u32, u32)>) -> Result<(), Rejection> {
+pub unsafe fn install(hooks: &mut Hooks, engine_module: &Module, gamedll: &Module) -> Result<(), Rejection> {
     let o = options();
-    if o.video
-        && let Some((width, height)) = size
-    {
-        video::set_size(width, height);
-        // SAFETY: the caller's guarantee; the export's type is `float IGame::GetGameTimeDelta() const`.
-        unsafe { eng_chr::game::hook(hooks, gamedll)? };
-        eng_chr::game::observe(video::probe_frame);
-    }
     install_gameplay(hooks, engine_module, gamedll)?;
     if o.flat {
         return Ok(());
@@ -233,28 +214,21 @@ pub unsafe fn install(hooks: &mut Hooks, engine_module: &Module, gamedll: &Modul
     Ok(())
 }
 
-/// The probes' hooks: the look and arms probes take their component's hook when it is off.
+/// The probes' hooks: the arms probes take their component's hook when it is off.
 pub(crate) fn install_probes(start: &mut Start<'_, Dl1>) -> Result<(), Lack> {
     let probes = options();
-    let Facts { engine: engine_module, renderer, gamedll } = start.build;
-    if !probes.flat {
-        if probes.look && !start.is_on(&crate::look::LOOK) {
-            crate::look::hook_from_forward(start.hooks, engine_module)?;
-        }
-        if probes.arms() && !start.is_on(&crate::arms::ARMS) {
-            crate::arms::hook_arms(start.hooks, engine_module, gamedll)?;
-        }
+    let Facts { engine: engine_module, gamedll, .. } = start.build;
+    if !probes.flat && probes.arms() && !start.is_on(&crate::ARMS) {
+        crate::providers::skeleton::hook_arms(start.hooks, engine_module, gamedll)?;
     }
-    let size = if probes.flat { None } else { crate::swapchain_parts(renderer).ok().map(|(_, _, _, size)| size) };
     // SAFETY: the engine and the game DLL are the builds `engine.rs` describes (hashes checked).
-    unsafe { install(start.hooks, engine_module, gamedll, size)? };
+    unsafe { install(start.hooks, engine_module, gamedll)? };
     Ok(())
 }
 
 /// The present thread retires the eye: what the rendering probes gathered.
 pub fn finish() {
     drift::report();
-    look::report();
     depth::report();
     targets::report();
     backbuffer::report();
@@ -271,9 +245,6 @@ pub fn report() {
     melee::report();
     sweep::report();
     walk::report();
-    if options().resize {
-        resize::report();
-    }
     if options().bindings {
         bindings::report();
     }

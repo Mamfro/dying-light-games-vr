@@ -104,7 +104,7 @@ pub fn frame(_game: usize) {
 
 fn give() -> Result<(), String> {
     let items = ITEMS.get().ok_or("no items")?;
-    let gamedll = Module::find(crate::engine::GAMEDLL).ok_or("no game DLL")?;
+    let gamedll = Module::find(crate::providers::engine::GAMEDLL).ok_or("no game DLL")?;
     let game = mem::read::<usize>(gamedll.at(GAME)).filter(|&g| g != 0).ok_or("no game object")?;
     let session = mem::read::<usize>(game + SESSION_IN_GAME).filter(|&s| s != 0).ok_or("no session")?;
     if mem::read::<usize>(gamedll.at(PLAYER)).is_none_or(|p| p == 0) {

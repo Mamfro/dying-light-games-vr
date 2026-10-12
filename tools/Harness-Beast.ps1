@@ -6,7 +6,7 @@ param([Parameter(Mandatory)][string]$Script,[ValidatePattern('^[a-z_0-9]+=[\w.,:
 # and gamepad, saving the frames the script asks for (PNG in the run folder's frames). The game pauses without focus:
 # start the script with `0 focus DyingLightGame_TheBeast_x64_rwdi.exe`.
 # -Experiment adds or overrides producer options (key=value: beast\src\manifest.rs and config.rs), for example
-# probe_hands=1 or mode=framegen.
+# probe_hands=1, stereo=afw or framegen=fsr.
 # Build first: cargo build --release -p monaka -p monaka_beast; cargo build --release -p monaka_channel --example harness
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'Check.ps1')

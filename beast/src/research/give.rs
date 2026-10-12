@@ -72,11 +72,11 @@ pub fn frame(_game: usize) {
 
 fn give() -> Result<(), &'static str> {
     let items = ITEMS.get().ok_or("no items")?;
-    let gamedll = Module::find(crate::engine::GAMEDLL).ok_or("no game DLL")?;
+    let gamedll = Module::find(crate::providers::engine::GAMEDLL).ok_or("no game DLL")?;
     let game = mem::read::<usize>(gamedll.at(GAME)).filter(|&g| g != 0).ok_or("no game object")?;
     // SAFETY: the game's own local-player getter on its game object, on the game thread.
     let player = unsafe { std::mem::transmute::<usize, PlayerFn>(gamedll.at(LOCAL_PLAYER))(game) };
-    if player == 0 || mem::read::<usize>(player) != Some(gamedll.at(crate::engine::PLAYER_VTABLE)) {
+    if player == 0 || mem::read::<usize>(player) != Some(gamedll.at(crate::providers::engine::PLAYER_VTABLE)) {
         return Err("no player");
     }
     let first = mem::read::<usize>(player + GIVE_FIRST).ok_or("no player")?;

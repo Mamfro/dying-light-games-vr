@@ -477,7 +477,7 @@ pub fn report_frames() {
 /// `camera_refs=1`: from inside the DLSS command's execute (render thread, frame data current),
 /// every pointer to a camera in the frame render data and in the render context, labelled by the
 /// eye of its position: this frame's, the other (the previous frame's), or neither.
-static DLSS_EXECUTE: Original<crate::engine::CommandExecuteFn> = Original::new();
+static DLSS_EXECUTE: Original<crate::providers::engine::CommandExecuteFn> = Original::new();
 static REFS_LEFT: AtomicU32 = AtomicU32::new(0);
 static REFS_RENDERER: AtomicUsize = AtomicUsize::new(0);
 const REFS_FRAMES: u32 = 4;
@@ -487,10 +487,10 @@ const REFS_FRAMES: u32 = 4;
 /// # Safety
 /// `renderer` is the fingerprinted renderer.
 pub unsafe fn install_refs(hooks: &mut Hooks, renderer: &Module) -> Result<(), Rejection> {
-    let (rva, prologue) = crate::engine::DLSS_COMMAND_EXECUTE;
+    let (rva, prologue) = crate::providers::engine::DLSS_COMMAND_EXECUTE;
     // SAFETY: the DLSS command's execute in the fingerprinted renderer (prologue checked byte for
     // byte), of type CommandExecuteFn.
-    unsafe { hooks.inline(&DLSS_EXECUTE, "CmdPPFX_DLSS execute", renderer.at(rva), prologue, dlss_execute as crate::engine::CommandExecuteFn)? };
+    unsafe { hooks.inline(&DLSS_EXECUTE, "CmdPPFX_DLSS execute", renderer.at(rva), prologue, dlss_execute as crate::providers::engine::CommandExecuteFn)? };
     arm_refs(renderer.base());
     Ok(())
 }
@@ -522,9 +522,9 @@ fn camera_eye(object: usize, eyes: &[[f32; 3]; 2]) -> Option<(String, Option<usi
 
 fn camera_refs(context: usize) {
     let eyes = eyes();
-    let rendering = crate::stereo::eyes::rendering_eye();
-    let renderer = mem::read::<usize>(REFS_RENDERER.load(Relaxed) + crate::engine::RENDERER_GLOBAL).unwrap_or(0);
-    let frame = mem::read::<usize>(renderer + crate::engine::RENDERER_FRAME_DATA).unwrap_or(0);
+    let rendering = crate::providers::eye_site::rendering_eye();
+    let renderer = mem::read::<usize>(REFS_RENDERER.load(Relaxed) + crate::providers::engine::RENDERER_GLOBAL).unwrap_or(0);
+    let frame = mem::read::<usize>(renderer + crate::providers::engine::RENDERER_FRAME_DATA).unwrap_or(0);
     let main_view = mem::read::<usize>(frame + 0xf0).and_then(|c| camera_eye(c, &eyes));
     log!("camera refs: rendering eye {rendering:?}, frame data {frame:#x}, main view {main_view:?}, context {context:#x}");
     let label = |eye: Option<usize>| match (eye, main_view.as_ref().and_then(|m| m.1)) {

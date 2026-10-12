@@ -1,12 +1,12 @@
-//! `probe=1`: observing probe of the renderer's camera (`crate::stereo::cameras`): which cameras are set or
-//! rebuilt, from where, on which thread and how often, to find the player's camera and the one
-//! place per frame where an eye camera can be written. Changes nothing: every detour counts its call
-//! and runs the original with the game's own arguments (`CCamera::SetView(mtx34)` is hooked for
-//! this probe alone). Camera values are read only by the reporting thread, with fault-free reads,
-//! never inside a game call.
+//! `probe=1`: observing probe of the renderer's camera (`crate::providers::cameras`): which cameras
+//! are set or rebuilt, from where, on which thread and how often, to find the player's camera and
+//! the one place per frame where an eye camera can be written. Changes nothing: every detour counts
+//! its call and runs the original with the game's own arguments (`CCamera::SetView(mtx34)` is
+//! hooked for this probe alone). Camera values are read only by the reporting thread, with
+//! fault-free reads, never inside a game call.
 
 use super::options;
-use crate::engine::{self, SetMatrixFn};
+use crate::providers::engine::{self, SetMatrixFn};
 use monaka_hook::module::Module;
 use monaka_hook::{Hooks, InFlight, Original, mem, probe};
 use monaka_producer::{Rejection, log};
@@ -20,7 +20,7 @@ static SET_MATRIX_ORIGINAL: Original<SetMatrixFn> = Original::new();
 enum Kind {
     SetMatrix = 1,
     SetVectors = 2,
-    ComputeFrustum = 3,
+    Frustum = 3,
 }
 
 impl Kind {
@@ -28,7 +28,7 @@ impl Kind {
         match value {
             1 => Some(Self::SetMatrix),
             2 => Some(Self::SetVectors),
-            3 => Some(Self::ComputeFrustum),
+            3 => Some(Self::Frustum),
             _ => None,
         }
     }
@@ -37,7 +37,7 @@ impl Kind {
         match self {
             Self::SetMatrix => "SetView(mtx)",
             Self::SetVectors => "SetView(vec)",
-            Self::ComputeFrustum => "Frustum",
+            Self::Frustum => "Frustum",
         }
     }
 }
@@ -129,7 +129,7 @@ pub fn set_vectors(camera: usize, caller: usize) {
 
 /// `CCamera::ComputeFrustumMatrix` on `camera`, called from `caller`.
 pub fn frustum(camera: usize, caller: usize) {
-    note(Kind::ComputeFrustum, camera, caller);
+    note(Kind::Frustum, camera, caller);
 }
 
 monaka_hook::caller_shim!(set_matrix_stub => set_matrix);
@@ -223,6 +223,6 @@ mod tests {
     #[test]
     fn keys_are_never_empty_and_tell_kinds_apart() {
         assert_ne!(key(Kind::SetMatrix, 0, 0), 0);
-        assert_ne!(key(Kind::SetMatrix, 0x1000, 0x2000), key(Kind::ComputeFrustum, 0x1000, 0x2000));
+        assert_ne!(key(Kind::SetMatrix, 0x1000, 0x2000), key(Kind::Frustum, 0x1000, 0x2000));
     }
 }

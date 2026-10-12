@@ -5,7 +5,7 @@
 //! from the right hand.
 
 use monaka_core::math::length;
-use crate::arms::hand_world;
+use crate::providers::hand_world;
 use monaka_arms::Skeleton;
 use monaka_core::camera::{Mat34, compose, rigid_inverse};
 use monaka_producer::log;
@@ -41,7 +41,7 @@ pub fn after(vis: usize) {
     if !super::options().bow {
         return;
     }
-    let Some(model) = crate::arms::hands::held_bow(vis) else { return };
+    let Some(model) = crate::providers::skeleton::held_bow(vis) else { return };
     let Some(root) = model.world(0) else { return };
     let to_root = rigid_inverse(&root);
     let count = model.count();

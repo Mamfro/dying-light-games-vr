@@ -1,11 +1,11 @@
-//! `probe_widget=<name>` (with the in-world HUD): the named widget of the game's UI tree
-//! (`crate::hud::ui`), its first part (kind and corner, layout pixels) at every snapshot, with the eye
+//! `probe_widget=<name>` (with the in-world HUD): the named widget of one of the HUD panels
+//! (`crate::providers::hud_widgets`), its first part (kind and corner, layout pixels) at every snapshot, with the eye
 //! being chosen, the present, and which camera the player camera held as the game laid it out.
 //! Kept in memory and logged in one go once [`WATCHED_LINES`] are in: logging a line at a time
 //! stalls the game thread enough that the eyes get each other's images.
 
 use super::options;
-use crate::hud::ui::Leaf;
+use crate::providers::hud_widgets::Leaf;
 use monaka_producer::log;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering::*};
@@ -25,15 +25,15 @@ pub fn note(name: &str, leaves: &[Leaf]) {
         return;
     }
     let Some(first) = leaves.first() else { return };
-    let camera = crate::stereo::eyes::live_camera_look().map_or("none".to_owned(), |(yaw, pitch, turned)| format!("{yaw:.2} {pitch:.2}{}", if turned { " view" } else { "" }));
+    let camera = crate::providers::eye_site::live_camera_look().map_or("none".to_owned(), |(yaw, pitch, turned)| format!("{yaw:.2} {pitch:.2}{}", if turned { " view" } else { "" }));
     let line = format!(
         "{} eye {} present {:?} camera {camera}: {}({:.1} {:.1})",
         monaka_channel::tick(),
-        crate::stereo::eyes::eye(),
-        crate::stereo::eyes::drawing_present(),
+        crate::providers::eye_site::eye(),
+        crate::providers::eye_site::drawing_present(),
         if first.text { "text" } else { "image" },
-        first.at[0],
-        first.at[1]
+        first.rect[0],
+        first.rect[1]
     );
     let full = WATCHED.lock().is_ok_and(|mut lines| {
         lines.push(line);

@@ -13,8 +13,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::*};
 use windows::Win32::System::Diagnostics::Debug::RtlCaptureStackBackTrace;
 
 const TAKE_DAMAGE: &str = "?TakeDamage@IControlObject@@UEAAXAEBUSDamageInfo@@@Z";
-/// How much of the damage info is logged (its full size is not known).
-const DUMPED: usize = 0x180;
+/// How much of the damage info is logged: the game DLL's own damage info (`SDamageInfoDi`, the
+/// engine's `SDamageInfo` of 0x48 bytes extended), as its clone allocates it.
+const DUMPED: usize = 0xa8;
 /// Hits logged in full; later ones get one line.
 const FULL: u64 = 40;
 

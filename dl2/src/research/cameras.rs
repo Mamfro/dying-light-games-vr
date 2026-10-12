@@ -1,4 +1,5 @@
-//! `probe_cameras`: what drives the frame's camera (`crate::look`, `crate::stereo::scene`).
+//! `probe_cameras`: what drives the frame's camera (`crate::providers::look_fields`,
+//! `crate::cooking::scene`).
 //!
 //! Two signs of a cutscene as engine state, for finding one: another caller than the player camera
 //! update setting the player camera, and a frame rendered from a camera the player camera update
@@ -34,7 +35,7 @@ pub fn player_camera(matrix: &[f32; 12]) {
 
 /// `FromForwardUpPos` on `camera` called from `site`, not the player camera update.
 pub fn other_caller(camera: usize, site: usize) {
-    if !options().cameras || camera == 0 || crate::look::AIM.player_camera(camera).is_none() {
+    if !options().cameras || camera == 0 || crate::providers::look_fields::AIM.player_camera(camera).is_none() {
         return;
     }
     let Ok(mut callers) = OTHER_CALLERS.lock() else { return };

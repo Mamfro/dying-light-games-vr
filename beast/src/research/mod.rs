@@ -15,12 +15,13 @@ pub mod history;
 pub mod motion;
 pub mod streamline;
 
-use crate::{Beast, arms, look, stereo_on};
+use crate::{ARMS, Beast, LOOK, stereo_on};
 use monaka_hook::Hooks;
 use monaka_producer::game::{Lack, Start};
 use monaka_hook::module::Module;
 use monaka_producer::research::Research;
 use monaka_producer::{Rejection, log};
+use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::time::Duration;
 
 /// What this run probes.
@@ -28,7 +29,7 @@ use std::time::Duration;
 pub struct Options {
     /// `probe=1`: who sets and rebuilds which renderer camera, every two seconds (`cameras`).
     pub cameras: bool,
-    /// `probe_hands=1` (with stereo) logs the arms skeleton ([`eng_chr::rig`]).
+    /// `probe_hands=1` (with stereo) logs the arms skeleton ([`eng_chr::providers::rig`]).
     pub hands: bool,
     /// `probe_streamline=1` (D3D12): the DLSS inputs (tags and camera constants) of the first
     /// frames (`streamline`; read-only).
@@ -76,11 +77,11 @@ impl Options {
 pub(crate) fn install_probes(start: &mut Start<'_, Beast>) -> Result<(), Lack> {
     let stereo = stereo_on(start.options);
     if options().hands
-        && start.is_on(&look::LOOK)
-        && !start.is_on(&arms::ARMS)
-        && let Err(why) = arms::hands::configure(&start.build.engine, arms::hands_settings(start, false))
+        && start.is_on(&LOOK)
+        && !start.is_on(&ARMS)
+        && let Err(Lack::Missing(why)) = eng_chr::feature::install_rig(start, false)
     {
-        log!("arms probe off: {}", why.reason);
+        log!("arms probe off: {why}");
     }
     // SAFETY: the renderer's and the game DLL's hashes were checked.
     unsafe {
@@ -129,8 +130,8 @@ pub unsafe fn install_game(hooks: &mut Hooks, gamedll: Option<&Module>) -> Resul
             return Ok(());
         };
         // SAFETY: the caller's guarantee; the import's type is `float IGame::GetGameTimeDelta() const`.
-        unsafe { eng_chr::game::hook(hooks, gamedll)? };
-        eng_chr::game::observe(give::frame);
+        unsafe { eng_chr::providers::game::hook(hooks, gamedll)? };
+        eng_chr::providers::game::observe(give::frame);
     }
     Ok(())
 }
@@ -140,10 +141,14 @@ pub fn start(stereo: bool, renderer_base: usize) {
     history::start(stereo, renderer_base);
 }
 
-/// The reporter thread's tick (`elapsed` since it started): the scans once due, and what the
-/// probes have gathered once they have it.
-pub fn poll(elapsed: Duration) {
-    history::scans(elapsed);
+/// How long the probes have polled, in milliseconds.
+static POLLED: AtomicU64 = AtomicU64::new(0);
+
+/// The timer's tick (`seconds` since the last): the scans once due, and what the probes have
+/// gathered once they have it.
+pub fn poll(seconds: f64) {
+    let polled = POLLED.fetch_add((seconds * 1000.0) as u64, Relaxed) + (seconds * 1000.0) as u64;
+    history::scans(Duration::from_millis(polled));
     history::report_if_done();
     history::report_dump();
     history::report_vp();

@@ -4,10 +4,33 @@
 use monaka_arms::aim::AimSettings;
 use monaka_arms::{melee, roomscale};
 use monaka_core::camera::Frustum;
-use monaka_core::manifest::Manifest;
+use monaka_core::manifest::{Kind, Manifest, Opt, Shown, SteamFiles, choice, opt};
 use monaka_core::options::{Options, Shared};
+use monaka_core::rendering::{self, STEREO_OFF, StereoMethod};
 use monaka_core::protocol::HeadPose;
 use std::ops::Deref;
+
+/// FSR upscaling ([`Config::fsr`]): each eye rendered smaller, then upscaled.
+pub const FSR: Opt = opt("fsr", "FSR upscaling", "Renders each eye smaller, then upscales it (needs the headset resolution and Dying Light 2's FidelityFX DLLs).", Kind::Switch { default: false })
+    .on(Shown::Rendering)
+    // Upscales to the eye size, with the FidelityFX runtime Dying Light 2 installs (Monaka ships none).
+    .needs_eye_size()
+    .needs_steam_files(SteamFiles {
+        game_folder: "Dying Light 2",
+        path: r"ph\work\bin\x64",
+        file: "amd_fidelityfx_upscaler_dx12.dll",
+        line: "fsr_dlls",
+        missing: "FSR is off: it needs AMD's FidelityFX DLLs, which come with Dying Light 2 (not installed).",
+    });
+/// The stereo methods DL1 offers: AER (Alt-eye) by default, AFW (Frame-warp: each frame warped into
+/// the other eye with its depth, on D3D11).
+pub const STEREO: Opt = rendering::stereo_method(&[StereoMethod::Aer.offer(), StereoMethod::Afw.offer(), STEREO_OFF], StereoMethod::Aer);
+
+pub const FSR_SCALE: Opt = opt("fsr_scale", "FSR quality", "How much smaller each eye renders.", choice(&[("1.5", "Quality"), ("1.7", "Balanced"), ("2", "Performance"), ("3", "Ultra performance")], "1.5"))
+    .on(Shown::Rendering)
+    .only_when("fsr", "1");
+pub const FSR_SHARPNESS: Opt =
+    opt("fsr_sharpness", "FSR sharpness", "0 turns sharpening off.", Kind::Number { min: 0.0, max: 1.0, step: 0.05, default: 0.3 }).on(Shown::Rendering).only_when("fsr", "1");
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Config {
@@ -36,9 +59,9 @@ pub struct Config {
     /// that, so screen-space effects that assume a centred projection see one (DL2: fixed shadow
     /// blocks). Costs about 20% more pixels.
     pub symmetric_projection: bool,
-    /// Experiment: alternate-eye rendering with depth (`monaka_stereo::hybrid`): a pair every frame,
-    /// the other eye reprojected from the real one, its gaps filled from that eye's last real frame.
-    pub hybrid: bool,
+    /// AFW (`stereo=afw`, `monaka_stereo::afw11`): a pair every frame, the other eye reprojected
+    /// from the real one, its gaps filled from that eye's last real frame.
+    pub afw: bool,
     /// With the in-world HUD, its pieces at full opacity whatever the game fades them to (health at
     /// full health, the quest list after a while): `world_hud_opaque=0` lets the game fade them.
     pub world_hud_opaque: bool,
@@ -52,9 +75,9 @@ pub struct Config {
     /// Diagnostic: the real pad's input is dropped from the reads the VR pad merges into.
     pub pad_mask_real: bool,
     /// Room-scale following (with the hand rig; `monaka_arms::roomscale` on
-    /// [`crate::arms::roomscale`]).
+    /// [`crate::cooking::room_scale_rules`]).
     pub room_scale: Option<roomscale::Settings>,
-    /// Physical melee (with the hand rig; [`crate::arms::melee`]). DL1 starts a light attack
+    /// Physical melee (with the hand rig; `monaka_arms::melee_hit`). DL1 starts a light attack
     /// when it is let go: swings press briefly.
     pub physical_melee: Option<melee::Physical>,
     /// With physical melee, a weapon's swing attacks only once the blade is about to reach
@@ -143,7 +166,7 @@ impl Config {
             mesh_cull_scale: options.number("mesh_cull_scale", 0.001, 1.0, 0.2),
             detail_zoom: options.value::<f32>("detail_zoom").filter(|z| (1.0..=16.0).contains(z)),
             symmetric_projection: options.switch("symmetric_projection", false),
-            hybrid: options.switch("hybrid", false),
+            afw: StereoMethod::chosen(&STEREO, options) == StereoMethod::Afw,
             world_hud_opaque: options.switch("world_hud_opaque", true),
             climb_pullback: options.number("climb_pullback", 0.0, 1.5, 0.35),
             hand_hold: options.floats::<3>("hand_hold", 1.0).unwrap_or([0.0; 3]),
@@ -170,9 +193,9 @@ impl Config {
         }
     }
 
-    /// FSR as it can run: with the headset's eye size, not with the hybrid.
+    /// FSR as it can run: with the headset's eye size, not with AFW.
     pub fn upscaled(&self) -> Option<Fsr> {
-        self.fsr.filter(|_| self.eye_size.is_some() && !self.hybrid)
+        self.fsr.filter(|_| self.eye_size.is_some() && !self.afw)
     }
 
     /// The HUD and menus are placed in front of the eyes (`hud=0`: left as the game draws them).
@@ -228,7 +251,7 @@ mod tests {
         assert!(config.no_raster_occlusion && config.hud_active() && config.hud.world);
         assert_eq!((config.hud.scale, config.hud.distance, config.mesh_cull_scale), (0.36, 2.0, 0.2));
         assert_eq!((config.synthetic, config.detail_zoom), (None, None));
-        assert!(!config.symmetric_projection && !config.hybrid, "experiments are opt-in");
+        assert!(!config.symmetric_projection && !config.afw, "experiments are opt-in, AER the method");
         assert!(config.fsr.is_none(), "FSR is opt-in");
         let without = Config::parse("aim=off");
         assert!(!without.aim.head && without.turn_live_camera && !without.arms_aim.head_aim);

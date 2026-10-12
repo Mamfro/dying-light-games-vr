@@ -14,7 +14,7 @@ fn defaults_write_the_manifests_values() {
     let dl1 = &MANIFESTS[0];
     assert_eq!(
         plan(&Values::default(), dl1, Some((2880, 2880))).files[0].1,
-        "eye_separation=0.064\nfsr=0\nhud_scale=0.36\nhud_distance=2\nworld_hud=1\naim=hand_rig\nfinger_tracking=1\nfinger_binary=0\nroom_scale=1\nvr_buttons=1\ndisable_zombie_grabs=1\ncontroller_pad=1\nother_builds=0\neye_size=2880x2880"
+        "stereo=aer\nhead_position=lean\nlatency=2\neye_separation=0.064\nfsr=0\nhud_scale=0.36\nhud_distance=2\nworld_hud=1\naim=hand_rig\nlock_pitch=1\nfinger_tracking=1\nfinger_binary=0\nroom_scale=1\nvr_buttons=1\ndisable_zombie_grabs=1\ncontroller_pad=1\nother_builds=0\neye_size=2880x2880"
     );
     assert_eq!(eye_size(&Values::default(), dl1), EyeSize::Headset);
 }

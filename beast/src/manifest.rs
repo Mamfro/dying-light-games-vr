@@ -24,4 +24,5 @@ pub const MANIFESTS: &[Manifest] = &[Manifest {
     licences: &[],
     left_hand_aims: true,
     weapon_ring: true,
+    controls: &[],
 }];

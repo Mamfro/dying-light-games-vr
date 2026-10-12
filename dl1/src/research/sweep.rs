@@ -5,7 +5,7 @@
 //! the rig ran since the last sweep. Each hit the sweep turns into damage is logged with its
 //! point, direction and bone. Read-only.
 
-use crate::{engine, arms::hands};
+use crate::providers::{engine, skeleton};
 use monaka_hook::module::Module;
 use monaka_hook::probe::class_name;
 use monaka_hook::{Hooks, InFlight, Original, mem};
@@ -54,7 +54,7 @@ pub fn install(hooks: &mut Hooks, engine_module: &Module, gamedll: &Module) -> R
     // SAFETY: each export has the signature its mangled name states, on x64.
     let resolved = unsafe {
         Engine {
-            element_id: std::mem::transmute::<usize, ElementIdFn>(find(crate::engine::ELEMENT_ID)?),
+            element_id: std::mem::transmute::<usize, ElementIdFn>(find(crate::providers::engine::ELEMENT_ID)?),
             world: std::mem::transmute::<usize, engine::ElementWorldFn>(find(engine::ELEMENT_WORLD)?),
         }
     };
@@ -147,8 +147,8 @@ unsafe extern "C" fn detect(controller: *mut c_void, track: *mut c_void, mode: i
             .filter(|&get| Module::find(engine::GAMEDLL).is_some_and(|m| m.contains(get)))
             // SAFETY: the controller's own getter, on the game thread inside its own update.
             .map_or(0, |get| unsafe { std::mem::transmute::<usize, GetterFn>(get)(controller) } as usize);
-        let arms = hands::arms_model();
-        let rig = hands::rig_calls();
+        let arms = skeleton::arms_model();
+        let rig = skeleton::rig_calls();
         let rig_since = rig - RIG_AT_SWEEP.swap(rig, Relaxed);
         let track_name = TRACKS.iter().find(|(o, _)| ctrl + o == track as usize).map_or("?", |(_, name)| name);
         let fmt = |h: Option<([f32; 3], [f32; 3])>| h.map_or("none".to_owned(), |(at, along)| format!("{at:.3?} along {along:.2?}"));
@@ -157,7 +157,7 @@ unsafe extern "C" fn detect(controller: *mut c_void, track: *mut c_void, mode: i
             "sweep probe: {} ms sweep {n} track {track_name} mode {mode} attack type {} direction {:.2?} | object {object:#x} ({}) {} arms model {arms:#x} | hand {} | arms hand {} | tip motion in the hand's axes {motion} | rig calls since last sweep {rig_since}",
             ms(),
             mem::read::<i32>(ctrl + ATTACK_TYPE).unwrap_or(-1),
-            crate::arms::walk::vec3(ctrl + ATTACK_DIRECTION),
+            crate::providers::steps::vec3(ctrl + ATTACK_DIRECTION),
             class_name(object).unwrap_or_else(|| "?".into()),
             if object == arms { "IS the" } else { "is not the" },
             fmt(hand_holder(object)),
@@ -183,9 +183,9 @@ unsafe extern "C" fn deal(
     if n < LINES && !entry.is_null() {
         let at = entry as usize;
         let victim = mem::read::<usize>(at).unwrap_or(0);
-        let point = crate::arms::walk::vec3(at + 0x18);
+        let point = crate::providers::steps::vec3(at + 0x18);
         // How far out the blade the hit is: from the hand element, along it and off it.
-        let reach = hand_holder(hands::arms_model()).map_or("hand unknown".to_owned(), |(hand, along)| {
+        let reach = hand_holder(skeleton::arms_model()).map_or("hand unknown".to_owned(), |(hand, along)| {
             let d = [0, 1, 2].map(|k| point[k] - hand[k]);
             let out = d[0] * along[0] + d[1] * along[1] + d[2] * along[2];
             let off = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2] - out * out).max(0.0).sqrt();
@@ -198,7 +198,7 @@ unsafe extern "C" fn deal(
             mem::read::<i32>(at + 0x08).unwrap_or(-1),
             mem::read::<i32>(at + 0x30).unwrap_or(-1),
             point,
-            crate::arms::walk::vec3(at + 0x0c),
+            crate::providers::steps::vec3(at + 0x0c),
             mem::read::<f32>(at + 0x38).unwrap_or(f32::NAN),
         );
     }

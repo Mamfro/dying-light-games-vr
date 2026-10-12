@@ -1,13 +1,14 @@
-//! The arms' probes, around the arms callback (`crate::arms::hands`): `probe_hands` adds to the shared
-//! probe (`eng_chr::fpp`) the callback's caller and thread, the visual's element table, the eye
-//! camera and the right holder in the wrist; `probe_fingers` the hands' elements with their rest
-//! poses; `probe_rig` keeps what each rig move was made from, for [`super::view::rig`].
+//! The arms' probes, around the arms callback (`crate::providers::skeleton`): `probe_hands` adds to
+//! the shared probe (`eng_chr::providers::fpp`) the callback's caller and thread, the visual's
+//! element table, the eye camera and the right holder in the wrist; `probe_fingers` the hands'
+//! elements with their rest poses; `probe_rig` keeps what each rig move was made from, for
+//! [`super::view::rig`].
 
 use super::options;
-use crate::engine;
-use crate::arms::hands::{Model, camera_matrix};
-use crate::stereo::eyes;
-use eng_chr::fpp::{self, ArmsSkeleton};
+use crate::providers::engine;
+use crate::providers::skeleton::{arms_of, camera_matrix};
+use crate::providers::eye_site;
+use eng_chr::providers::fpp::{self, ArmsSkeleton};
 use monaka_arms::{Placed, Skeleton, Snapshot};
 use monaka_core::camera::{Mat34, compose, rigid_inverse};
 use monaka_hook::module::Module;
@@ -39,9 +40,9 @@ pub fn moved(placed: Option<&Placed>, game: Option<Mat34>) {
     }
     let (Some(placed), Some(game)) = (placed, game) else { return };
     // The same tracking origin the rig used: the view's.
-    let origin = eyes::tracking_origin(&game, true, eyes::config().aim.hand);
+    let origin = eye_site::tracking_origin(&game, true, eye_site::config().aim.hand);
     if let Ok(mut last) = LAST_RIG.lock() {
-        *last = Some(RigSample { palm: placed.palm, origin, game, call: fpp::calls(), present: eyes::drawing_present().unwrap_or(0) });
+        *last = Some(RigSample { palm: placed.palm, origin, game, call: fpp::calls(), present: eye_site::drawing_present().unwrap_or(0) });
     }
 }
 
@@ -67,7 +68,7 @@ fn probe(vis: usize, camera: usize, call: u64) {
         return;
     };
     let view = rigid_inverse(&game);
-    let player = eyes::player_camera();
+    let player = eye_site::player_camera();
     log!(
         "hands probe {call}: from {} thread {} camera {camera:#x} {} (player camera {}), camera at [{:.3} {:.3} {:.3}]",
         Module::describe(caller()),
@@ -78,7 +79,7 @@ fn probe(vis: usize, camera: usize, call: u64) {
         game[7],
         game[11]
     );
-    let Ok(model) = Model::of(vis) else { return };
+    let Ok(model) = arms_of(vis) else { return };
     let table = mem::read::<usize>(vis + engine::FPP_VIS_ELEMENTS);
     for (slot, label) in engine::FPP_ELEMENT_SLOTS {
         let Some(element) = table.and_then(|t| mem::read::<i32>(t + slot)) else { continue };
@@ -106,7 +107,7 @@ fn probe_holder(vis: usize, before: Option<&Snapshot>) {
     if !(last.1 == 30 || last.1.is_multiple_of(300)) {
         return;
     }
-    let (Ok(model), Some(before)) = (Model::of(vis), before) else { return };
+    let (Ok(model), Some(before)) = (arms_of(vis), before) else { return };
     let (Some(holder), Some(wrist)) = (model.find("r_handholder"), model.find("r_hand")) else { return };
     let (Some(&h), Some(&w)) = (before.worlds.get(holder as usize), before.worlds.get(wrist as usize)) else { return };
     log!("  holder in wrist {}", fpp::rows(&compose(&rigid_inverse(&w), &h)));
@@ -115,7 +116,7 @@ fn probe_holder(vis: usize, before: Option<&Snapshot>) {
 /// `probe_fingers`: each hand's elements under it, with the reference frame (rest pose): names,
 /// parents, rest pose against the parent, and how the animated pose turns from it.
 fn probe_fingers(vis: usize) {
-    let Ok(model) = Model::of(vis) else { return };
+    let Ok(model) = arms_of(vis) else { return };
     for hand_name in ["l_hand", "r_hand"] {
         let Some(hand) = model.find(hand_name) else {
             log!("fingers probe: no element {hand_name}");

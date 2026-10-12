@@ -1,4 +1,4 @@
-//! `probe_backbuffer`: how a frame reaches the back buffer. The HUD routing ([`crate::hud::draws`])
+//! `probe_backbuffer`: how a frame reaches the back buffer. The HUD routing ([`crate::providers::hud_draws`])
 //! takes the frame's first unblended three-vertex draw onto the back buffer as the finished 3D
 //! image and every later back-buffer draw as HUD; in a frame where that copy is not seen, the HUD
 //! draws are not routed and the HUD stays in each eye's image. For a few frames this
@@ -60,7 +60,7 @@ pub fn bound(context: &ID3D11DeviceContext, on: bool, count: u32, depth: bool) {
     if !enabled() {
         return;
     }
-    let Some(frame) = crate::stereo::eyes::drawing_present() else { return };
+    let Some(frame) = crate::providers::eye_site::drawing_present() else { return };
     if !LOGGED.contains(&frame) {
         return;
     }
@@ -83,7 +83,7 @@ pub fn draw(context: &ID3D11DeviceContext, vertices: u32, copied: bool) {
     if !enabled() {
         return;
     }
-    let Some(frame) = crate::stereo::eyes::drawing_present() else { return };
+    let Some(frame) = crate::providers::eye_site::drawing_present() else { return };
     let index = {
         let Ok(mut counts) = COUNTS.lock() else { return };
         at_frame(&mut counts, frame);
@@ -95,7 +95,7 @@ pub fn draw(context: &ID3D11DeviceContext, vertices: u32, copied: bool) {
         }
         counts.before + counts.after - 1
     };
-    if copied && let Some(size) = crate::hud::draws::backbuffer_size() {
+    if copied && let Some(size) = crate::providers::hud_draws::backbuffer_size() {
         note_odd_sizes(context, frame, vertices, size);
     }
     if LOGGED.contains(&frame) && index < 400 {

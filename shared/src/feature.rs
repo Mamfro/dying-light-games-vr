@@ -4,32 +4,35 @@
 //! `Component { needs: &[&ARMS], ..eng_chr::feature::melee() }`. A fact its build has not been read
 //! for leaves that component off for the run, said in the log.
 
-use crate::headaim::{self, HeadAim, IdLoad, InputActionFn, PitchActions};
-use crate::{grabs, gui, handwork, hudfix, hudlayer, hudover, melee, melee_reach, panels, view_bob, walk};
-use monaka_arms::aim::AimSettings;
+use crate::providers::look_fields::HeadAim;
+use crate::cooking::{hudfix, panels};
+use crate::providers::look_fields::{self, IdLoad, InputActionFn, PitchActions};
+use crate::providers::{actions, grabs, gui, hudlayer, model, rig, view_bob, walk};
+use monaka_arms::hand_rig;
+use monaka_arms::held::HeldItems;
+use monaka_arms::reload::Reloads;
 use monaka_hook::Site;
-use monaka_arms::roomscale;
 use monaka_core::feature::Feature;
-use monaka_core::manifest::{
-    AIM_HAND, AIM_LOOK, AIM_MOTION, AIM_MOUSE, AIM_POINT, DISABLE_VIEW_BOBBING, Kind, Manifest, Opt, ROOM_SCALE, Shown, WORLD_HUD, aim, aims, opt,
-};
-use monaka_core::options::{Options, Shared};
+use monaka_core::manifest::{DISABLE_VIEW_BOBBING, Kind, Opt, Shown, WORLD_HUD, opt};
 use monaka_hook::module::Module;
-use monaka_producer::game::{Component, Game, Lack, Missing, On, OrMissing, Run, Start, Switch};
+use monaka_producer::game::{Component, Lack, Missing, On, OrMissing, Run, Start, Switch};
 use monaka_producer::log;
+use monaka_producer::situation::Situation;
+use monaka_stereo::providers::GameQueue;
 use std::sync::atomic::{AtomicBool, Ordering::*};
-use windows::Win32::Graphics::Direct3D12::ID3D12CommandQueue;
 
-/// A game on the Chrome Engine, as its ready-made components see it.
-pub trait Chrome: Game {
+/// A game on the Chrome Engine, as its ready-made components see it (its hand rig Monaka's,
+/// [`crate::providers::fpp::chrome_rig`], with what the hands hold, [`crate::providers::held`], and
+/// the bow drawn and the melee's reach looked at at its posing moment, [`crate::providers::bow`],
+/// [`crate::providers::melee`]; its direct queue once its present
+/// request knows it, none on D3D11).
+pub trait Chrome: HeldItems + monaka_arms::bow::Bows + monaka_arms::melee_hit::Hits + GameQueue {
     /// What this game's build has been read for.
     const FACTS: Facts;
     /// The engine module.
     fn engine(build: &Self::Build) -> &Module;
     /// The game DLL, when it is the build the facts describe (what needs it stays off otherwise).
     fn gamedll(build: &Self::Build) -> Option<&Module>;
-    /// The game's direct queue, once its present request knows it (none on D3D11).
-    fn game_queue() -> Option<ID3D12CommandQueue>;
     /// Whether VR shows the game now: the gui tree's pieces and menus count only then.
     fn showing() -> bool;
 }
@@ -37,17 +40,21 @@ pub trait Chrome: Game {
 /// One build's facts for the ready-made components (none where the build has not been read).
 pub struct Facts {
     pub look: Option<Look>,
+    pub arms: Option<rig::Arms>,
     pub view_bob: Option<view_bob::Build>,
     pub grabs: Option<grabs::Build>,
     pub walk: Option<walk::Build>,
-    pub melee: Option<melee::Build>,
+    pub melee: Option<crate::providers::melee::Build>,
     /// With physical melee, a weapon's swing attacks only when its blade is about to reach
     /// something.
-    pub melee_reach: Option<melee_reach::Build>,
+    pub melee_reach: Option<crate::providers::melee::Targets>,
     /// The game starts a light attack when its button is let go (Dying Light 1, The Beast): a swing
     /// presses briefly.
     pub attacks_on_release: bool,
-    pub handwork: Option<handwork::Builds>,
+    /// What the hands do with the game's own throw, bow and lockpick.
+    pub hands: Option<crate::providers::hands::Builds>,
+    /// The gun's update and reload start, for the reload taken the game's own way.
+    pub reload: Option<actions::Reload>,
     pub gui: Option<gui::Build>,
     /// The HUD's pieces the dynamic HUD takes, by the game's widget names.
     pub pieces: &'static [gui::Piece],
@@ -63,6 +70,10 @@ pub struct Look {
     pub input_action: Site<InputActionFn>,
     pub pitch_actions: &'static PitchActions,
     pub id_load: IdLoad,
+    /// The engine exports its cutscene query (`look_fields::IS_OBJECT_ON_SOME_MOVIE`): head aim
+    /// stands down while a cutscene has the player ([`look_fields::Cutscene`]). Without it head aim
+    /// steers through cutscenes.
+    pub cutscenes: bool,
 }
 
 /// The game DLL a component hooks, or why it stays off.
@@ -77,65 +88,98 @@ fn fact<T>(fact: Option<T>, what: &str) -> Result<T, Lack> {
 
 // ---- Look and the arms ----
 
-const LOOK_OPTIONS: &[Opt] = &[aim(&[AIM_MOTION, AIM_LOOK, AIM_POINT, AIM_MOUSE], aims::HAND_RIG), AIM_HAND];
-
-/// Head aim on the character (`headaim`): motion controls, pointing or look-based aim, the
-/// controllers in for a pointing hand. A game gives where it steers (`install`), its hand-back
-/// (`give_back`, its `HeadAim`'s release) and what it works on top of, by struct update.
-pub const fn look<G: Chrome>() -> Component<G> {
-    Component {
-        name: "look",
-        features: &[Feature::Look],
-        options: LOOK_OPTIONS,
-        needs_channel: true,
-        on: |run| On::when(run.shared.aim.head, "aim is mouse and stick only"),
-        install: install_look::<G>,
-        give_back: give_back_look::<G>,
-        release: monaka_arms::controllers::close,
-        ..Component::NONE
+/// Another camera taking the view, where the engine says when a cutscene has the player: what a
+/// Chrome game's look by targets reports (`monaka_arms::look_targets::LooksByTargets::REPORTS`).
+pub const fn look_reports<G: Chrome>() -> &'static [Situation] {
+    match G::FACTS.look {
+        Some(Look { cutscenes: true, .. }) => &[Situation::CameraTaken],
+        _ => &[],
     }
 }
 
-/// Head aim's own part of a look's install: what aims, the vertical look input held while the head
-/// steers, the controllers for a pointing hand. A game's install calls it, then hooks where it
-/// steers ([`HeadAim::steer`]).
+/// A Chrome game's look provider install for the look by targets
+/// (`monaka_arms::look_targets::LooksByTargets::install`, what aims already set): the game DLL its
+/// character is recognised in, the vertical look input held while the head steers, the cutscene
+/// query, and the arms visual's callback where head aim steers there. A game whose head aim steers
+/// elsewhere hooks that after it ([`HeadAim::steer`]).
 pub fn install_look<G: Chrome>(start: &mut Start<'_, G>) -> Result<(), Lack> {
     let look = fact(G::FACTS.look, "head aim")?;
-    let settings = AimSettings::from_options(start.options, start.shared.aim, true);
-    look.aim.configure(settings, gamedll(start)?.base());
-    log!("{settings:?}");
+    look.aim.set_gamedll(gamedll(start)?.base());
     match hook_input_action::<G>(start) {
         Err(Lack::Missing(why)) => log!("vertical look not locked: {why}"),
         other => other?,
     }
-    if settings.hand_aim {
-        monaka_arms::controllers::open(start.channel()?);
+    if look.cutscenes {
+        look.aim.cutscene().resolve(G::engine(start.build)).missing()?;
+    } else {
+        log!("head aim: steers through cutscenes (the engine does not export IsObjectOnSomeMovie)");
+    }
+    if let Some(arms) = G::FACTS.arms
+        && arms.head_aim_here
+    {
+        // SAFETY: the game DLL is the build the facts describe.
+        unsafe { rig::hook::<G>(start.hooks, gamedll(start)?) }.missing()?;
     }
     Ok(())
 }
 
-/// The game's input-action converter hooked ([`headaim::input_action`]), once the vertical look
-/// actions are where the build keeps them.
+/// The game's input-action converter hooked ([`look_fields::input_action`]), once the vertical look
+/// actions are where the build keeps them: where head aim holds vertical look neutral, and the pitch
+/// lock (`monaka_arms::pitch_lock`) asks.
 pub fn hook_input_action<G: Chrome>(start: &mut Start<'_, G>) -> Result<(), Lack> {
     let look = fact(G::FACTS.look, "head aim")?;
     let gamedll = gamedll(start)?;
-    headaim::pitch_actions_match(G::engine(start.build), look.pitch_actions, look.id_load).missing()?;
-    headaim::convert_for(look.aim, look.pitch_actions);
-    start.hooks.site(&headaim::INPUT_ACTION, gamedll, &look.input_action, headaim::input_action)?;
+    look_fields::pitch_actions_match(G::engine(start.build), look.pitch_actions, look.id_load).missing()?;
+    look_fields::convert_for(look.aim, look.pitch_actions);
+    start.hooks.site(&look_fields::INPUT_ACTION, gamedll, &look.input_action, look_fields::input_action)?;
     Ok(())
 }
 
-/// The next camera update hands the head's share back.
-fn give_back_look<G: Chrome>() {
-    if let Some(look) = G::FACTS.look {
-        look.aim.release(500);
+/// A Chrome game's look provider after the hooks are out
+/// (`monaka_arms::look_targets::LooksByTargets::release`): the arms' tally where head aim steered at
+/// their callback.
+pub fn release_look<G: Chrome>() {
+    if let Some(arms) = G::FACTS.arms
+        && arms.head_aim_here
+    {
+        arms.rig.report();
     }
 }
 
-/// The arms on the controllers (`rig`), with motion controls: a game gives its install and what it
-/// works on top of, by struct update.
+/// The arms on the controllers at the arms visual's callback (`rig`), with motion controls, a swing
+/// of a held weapon or a fist attacking (`swing_attack`, `swing_speed`): a game gives what it works
+/// on top of, by struct update.
 pub const fn arms<G: Chrome>() -> Component<G> {
-    Component { name: "arms", features: &[Feature::HandRig], on: |run| On::when(run.shared.aim.rig, "aim is not motion controls"), ..Component::NONE }
+    Component { name: "arms", install: |start| install_rig(start, true), release: release_arms::<G>, ..hand_rig::hand_rig() }
+}
+
+/// The arms visual's callback for the run, posing the arms (`rig`) or only probing them
+/// (`probe_hands=1`): hooked here, unless head aim steers there and hooked it.
+pub fn install_rig<G: Chrome>(start: &mut Start<'_, G>, rig: bool) -> Result<(), Lack> {
+    let arms = fact(G::FACTS.arms, "the arms")?;
+    if rig {
+        hand_rig::install::<G>(start)?;
+    }
+    let options = rig::Options::read(start.options, start.shared, rig, start.options.switch("probe_hands", false));
+    arms.rig.configure(G::engine(start.build), options).missing()?;
+    // The held weapons' models, for the bow's line and the blade's reach.
+    if let Err(why) = model::resolve(G::engine(start.build), &model::VIRTUAL) {
+        log!("model elements: {why}");
+    }
+    if !arms.head_aim_here {
+        // SAFETY: the game DLL is the build the facts describe.
+        unsafe { rig::hook::<G>(start.hooks, gamedll(start)?) }.missing()?;
+    }
+    Ok(())
+}
+
+fn release_arms<G: Chrome>() {
+    if let Some(arms) = G::FACTS.arms
+        && !arms.head_aim_here
+    {
+        arms.rig.report();
+    }
+    monaka_arms::controllers::close();
 }
 
 // ---- View bob ----
@@ -186,107 +230,55 @@ fn install_grabs<G: Chrome>(start: &mut Start<'_, G>) -> Result<(), Lack> {
 
 // ---- Room-scale ----
 
-/// The character follows the player's real steps (`monaka_arms::roomscale` at the player's
-/// movement step, `walk`), with the hand rig.
-pub const fn room_scale<G: Chrome>() -> Component<G> {
-    Component {
-        name: "room scale",
-        features: &[Feature::RoomScale],
-        options: &[ROOM_SCALE],
-        settings: read_room_scale,
-        on: room_scale_on::<G>,
-        install: install_room_scale::<G>,
-        quiet: roomscale::stop,
-        release: walk::report,
-        ..Component::NONE
-    }
-}
-
-fn read_room_scale(options: &Options, manifest: &Manifest) {
-    roomscale::Settings::from_options(options, &Shared::from_options(options, manifest));
-}
-
-fn room_scale_on<G: Chrome>(run: &Run<'_, G>) -> On {
-    On::when(roomscale::Settings::from_options(run.options, run.shared).is_some(), "room-scale movement is off")
-}
-
-fn install_room_scale<G: Chrome>(start: &mut Start<'_, G>) -> Result<(), Lack> {
-    let settings = fact(roomscale::Settings::from_options(start.options, start.shared), "room-scale movement")?;
+/// The player's movement step hooked for room-scale following (`walk`): a game's
+/// `monaka_arms::feature::Steps::install`, under `monaka_arms::feature::room_scale()`.
+pub fn hook_steps<G: Chrome>(start: &mut Start<'_, G>) -> Result<(), Lack> {
     let gamedll = gamedll(start)?;
-    walk::install(start.hooks, G::engine(start.build), gamedll, fact(G::FACTS.walk, "the movement step")?).missing()?;
-    roomscale::install(settings);
-    Ok(())
+    walk::install(start.hooks, G::engine(start.build), gamedll, fact(G::FACTS.walk, "the movement step")?).missing()
 }
 
 // ---- Physical melee ----
 
-/// Physical melee (`melee`): a swing hits where the weapon in the hand is, through the game's own
-/// hit detection; with the game's reach check (`melee_reach`), a weapon's swing attacks only when
-/// its blade is about to reach something (`melee_on_reach=0` lets every swing attack, for a test).
-/// The swing that presses the attack is the hand rig's.
+/// Physical melee (`monaka_arms::melee_hit`) on the game's hit detection
+/// ([`crate::providers::melee`]): a swing hits where the weapon in the hand is; where the build has
+/// been read for the melee's targets (`melee_reach`), a weapon's swing attacks only when its blade
+/// is about to reach something (`melee_on_reach=0` lets every swing attack, for a test). The swing
+/// that presses the attack is the hand rig's.
 pub const fn melee<G: Chrome>() -> Component<G> {
-    Component { name: "melee", features: &[Feature::Melee], on: melee_on::<G>, install: install_melee::<G>, release: melee_reach::report, ..Component::NONE }
+    monaka_arms::melee_hit::physical_melee()
 }
 
-fn physical<G: Chrome>(options: &Options, shared: &Shared) -> Option<monaka_arms::melee::Physical> {
-    monaka_arms::melee::Physical::from_options(options, shared.aim.rig, G::FACTS.attacks_on_release)
+// ---- Throw, bow and lockpick ----
+
+/// The bow by hand (`monaka_arms::bow`) on the bow's fire hook and draw ([`crate::providers::bow`]):
+/// `motion_bow=0` turns it off, `bow_string=0` leaves the bow model's string to the game, for a
+/// test. A game says what it works on top of by struct update.
+pub const fn bow<G: Chrome>() -> Component<G> {
+    Component { switch: Some(Switch::new("motion_bow", true, "the game's bow")), ..monaka_arms::bow::bow() }
 }
 
-fn melee_on<G: Chrome>(run: &Run<'_, G>) -> On {
-    On::when(physical::<G>(run.options, run.shared).is_some(), "physical melee is off")
+/// Throwing by hand (`monaka_arms::throw`) on the game's throw release
+/// ([`crate::providers::throws`]): `motion_throw=0` turns it off, for a test. A game says what it
+/// works on top of by struct update.
+pub const fn throw<G: Chrome + monaka_arms::throw::ThrowsByHand>() -> Component<G> {
+    Component { switch: Some(Switch::new("motion_throw", true, "the game's throw")), ..monaka_arms::throw::throw() }
 }
 
-fn install_melee<G: Chrome>(start: &mut Start<'_, G>) -> Result<(), Lack> {
-    let physical = fact(physical::<G>(start.options, start.shared), "physical melee")?;
+/// Lockpicking by hand (`monaka_arms::lockpick`), the minigame taken the game's own way
+/// ([`crate::providers::lockpick`]): `motion_lockpick=0` turns it off, for a test. A game lists it
+/// where its build has been read for the lockpick, saying what it works on top of by struct update.
+pub const fn lockpick<G: Chrome + monaka_arms::lockpick::Lockpicks>() -> Component<G> {
+    Component { switch: Some(Switch::new("motion_lockpick", true, "the game's lockpick")), ..monaka_arms::lockpick::lockpick() }
+}
+
+// ---- Reload ----
+
+/// The player's gun's update hooked ([`actions::install_reload`]): the reload taken the game's own
+/// way, and the moment reloading by hand reads its gesture there (`monaka_arms::reload::update`).
+/// A game's `Reloads::install`, under `monaka_arms::reload::reload()`.
+pub fn hook_reload<G: Chrome + Reloads>(start: &mut Start<'_, G>) -> Result<(), Lack> {
     let gamedll = gamedll(start)?;
-    melee::install(start.hooks, gamedll, fact(G::FACTS.melee, "the melee code")?, physical).missing()?;
-    if let Some(reach) = G::FACTS.melee_reach
-        && start.options.switch("melee_on_reach", true)
-        && let Err(why) = melee_reach::install(G::engine(start.build), gamedll, reach)
-    {
-        log!("every swing attacks: {}", why.reason);
-    }
-    Ok(())
-}
-
-// ---- Handwork ----
-
-/// What the hands do with the game's own throw, bow, reload and lockpick (`handwork`), with the
-/// hand rig. Each part is the rig's, not a setting: its option stays readable for tests only.
-pub const fn handwork<G: Chrome>() -> Component<G> {
-    Component { name: "handwork", features: handwork_features::<G>(), on: handwork_on::<G>, install: install_handwork::<G>, release: handwork::report, ..Component::NONE }
-}
-
-/// The parts this build has been read for.
-const fn handwork_features<G: Chrome>() -> &'static [Feature] {
-    match G::FACTS.handwork {
-        Some(handwork::Builds { lockpick: Some(_), .. }) => &[Feature::Throw, Feature::Bow, Feature::Reload, Feature::Lockpick],
-        Some(_) => &[Feature::Throw, Feature::Bow, Feature::Reload],
-        None => &[],
-    }
-}
-
-/// `motion_throw=0`, `motion_bow=0` (`bow_string=0`: only the string drawn by hand),
-/// `manual_reload=0`, `motion_lockpick=0` turn one part off, for a test.
-fn handwork_options(options: &Options, rig: bool) -> handwork::Options {
-    handwork::Options {
-        throw: options.switch("motion_throw", true) && rig,
-        bow: options.switch("motion_bow", true) && rig,
-        bow_string: options.switch("bow_string", true),
-        reload: options.switch("manual_reload", true) && rig,
-        lockpick: options.switch("motion_lockpick", true) && rig,
-    }
-}
-
-fn handwork_on<G: Chrome>(run: &Run<'_, G>) -> On {
-    On::when(handwork_options(run.options, run.shared.aim.rig) != handwork::Options::default(), "aim is not motion controls")
-}
-
-fn install_handwork<G: Chrome>(start: &mut Start<'_, G>) -> Result<(), Lack> {
-    let builds = fact(G::FACTS.handwork, "the hands' actions")?;
-    let gamedll = gamedll(start)?;
-    handwork::install(start.hooks, gamedll, &builds, handwork_options(start.options, start.shared.aim.rig));
-    Ok(())
+    actions::install_reload(start.hooks, gamedll, fact(G::FACTS.reload, "the gun's reload")?, monaka_arms::reload::update::<G>).missing()
 }
 
 // ---- HUD ----
@@ -303,9 +295,10 @@ pub fn panels_on() -> bool {
 
 /// The HUD as a layer of its own, from the game's command lists (`hudlayer`; `probe_hud=1` probes
 /// it): laid over the eyes in front of them, or kept for the dynamic HUD's pieces. The gui tree
-/// comes with it (`gui`; `probe_gui=1` probes it), telling when a menu is open (shown flat).
+/// comes with it (`gui`; `probe_gui=1` probes it), telling when a menu is open (shown flat). On the
+/// HUD layer's base (`monaka_stereo::hud_layer`: its size and distance).
 pub const fn hud<G: Chrome>() -> Component<G> {
-    Component { name: "hud", features: &[Feature::HudLayer], on: hud_on::<G>, install: install_hud::<G>, give_back: remove_hud, release: close_hud, ..Component::NONE }
+    Component { on: hud_on::<G>, install: install_hud::<G>, give_back: remove_hud, release: close_hud, ..monaka_stereo::hud_layer::hud_layer() }
 }
 
 fn hud_on<G: Chrome>(run: &Run<'_, G>) -> On {
@@ -341,10 +334,11 @@ fn remove_hud() {
 }
 
 fn close_hud() {
+    hudlayer::leave();
     GUI.store(false, Release);
     panels::close();
     hudfix::close();
-    hudover::close();
+    monaka_stereo::hudover12::close();
     gui::report();
 }
 

@@ -20,6 +20,7 @@ eng_chr.workspace = true
 monaka_framegen.workspace = true
 monaka_pad.workspace = true
 monaka_streamline.workspace = true
+monaka_warp.workspace = true
 monaka_stereo.workspace = true
 monaka_producer.workspace = true
 

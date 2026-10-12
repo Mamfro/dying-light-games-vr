@@ -7,7 +7,7 @@
 //! - the near distance and projection the depth was rendered with (the render camera state:
 //!   `STATE_PROJECTION`, `STATE_NEAR`), for [`monaka_core::depth::DepthMapping`];
 //! - a UI layer: the HUD draws after the scene copy pass through our hooks, so they are drawn
-//!   into private targets instead of the back buffer (the HUD layer, [`crate::hud::draws`]).
+//!   into private targets instead of the back buffer (the HUD layer, [`crate::providers::hud_draws`]).
 //!
 //! With those, one render per frame gives both eyes from the same moment (alternate-eye shows
 //! them a frame apart) at one pair per game frame.
