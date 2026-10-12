@@ -97,11 +97,21 @@ fn start(session: &'static Session) -> Result<(), Rejection> {
                 log!("arms hook off (no head aim, no hand rig): {}", why.reason);
             }
         }
-        if hand_rig
-            && let Some(physical) = config.physical_melee
-            && let Err(why) = eng_chr::melee::install(&mut hooks, gamedll, engine::MELEE, physical)
-        {
-            log!("physical melee off: {}", why.reason);
+        if hand_rig && let Some(physical) = config.physical_melee {
+            match eng_chr::melee::install(&mut hooks, gamedll, engine::MELEE, physical) {
+                Err(why) => log!("physical melee off: {}", why.reason),
+                // A weapon's swing attacks only when the blade is about to reach something
+                // (`melee_on_reach=0` lets every swing attack, for a test).
+                Ok(()) if config.melee_on_reach => {
+                    if let Err(why) = eng_chr::melee_reach::install(&engine_module, gamedll, engine::MELEE_REACH) {
+                        log!("every swing attacks: {}", why.reason);
+                    }
+                }
+                Ok(()) => {}
+            }
+        }
+        if config.disable_view_bobbing {
+            eng_chr::view_bob::install(gamedll, engine::VIEW_BOB);
         }
         if config.disable_zombie_grabs
             && let Err(why) = eng_chr::grabs::install(&mut hooks, gamedll, engine::GRABS)
@@ -288,6 +298,7 @@ fn stop() -> Result<(), Rejection> {
     eng_chr::walk::report();
     eng_chr::handwork::report();
     eng_chr::grabs::report();
+    eng_chr::melee_reach::report();
     player::flashlight::report();
     monaka_pad::stop();
     camera_update::disable();

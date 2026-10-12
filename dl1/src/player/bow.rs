@@ -8,14 +8,15 @@
 //! it), and the bow model's nock and string (`arrow_pose`, `bone_string`) go straight back along
 //! the arrow (the nock's axis that lies along the bow's x; forward is away from the string hand)
 //! from where the game had them as the draw began, as far as the right hand's fingers are behind
-//! that ([`hand_world::string_point`]), at most [`LONGEST_PULL`]. The bow controller
+//! that ([`hand_world::string_point`]), at most [`PULL`]'s longest. The bow controller
 //! (`WeaponBowController`) looses an arrow ([`loose`]) with a speed from how far the bow is drawn
-//! (0 to 1, at +0x6c), set from the pull ([`FULL_PULL`] is a full draw); the arrow it fires is
-//! placed on the arrow's line ([`projectile`], its speed kept). A pull under [`LEAST_PULL`] keeps
-//! the game's draw.
+//! (0 to 1, at +0x6c), set from the pull's share ([`PULL`]'s full is a full draw); the arrow it
+//! fires is placed on the arrow's line ([`projectile`], its speed kept). A pull under [`PULL`]'s
+//! least keeps the game's draw.
 
 use crate::player::{hand_world, hands, projectile};
 use monaka_arms::Skeleton;
+use monaka_core::gesture::{Pull, PullRules};
 use monaka_hook::module::Module;
 use monaka_hook::{Hooks, InFlight, Original, mem};
 use monaka_producer::{Rejection, log};
@@ -39,11 +40,9 @@ const NOCK: &str = "arrow_pose";
 /// In the controller: how far it is drawn (0 to 1); its player (vfunc +0x20).
 const DRAWN: usize = 0x6c;
 const PLAYER_SLOT: usize = 0x20;
-/// The pull (metres behind where the string rests) that counts, that is a full draw, and the
-/// most the string goes back.
-const LEAST_PULL: f32 = 0.05;
-const FULL_PULL: f32 = 0.5;
-const LONGEST_PULL: f32 = 0.7;
+/// The pull (metres behind where the string rests) that counts (0.05), that is a full draw (0.5),
+/// and the most the string goes back (0.7).
+const PULL: PullRules = PullRules::BOW;
 /// The bow model's bone the bow bends from (its limbs hang off it).
 const BOW_BONE: &str = "bone_root";
 /// The arrow's line runs along the bow root's x (one way or the other: forward is away from the
@@ -129,8 +128,8 @@ unsafe extern "C" fn loose(controller: *mut c_void) {
     let at = controller as usize;
     let bow = BOW.lock().ok().and_then(|b| *b).filter(|b| b.at.elapsed() < DRAW_FRESH);
     let shot = bow.filter(|_| players(at)).map(|bow| {
-        if bow.pull >= LEAST_PULL {
-            mem::write::<f32>(at + DRAWN, (bow.pull / FULL_PULL).clamp(0.0, 1.0));
+        if let Some(share) = Pull::share(bow.pull, &PULL) {
+            mem::write::<f32>(at + DRAWN, share);
         }
         projectile::Shot::Along { start: bow.grip, direction: bow.axis }
     });
@@ -273,7 +272,7 @@ pub fn place_string(vis: usize, reticle: Option<[f32; 3]>) {
         axis = axis.map(|c| -c);
         log!("bow by hand: the arrow points the other way along the nock's axis");
     }
-    let pull = fingers.map_or(0.0, |f| dot(sub(from, f), axis).clamp(0.0, LONGEST_PULL));
+    let pull = fingers.map_or(0.0, |f| Pull::back(from, axis, f, &PULL));
     if let Ok(mut bow) = BOW.lock() {
         *bow = Some(Bow { grip: from, axis, pull, at: Instant::now() });
     }

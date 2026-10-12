@@ -271,6 +271,8 @@ pub const MELEE: eng_chr::melee::Build = eng_chr::melee::Build {
 };
 /// The sync action conditions' checks (vtable slot 1 of `SyncActionConditionIsBusy`,
 /// `SyncActionConditionIsClimbing` and `SyncActionConditionMinDistance`, for `eng_chr::grabs`).
+/// The player's `HeadBobFactor` in its parameter block (for `eng_chr::view_bob`).
+pub const VIEW_BOB: eng_chr::view_bob::Build = eng_chr::view_bob::Build { player_vtable: PLAYER_VTABLE, parameters_slot: 0x618, head_bob: 0x2e08 };
 pub const GRABS: eng_chr::grabs::Build = eng_chr::grabs::Build { is_busy: 0x20fb220, in_climb: 0x20fb300, min_distance: 0x20fb5d0 };
 /// What the hands do with the game's own actions (`eng_chr::handwork`):
 /// - the throw controller (`WeaponThrowController`): update vtable slot 137, state at +0x40 (2 to 4

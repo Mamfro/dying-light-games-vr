@@ -302,6 +302,7 @@ fn steer(fields: &LookFields, camera: usize, site: usize, forward: usize) {
         state.climb = None;
     }
     let movie = on_movie(character);
+    monaka_producer::situation::report(monaka_producer::situation::Situation::CameraTaken, movie, 500);
     if movie != MOVIE.swap(movie, Relaxed) {
         if movie {
             state.movie_head = Some(head_yaw);

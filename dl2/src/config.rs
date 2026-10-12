@@ -82,6 +82,8 @@ pub struct Config {
     pub handwork: eng_chr::handwork::Options,
     /// Grabs never land on the player (`disable_zombie_grabs`; `eng_chr::grabs`).
     pub disable_zombie_grabs: bool,
+    /// The view stays level instead of bobbing with the steps (`eng_chr::view_bob`).
+    pub disable_view_bobbing: bool,
     /// The headset's recommended eye size (`eye_size=WxH`, from the OpenXR runtime).
     pub eye_size: Option<(u32, u32)>,
     /// One render per frame, eyes taking turns (`mode=alternate`, D3D12).
@@ -126,6 +128,7 @@ impl Config {
             physical_melee: melee::Physical::from_options(options, shared.aim.rig, false),
             room_scale: roomscale::Settings::from_options(options, &shared),
             disable_zombie_grabs: options.switch("disable_zombie_grabs", true),
+            disable_view_bobbing: options.switch("disable_view_bobbing", true),
             handwork: eng_chr::handwork::Options {
                 throw: options.switch("motion_throw", true) && shared.aim.rig,
                 bow: options.switch("motion_bow", true) && shared.aim.rig,

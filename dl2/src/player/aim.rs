@@ -21,6 +21,7 @@ use crate::game;
 use crate::{view::head, view::scene};
 use eng_chr::headaim::{Fields, HeadAim, IdLoad, is_pitch_action};
 use monaka_arms::aim::{TOOL, neutral_pitch};
+use monaka_core::aim::Levelling;
 use monaka_hook::AtomicF32;
 use monaka_hook::module::Module;
 use monaka_hook::{InFlight, Original, mem};
@@ -46,6 +47,9 @@ pub static GAME_PITCH_KNOWN: AtomicBool = AtomicBool::new(false);
 pub static MOUSE_PITCH_KNOWN: AtomicBool = AtomicBool::new(false);
 pub static LEVELLING: AtomicU64 = AtomicU64::new(0);
 static PITCH_LOCKED: AtomicU64 = AtomicU64::new(0);
+/// The pitch lock's rule (radians): vertical look passes only back toward level, from beyond 1.5
+/// degrees. The game writes its own pitch, so nothing is stepped.
+const LEVEL: Levelling = Levelling { dead_band: 0.026, step: 0.0 };
 
 /// Vertical look inputs neutralised (by head aim) or blocked (by the pitch lock).
 pub fn pitch_blocked() -> u64 {
@@ -91,7 +95,12 @@ fn player_camera_update(camera: usize, forward: [f32; 3]) {
     let character = mem::read::<usize>(camera + engine::CAMERA_TARGET).filter(|&t| t != 0).and_then(|target| AIM.character_of(target));
     let head = scene::vr_active().then(|| head::HEAD.current()).flatten();
     let steered = match character {
-        Some(character) => AIM.steer(character, head, counter),
+        Some(character) => {
+            let steered = AIM.steer(character, head, counter);
+            // The view level while VR steers the character.
+            eng_chr::view_bob::hold(character, steered.is_some());
+            steered
+        }
         None => {
             TOOL.release();
             None
@@ -134,9 +143,8 @@ pub unsafe extern "system" fn input_action(binding: usize, receivers: usize, mut
             // turns the camera back toward level (beyond a 1.5 degree dead band) passes.
             let action = mem::read::<u32>(binding).unwrap_or(0);
             let toward = GAME_PITCH_KNOWN.load(Ordering::Acquire) && {
-                let pitch = GAME_PITCH.load();
                 let up = action == engine::PITCH_ACTIONS[0].2 || action == engine::PITCH_ACTIONS[2].2;
-                (up && pitch < -0.026) || (!up && pitch > 0.026)
+                LEVEL.toward_level(GAME_PITCH.load(), up)
             };
             if toward {
                 if neutral != value {

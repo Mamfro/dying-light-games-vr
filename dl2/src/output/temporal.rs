@@ -4,6 +4,7 @@
 
 use crate::engine::CAMERA_WRITER_RETURNS;
 use monaka_core::Aligned16;
+use monaka_core::eye_history::{EyeHistory, Rules};
 use monaka_core::mat4d::{Mat4d, inverse, mul};
 
 /// Which of the scene's seven camera writers a return address (RVA) is, as a bit.
@@ -88,21 +89,6 @@ pub fn eye_viewport(original: u32, eye: u32) -> u32 {
     if !(1..=2).contains(&eye) || original >= 0x4000_0000 { original } else { monaka_streamline::eye_viewport(original, eye) }
 }
 
-#[derive(Default)]
-pub struct ResetTracker {
-    epoch: u32,
-    viewport: u32,
-    valid: bool,
-}
-
-impl ResetTracker {
-    pub fn needs_reset(&mut self, epoch: u32, viewport: u32) -> bool {
-        let reset = !self.valid || self.epoch != epoch || self.viewport != viewport;
-        (self.valid, self.epoch, self.viewport) = (true, epoch, viewport);
-        reset
-    }
-}
-
 type Matrix = Mat4d;
 
 fn read_f32(p: &[u8], offset: usize) -> f32 {
@@ -151,47 +137,49 @@ fn write(packet: &mut [u8], offset: usize, m: &Matrix) {
 /// Size of the DLSS constants packet this code touches.
 pub const PACKET_BYTES: usize = 0x1b0;
 
+/// What an eye's DLSS history carries on through: the temporal epoch (a mono or skipped frame
+/// starts a new one), the eye's viewport id and the render size.
+type Shape = (u32, u32, u32, u32);
+
 /// The DLSS constants packet carries clip-to-previous-clip matrices built from the native camera
-/// history; these are rebuilt from each eye's own previous clip transform.
-#[derive(Default)]
+/// history; these are rebuilt from each eye's own previous clip transform, kept per eye
+/// (`monaka_core::eye_history`).
 pub struct DlssMatrices {
-    entries: [Option<EyeClip>; 2],
+    history: EyeHistory<Shape, Matrix>,
 }
 
-struct EyeClip {
-    clip: Matrix,
-    epoch: u32,
-    viewport: u32,
-    width: u32,
-    height: u32,
+impl Default for DlssMatrices {
+    fn default() -> Self {
+        Self { history: EyeHistory::new(Rules::OWN) }
+    }
 }
 
 impl DlssMatrices {
-    /// Writes this eye's clip-to-previous (+0xf0) and previous-to-clip (+0x130); sets the reset flag
-    /// (+0x18) when seeding.
-    pub fn apply(&mut self, packet: &mut [u8; PACKET_BYTES], eye: u32, epoch: u32, viewport: u32, reset: bool) -> bool {
+    /// Writes this eye's (1 or 2) clip-to-previous (+0xf0) and previous-to-clip (+0x130), and sets
+    /// the reset flag (+0x18) when its history starts over: its first frame, `reset` asked for, a
+    /// new epoch, viewport or size. Whether it started over; `None` when the matrices could not be
+    /// made.
+    pub fn apply(&mut self, packet: &mut [u8; PACKET_BYTES], eye: u32, epoch: u32, viewport: u32, reset: bool) -> Option<bool> {
         if !(1..=2).contains(&eye) {
-            return false;
+            return None;
         }
-        let Some(current) = clip(packet) else { return false };
-        let Some(inverse_current) = inverse(&current) else { return false };
+        let current = clip(packet)?;
+        let inverse_current = inverse(&current)?;
         let width = u32::from_le_bytes(packet[0x24..0x28].try_into().expect("4 bytes"));
         let height = u32::from_le_bytes(packet[0x28..0x2c].try_into().expect("4 bytes"));
-        let slot = &mut self.entries[(eye - 1) as usize];
-        let previous = match slot {
-            Some(e) if !reset && e.epoch == epoch && e.viewport == viewport && e.width == width && e.height == height => Some(e.clip),
-            _ => None,
-        };
+        let eye = (eye - 1) as usize;
+        self.history.frame(eye, (epoch, viewport, width, height), reset);
+        let previous = self.history.previous(eye).copied();
         let seed = previous.is_none();
         let to_previous = mul(&previous.unwrap_or(current), &inverse_current);
-        let Some(to_current) = inverse(&to_previous) else { return false };
+        let to_current = inverse(&to_previous)?;
         write(packet, 0xf0, &to_previous);
         write(packet, 0x130, &to_current);
         if seed {
             packet[0x18..0x1c].copy_from_slice(&1u32.to_le_bytes());
         }
-        *slot = Some(EyeClip { clip: current, epoch, viewport, width, height });
-        true
+        self.history.keep(eye, current);
+        Some(seed)
     }
 }
 
@@ -239,11 +227,17 @@ mod tests {
             }
         }
         let mut m = DlssMatrices::default();
-        assert!(m.apply(&mut packet, 1, 1, 3, false));
+        assert_eq!(m.apply(&mut packet, 1, 1, 3, false), Some(true));
         assert_eq!(u32::from_le_bytes(packet[0x18..0x1c].try_into().unwrap()), 1, "first use seeds");
         packet[0x18..0x1c].copy_from_slice(&0u32.to_le_bytes());
-        assert!(m.apply(&mut packet, 1, 1, 3, false));
+        assert_eq!(m.apply(&mut packet, 1, 1, 3, false), Some(false));
         assert_eq!(u32::from_le_bytes(packet[0x18..0x1c].try_into().unwrap()), 0, "same epoch keeps history");
         assert!((read_f32(&packet, 0xf0) - 1.0).abs() < 1e-5);
+        assert_eq!(m.apply(&mut packet, 2, 1, 3, false), Some(true), "the other eye seeds its own");
+        assert_eq!(m.apply(&mut packet, 1, 2, 3, false), Some(true), "a new epoch seeds again");
+        assert_eq!(m.apply(&mut packet, 1, 2, 4, false), Some(true), "and a new viewport");
+        assert_eq!(m.apply(&mut packet, 1, 2, 4, true), Some(true), "and a reset asked for");
+        assert_eq!(m.apply(&mut packet, 1, 2, 4, false), Some(false));
+        assert_eq!(m.apply(&mut packet, 3, 2, 4, false), None, "eyes are 1 and 2");
     }
 }

@@ -22,10 +22,12 @@ pub mod hudfix;
 pub mod hudover;
 pub mod hudlayer;
 pub mod melee;
+pub mod melee_reach;
 pub mod model;
 pub mod panels;
 pub mod rd3d12;
 pub mod rig;
+pub mod view_bob;
 pub mod walk;
 
 /// The engine DLL (all three games).

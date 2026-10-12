@@ -1,7 +1,6 @@
-//! Reloading by hand (with the hand rig): with a gun drawn, the left hand brought to the gun (within
-//! [`NEAR`] of the right controller) and taken away again (past [`AWAY`] within [`WITHIN`]) reloads,
-//! as the reload button would; not again for [`COOLDOWN`]. The controllers count, not the arms: with
-//! a gun held two-handed the left arm rides the gun.
+//! Reloading by hand (with the hand rig): with a gun drawn, the left hand brought to the gun and
+//! taken away again ([`TOUCH`]) reloads, as the reload button would. The controllers count, not the
+//! arms: with a gun held two-handed the left arm rides the gun.
 //!
 //! The gun's controller (`WeaponFireController`) starts a reload from its input when the reload
 //! action is pressed with the gun ready (state 0): it calls the reload start with `from input` set
@@ -10,13 +9,13 @@
 //! gesture makes that same call; the reload then runs as the game's.
 
 use crate::hands;
+use monaka_core::gesture::{TouchAway, TouchAwayRules};
 use monaka_core::protocol::{LEFT_HAND, RIGHT_HAND};
 use monaka_hook::module::Module;
 use monaka_hook::{Hooks, InFlight, Original, mem};
 use monaka_producer::{Rejection, log};
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, Instant};
 
 /// One build's gun controller code and fields (game DLL RVAs and offsets).
 #[derive(Clone, Copy, Debug)]
@@ -44,13 +43,9 @@ pub struct Prepare {
 
 /// The gun ready.
 const READY: i32 = 0;
-/// The left controller this near the right (metres) touches the gun...
-const NEAR: f32 = 0.15;
-/// ...and then this far from it within [`WITHIN`] reloads.
-const AWAY: f32 = 0.25;
-const WITHIN: Duration = Duration::from_millis(1000);
-/// No second reload by the gesture for this long.
-const COOLDOWN: Duration = Duration::from_millis(1500);
+/// The left controller within 0.15 m of the right touches the gun, and then more than 0.25 m from
+/// it within 1 s reloads; no second reload by the gesture for 1.5 s.
+const TOUCH: TouchAwayRules = TouchAwayRules::RELOAD;
 /// The hands' places must be this recent (seconds).
 const FRESH: f32 = 0.1;
 
@@ -62,8 +57,8 @@ type CheckFn = unsafe extern "C" fn(usize) -> bool;
 static UPDATE_ORIGINAL: Original<UpdateFn> = Original::new();
 /// The build, with the start, the player vtable and the prepare checks relocated.
 static BUILD: OnceLock<(Build, usize, usize, Option<[usize; 2]>)> = OnceLock::new();
-/// When the left hand last touched the gun, and the last reload by the gesture.
-static GESTURE: Mutex<(Option<Instant>, Option<Instant>)> = Mutex::new((None, None));
+/// The left hand's touch of the gun and the last reload by the gesture.
+static GESTURE: Mutex<TouchAway> = Mutex::new(TouchAway::new());
 static RELOADS: AtomicU64 = AtomicU64::new(0);
 
 /// Hooks `build`'s gun update in the game DLL.
@@ -81,21 +76,7 @@ fn gestured() -> bool {
     let (Some(left), Some(right)) = (hands::palm(LEFT_HAND, FRESH), hands::palm(RIGHT_HAND, FRESH)) else { return false };
     let (left, right) = (hands::position(&left), hands::position(&right));
     let apart = hands::length([0, 1, 2].map(|k| left[k] - right[k]));
-    let Ok(mut gesture) = GESTURE.lock() else { return false };
-    let now = Instant::now();
-    let (touched, last) = &mut *gesture;
-    if apart < NEAR {
-        *touched = Some(now);
-        return false;
-    }
-    let fresh = touched.is_some_and(|at| now.duration_since(at) < WITHIN);
-    let rested = last.is_none_or(|at| now.duration_since(at) > COOLDOWN);
-    if apart > AWAY && fresh && rested {
-        *touched = None;
-        *last = Some(now);
-        return true;
-    }
-    false
+    GESTURE.lock().is_ok_and(|mut gesture| gesture.feed(hands::now(), apart, &TOUCH))
 }
 
 unsafe extern "C" fn update(controller: usize, dt: f32) {

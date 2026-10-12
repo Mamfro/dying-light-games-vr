@@ -18,6 +18,34 @@ use monaka_producer::{Rejection, log};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering::*};
 
+/// A gun's visual class (all three games); melee weapons are its base, `WeaponVis`.
+pub const GUN_VIS_CLASS: &str = ".?AVFireWeaponVis@@";
+
+/// Whether the weapon visual `weapon` is a gun (`FireWeaponVis`, by its vtable once named).
+pub fn is_gun(weapon: usize) -> bool {
+    static GUN_VTABLE: AtomicU64 = AtomicU64::new(0);
+    let Some(vtable) = mem::read::<usize>(weapon).filter(|_| weapon != 0) else { return false };
+    let known = GUN_VTABLE.load(Relaxed);
+    if known != 0 {
+        return known == vtable as u64;
+    }
+    let gun = class_name(weapon).as_deref() == Some(GUN_VIS_CLASS);
+    if gun {
+        GUN_VTABLE.store(vtable as u64, Relaxed);
+    }
+    gun
+}
+
+/// What the arms' weapon visual `weapon` (0 for none) is, for the shared melee: a gun
+/// ([`is_gun`]), another weapon, or nothing.
+pub fn held_of(weapon: usize) -> Held {
+    match weapon {
+        0 => Held::Nothing,
+        w if is_gun(w) => Held::Gun,
+        _ => Held::Melee,
+    }
+}
+
 /// A Chrome Engine arms skeleton: what the rig, the fingers and the probe need beyond
 /// [`Skeleton`].
 pub trait ArmsSkeleton: Skeleton {
@@ -161,7 +189,7 @@ pub fn around<S: ArmsSkeleton>(
         return Outcome { before, placed: None };
     }
     let weapon = mem::read::<usize>(vis + layout.weapons).unwrap_or(0);
-    let held = Held::of(weapon);
+    let held = held_of(weapon);
     let bow_vis = held_bow(vis, layout);
     let bow = bow_vis.is_some();
     let swung = LAST_WEAPON.lock().map(|mut last| swung_as(held, &mut last)).unwrap_or(held);
@@ -206,6 +234,9 @@ pub fn around<S: ArmsSkeleton>(
             }
             if let Some(bow_vis) = bow_vis {
                 crate::handwork::bow::place_string(bow_vis);
+            }
+            if let Some(skeleton) = &skeleton {
+                crate::melee_reach::look(skeleton, weapon, held);
             }
             if let (Some(axes), Some(skeleton)) = (options.fingers, &skeleton) {
                 monaka_arms::fingers::place_free_hands(options.melee.aim_side, weapon != 0, |side, tracked| crate::fingers::apply(skeleton, &axes, side, tracked));

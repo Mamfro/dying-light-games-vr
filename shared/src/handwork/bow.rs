@@ -29,6 +29,7 @@ use super::aim;
 use crate::hands;
 use crate::model::Model;
 use monaka_core::camera::Mat34;
+use monaka_core::gesture::{Pull, PullRules};
 use monaka_core::protocol::{LEFT_HAND, RIGHT_HAND};
 use monaka_hook::module::Module;
 use monaka_hook::{Hooks, InFlight, Original, mem};
@@ -58,10 +59,9 @@ const LOOSING: i32 = 4;
 /// Until the string's rest is known: the string hand this far behind the bow hand along its aim
 /// (metres) is where the string rests.
 const REST: f32 = 0.1;
-/// The string pulled this far back from where it rests (metres) is a full draw...
-const FULL_PULL: f32 = 0.45;
-/// ...and it goes no further back than this.
-const LONGEST_PULL: f32 = 0.7;
+/// The string pulled 0.45 m back from where it rests is a full draw, and it goes no further back
+/// than 0.7 m; any pull counts (a hand in front of the rest draws nothing).
+const PULL: PullRules = PullRules { least: 0.0, full: 0.45, longest: 0.7 };
 /// A draw the update has not confirmed for this long is over...
 const DRAW_FRESH: Duration = Duration::from_millis(200);
 /// ...and this long after one the string is back at rest.
@@ -268,7 +268,7 @@ pub fn place_string(bow: usize) {
     let known = KNOWN.lock().ok().and_then(|k| k.as_ref().filter(|k| k.model == model.id()).map(|k| (k.arrow, k.string, k.rest)));
     let Some((Some((nock, axis, sign)), string, Some(rest))) = known else { return };
     let Some(back) = pulled() else { return };
-    let back = back.clamp(0.0, LONGEST_PULL);
+    let back = back.clamp(0.0, PULL.longest);
     let Some(at) = model.world(nock) else { return };
     let way = unit([at[axis], at[4 + axis], at[8 + axis]]).map(|c| c * sign);
     let mut placed = false;
@@ -355,15 +355,15 @@ fn pulled() -> Option<f32> {
     let rest = KNOWN.lock().ok().and_then(|k| k.as_ref().and_then(|k| k.rest));
     if let (Some((_, way)), Some(rest), Some(holder)) = (line(), rest, placed()) {
         let at = into(&holder, [0, 1, 2].map(|c| hand[c] - holder[3 + 4 * c]));
-        return Some(hands::dot([0, 1, 2].map(|c| rest.nock_at[c] - at[c]), way));
+        return Some(Pull::back(rest.nock_at, way, at, &PULL));
     }
     let (bow, aim) = bow_now()?;
     Some(hands::dot([0, 1, 2].map(|c| bow[c] - hand[c]), aim) - REST)
 }
 
-/// The draw's share (0..1) for the string pulled `back` metres.
+/// The draw's share (0..1) for the string pulled `back` metres: none in front of the rest.
 fn pull(back: f32) -> f32 {
-    (back / FULL_PULL).clamp(0.0, 1.0)
+    Pull::share(back, &PULL).unwrap_or(0.0)
 }
 
 unsafe extern "C" fn update(controller: usize, dt: f32) {
@@ -462,7 +462,7 @@ mod tests {
     #[test]
     fn the_pull_runs_from_hands_together_to_a_full_draw() {
         assert_eq!(pull(-0.05), 0.0);
-        assert!((pull(FULL_PULL / 2.0) - 0.5).abs() < 1e-5);
+        assert!((pull(PULL.full / 2.0) - 0.5).abs() < 1e-5);
         assert_eq!(pull(0.9), 1.0);
     }
 }

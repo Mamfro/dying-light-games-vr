@@ -17,6 +17,7 @@ use monaka_framegen::motion::{self, MotionFix};
 use monaka_channel::d3d12;
 use monaka_core::Aligned16;
 use monaka_core::depth::{invert, multiply};
+use monaka_core::eye_history::{EyeHistory, Rules};
 use monaka_hook::mem;
 use monaka_streamline::{Constants, TAG_BYTES, buffer, constants as at};
 use monaka_producer::log;
@@ -59,7 +60,7 @@ struct State {
     options_applied: bool,
     /// This frame's eye (from its label), and what the fix needs for it.
     eye: Option<usize>,
-    previous: [Option<[f32; 16]>; 2],
+    previous: EyeHistory<(), [f32; 16]>,
     fix: Option<motion::Constants>,
     depth: Option<usize>,
     motion: Option<(usize, u32)>,
@@ -77,7 +78,7 @@ static STATE: Mutex<State> = Mutex::new(State {
     eye_viewports: [Aligned16([0; VIEWPORT_BYTES]); 2],
     options_applied: false,
     eye: None,
-    previous: [None; 2],
+    previous: EyeHistory::new(Rules::OWN),
     fix: None,
     depth: None,
     motion: None,
@@ -162,7 +163,8 @@ pub fn constants(constants: *const u8, viewport: *const u8, eye: Option<usize>) 
     let now = copy.view_projection()?;
     let game_to_prev = copy.matrix(at::CLIP_TO_PREV_CLIP);
     let mvec_scale = copy.vec2(at::MVEC_SCALE);
-    let same_to_prev = match (s.previous[eye], invert(&now)) {
+    s.previous.frame(eye, (), false);
+    let same_to_prev = match (s.previous.previous(eye).copied(), invert(&now)) {
         (Some(previous), Some(inverse)) => {
             let to_prev = multiply(&inverse, &previous);
             if let Some(from_prev) = invert(&previous).map(|p| multiply(&p, &now)) {
@@ -177,7 +179,7 @@ pub fn constants(constants: *const u8, viewport: *const u8, eye: Option<usize>) 
             game_to_prev
         }
     };
-    s.previous[eye] = Some(now);
+    s.previous.keep(eye, now);
     s.eye = Some(eye);
     s.fix = Some(motion::Constants { game_to_prev, same_to_prev, size: [0; 2], mvec_scale, object_scale: OBJECT_SCALE, pad: [0.0; 3] });
     s.constants = Some(copy);

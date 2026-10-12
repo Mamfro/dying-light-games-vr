@@ -1,13 +1,14 @@
 //! Where the hands are in the game's world, for what the hands do with the world's objects
 //! (throwing, the bow, the reload gesture): after each arms callback the rig has posed the arms
 //! model on the controllers, and each hand's element (`L_Hand`, `R_Hand`) is read back with the
-//! engine's element getters ([`sample`]). A short history gives each hand's velocity.
+//! engine's element getters ([`sample`]). A short trail of each (`monaka_core::trail`) gives its
+//! velocity.
 
 use crate::player::hands;
+use monaka_core::trail::Trail;
 use monaka_hook::mem;
 use monaka_hook::module::Module;
 use monaka_producer::{Rejection, log};
-use std::collections::VecDeque;
 use std::ffi::{CStr, c_void};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -19,9 +20,9 @@ type ElementIdFn = unsafe extern "system" fn(usize, *const i8) -> i32;
 pub const LEFT: usize = 0;
 pub const RIGHT: usize = 1;
 const NAMES: [&CStr; 2] = [c"L_Hand", c"R_Hand"];
-/// The history kept, and the span a velocity is measured over.
-const KEPT: Duration = Duration::from_millis(600);
-const VELOCITY_SPAN: Duration = Duration::from_millis(70);
+/// The trail kept, and the span a velocity is measured over (seconds).
+const KEPT: f64 = 0.6;
+const VELOCITY_SPAN: f64 = 0.07;
 
 struct Getters {
     element_id: ElementIdFn,
@@ -29,12 +30,18 @@ struct Getters {
 }
 
 static GETTERS: OnceLock<Getters> = OnceLock::new();
-/// A hand's positions, newest last.
-type Track = VecDeque<(Instant, [f32; 3])>;
-/// Each hand's.
-static HISTORY: Mutex<[Track; 2]> = Mutex::new([VecDeque::new(), VecDeque::new()]);
-/// Each controller's world positions, newest last.
-static CONTROLLERS: Mutex<[Track; 2]> = Mutex::new([VecDeque::new(), VecDeque::new()]);
+/// Each hand's element's way in the world.
+static HISTORY: Mutex<[Trail; 2]> = Mutex::new([Trail::new(KEPT), Trail::new(KEPT)]);
+/// Each controller's way in the world.
+static CONTROLLERS: Mutex<[Trail; 2]> = Mutex::new([Trail::new(KEPT), Trail::new(KEPT)]);
+/// The trails' clock.
+static STARTED: OnceLock<Instant> = OnceLock::new();
+
+/// Seconds on the trails' clock, which the hand gestures ([`crate::player::controls`]) keep time by
+/// too.
+pub fn now() -> f64 {
+    STARTED.get_or_init(Instant::now).elapsed().as_secs_f64()
+}
 
 pub fn resolve(engine_module: &Module) -> Result<(), Rejection> {
     let find = |name: &str| engine_module.export(name).ok_or_else(|| Rejection::revision(format!("the engine does not export {name}")));
@@ -92,84 +99,47 @@ pub fn sample_controllers(origin: &[f32; 12], palms: [Option<monaka_core::protoc
     keep(&CONTROLLERS, positions);
 }
 
-/// Adds each side's position to a history (clearing a side with none), dropping what is too old.
-fn keep(history: &Mutex<[Track; 2]>, positions: [Option<[f32; 3]>; 2]) {
-    let now = Instant::now();
+/// Adds each side's position to its trail (clearing a side with none), dropping what is too old.
+/// Several callbacks in one update give the same pose: one sample each ([`Trail::SAME_UPDATE`]).
+fn keep(history: &Mutex<[Trail; 2]>, positions: [Option<[f32; 3]>; 2]) {
+    let now = now();
     let Ok(mut history) = history.lock() else { return };
-    for (side, position) in positions.into_iter().enumerate() {
-        let list = &mut history[side];
+    for (trail, position) in history.iter_mut().zip(positions) {
         match position.filter(|p| p.iter().all(|c| c.is_finite())) {
             Some(p) => {
-                // Several callbacks in one update give the same pose: one sample each.
-                if list.back().is_none_or(|(at, _)| now.duration_since(*at) > Duration::from_millis(2)) {
-                    list.push_back((now, p));
-                }
+                trail.push_position(now, p);
             }
-            None => list.clear(),
+            None => trail.clear(),
         }
-        while list.front().is_some_and(|(at, _)| now.duration_since(*at) > KEPT) {
-            list.pop_front();
-        }
+        trail.expire(now);
     }
 }
 
 /// A hand's latest position in the world.
 pub fn position(side: usize) -> Option<[f32; 3]> {
-    HISTORY.lock().ok()?[side].back().map(|(_, p)| *p)
+    HISTORY.lock().ok()?[side].latest().map(|s| s.position)
 }
 
 /// A hand's fastest velocity (m/s, each over [`VELOCITY_SPAN`]) in the last `within`: the swing
 /// behind an action the game carries out a little after it.
 pub fn fastest(side: usize, within: Duration) -> Option<[f32; 3]> {
-    fastest_in(&HISTORY, side, within)
+    HISTORY.lock().ok()?[side].fastest(within.as_secs_f64(), VELOCITY_SPAN).map(|peak| peak.velocity)
 }
 
 /// Where a controller is in the world, as of the latest arms callback ([`sample_controllers`]).
 pub fn controller(side: usize) -> Option<[f32; 3]> {
-    CONTROLLERS.lock().ok()?[side].back().map(|(_, p)| *p)
+    CONTROLLERS.lock().ok()?[side].latest().map(|s| s.position)
 }
 
 /// A controller's fastest velocity in the world (m/s) in the last `within` ([`sample_controllers`]).
 pub fn controller_fastest(side: usize, within: Duration) -> Option<[f32; 3]> {
-    fastest_in(&CONTROLLERS, side, within)
+    CONTROLLERS.lock().ok()?[side].fastest(within.as_secs_f64(), VELOCITY_SPAN).map(|peak| peak.velocity)
 }
 
 /// Which way a controller travelled through its fastest moment in the last `within` (unit): from
 /// `before` that moment to `after` it (the newest sample at most). `None` when it hardly moved.
 pub fn controller_stroke(side: usize, within: Duration, before: Duration, after: Duration) -> Option<[f32; 3]> {
-    let history = CONTROLLERS.lock().ok()?;
-    let list = &history[side];
-    let peak = peak_in(list, within)?.1;
-    let (peak_at, _) = list[peak];
-    let (_, from) = *list.iter().take(peak + 1).find(|(at, _)| peak_at.duration_since(*at) <= before)?;
-    let (_, to) = *list.iter().skip(peak).take_while(|(at, _)| at.duration_since(peak_at) <= after).last()?;
-    let moved = [0, 1, 2].map(|k| to[k] - from[k]);
-    let length = length(moved);
-    (length > 0.005).then(|| moved.map(|c| c / length))
-}
-
-/// The fastest velocity in `list` in the last `within`, and the sample it was measured at.
-fn peak_in(list: &Track, within: Duration) -> Option<([f32; 3], usize)> {
-    let (newest_at, _) = *list.back()?;
-    let mut best: Option<([f32; 3], usize)> = None;
-    for (i, &(at, p)) in list.iter().enumerate() {
-        if newest_at.duration_since(at) > within {
-            continue;
-        }
-        // The latest sample at least a span earlier.
-        let Some(&(from_at, from)) = list.iter().take(i).rev().find(|(t, _)| at.duration_since(*t) >= VELOCITY_SPAN) else { continue };
-        let dt = at.duration_since(from_at).as_secs_f32();
-        let v = [0, 1, 2].map(|k| (p[k] - from[k]) / dt);
-        if best.is_none_or(|(b, _)| length(v) > length(b)) {
-            best = Some((v, i));
-        }
-    }
-    best
-}
-
-fn fastest_in(history: &Mutex<[Track; 2]>, side: usize, within: Duration) -> Option<[f32; 3]> {
-    let history = history.lock().ok()?;
-    peak_in(&history[side], within).map(|(v, _)| v)
+    CONTROLLERS.lock().ok()?[side].stroke(within.as_secs_f64(), VELOCITY_SPAN, before.as_secs_f64(), after.as_secs_f64())
 }
 
 /// Where the right hand holds a bowstring: between its index and middle fingers' middle joints
@@ -202,7 +172,7 @@ pub fn rigid(m: &[f32; 12]) -> [f32; 12] {
 
 pub fn report() {
     if GETTERS.get().is_some() {
-        let held = HISTORY.lock().map(|h| [h[0].len(), h[1].len()]).unwrap_or_default();
+        let held = HISTORY.lock().map(|h| h.each_ref().map(Trail::len)).unwrap_or_default();
         log!("hands in the world: samples held at the stop {held:?}");
     }
 }

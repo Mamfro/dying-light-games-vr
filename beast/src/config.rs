@@ -20,6 +20,11 @@ pub struct Config {
     /// Physical melee (with the hand rig; `eng_chr::melee`). The Beast starts a light attack when
     /// it is let go, as DL1 does: swings press briefly.
     pub physical_melee: Option<melee::Physical>,
+    /// With it, a weapon's swing attacks only when the blade is about to reach something
+    /// (`eng_chr::melee_reach`; `melee_on_reach=0` for a test).
+    pub melee_on_reach: bool,
+    /// The view stays level instead of bobbing with the steps (`eng_chr::view_bob`).
+    pub disable_view_bobbing: bool,
     /// The flashlight in VR (with stereo; [`crate::player::flashlight`]): its camera-movement sway
     /// held at zero (`flashlight_steady`, default on) and its screen-space shadows off
     /// (`flashlight_shadows=1` keeps them); `flashlight_source=x,y` sets its source offset (the
@@ -75,6 +80,8 @@ impl Config {
             arms_aim: AimSettings::from_options(options, shared.aim, true),
             melee: melee::Settings::from_options(options, shared.aim.side),
             physical_melee: melee::Physical::from_options(options, shared.aim.rig, true),
+            melee_on_reach: options.switch("melee_on_reach", true),
+            disable_view_bobbing: options.switch("disable_view_bobbing", true),
             flashlight: crate::player::flashlight::Settings {
                 steady: stereo && options.switch("flashlight_steady", true),
                 shadow_offset: options.value::<f32>("flashlight_shadow_offset").filter(|v| v.is_finite() && v.abs() <= 2.0),

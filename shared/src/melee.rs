@@ -85,6 +85,12 @@ pub fn install(hooks: &mut Hooks, gamedll: &Module, build: Build, physical: Phys
     Ok(())
 }
 
+/// The blade's length for `held` (metres: the weapon in the hand, or a fist's reach), once physical
+/// melee is on.
+pub fn blade(held: Held) -> Option<f32> {
+    PHYSICAL.get().map(|p| p.reach(held))
+}
+
 /// What the arms hold, if `player` is the player character and holds no gun.
 fn player_melee(player: usize) -> Option<Held> {
     let held = monaka_arms::melee::held().filter(|&h| h != Held::Gun)?;

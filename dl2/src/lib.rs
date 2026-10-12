@@ -205,6 +205,11 @@ fn start(session: &Session) -> Result<(), Rejection> {
         {
             log!("physical melee off: {}", why.reason);
         }
+        if config.disable_view_bobbing
+            && let Some(gamedll) = &gamedll
+        {
+            eng_chr::view_bob::install(gamedll, engine::VIEW_BOB);
+        }
         if config.disable_zombie_grabs
             && let Some(gamedll) = &gamedll
             && let Err(why) = eng_chr::grabs::install(&mut hooks, gamedll, engine::GRABS)

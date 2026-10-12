@@ -189,7 +189,11 @@ pub const PIECES: [eng_chr::gui::Piece; 5] = {
     ]
 };
 
+/// The player's `HeadBobFactor` in its parameter block (for `eng_chr::view_bob`).
+pub const VIEW_BOB: eng_chr::view_bob::Build = eng_chr::view_bob::Build { player_vtable: PLAYER_VTABLE, parameters_slot: 0x5e0, head_bob: 0x3420 };
 // --- Physical melee and the movement step (gamedll, engine) -------------------------------------------
+/// The game object and the class the game's combat target search finds (for `eng_chr::melee_reach`).
+pub const MELEE_REACH: eng_chr::melee_reach::Build = eng_chr::melee_reach::Build { game: 0x3acb4f0, target_class: 0x3952268 };
 /// The melee code (`eng_chr::melee`): DL2's
 /// at new addresses; the attack start's window at +0x1d4 and its copy (behind the controller's
 /// "time until the hit window", 0xf5a7d0) at +0x530; attack types 0..=26; segments carry 16 more

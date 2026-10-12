@@ -60,3 +60,35 @@ pub const MANIFESTS: &[Manifest] = &[Manifest {
     left_hand_aims: true,
     weapon_ring: true,
 }];
+
+#[cfg(test)]
+mod tests {
+    use monaka_core::capability::{Capabilities, FEATURES, unbacked};
+    use monaka_core::situation::Situation;
+
+    /// What this game's producer supplies (`monaka_core::capability`): the eye cameras, the arms
+    /// with their fingers, what the hand holds, the facing it steers, the buttons it presses, the
+    /// character's step, the HUD at a depth and in pieces, FSR per eye; and the cutscenes
+    /// (`IsObjectOnSomeMovie`), the world not drawn (a loading screen) and climbing it reports.
+    const CAPABILITIES: Capabilities = Capabilities::EYE_CAMERA
+        .with(Capabilities::SKELETON)
+        .with(Capabilities::FINGER_BONES)
+        .with(Capabilities::HELD_ITEM)
+        .with(Capabilities::LOOK_SINK)
+        .with(Capabilities::ACTION_PRESS)
+        .with(Capabilities::CHARACTER_STEP)
+        .with(Capabilities::HUD_LAYER)
+        .with(Capabilities::HUD_PIECES)
+        .with(Capabilities::PER_EYE_HISTORY)
+        .with(Capabilities::reports(Situation::CameraTaken))
+        .with(Capabilities::reports(Situation::WorldHidden))
+        .with(Capabilities::reports(Situation::Traversal));
+
+    #[test]
+    fn every_shared_option_offered_is_one_the_game_can_carry() {
+        for manifest in super::MANIFESTS {
+            let unbacked = unbacked(manifest, CAPABILITIES, FEATURES);
+            assert!(unbacked.is_empty(), "{}: {unbacked:?}", manifest.id);
+        }
+    }
+}

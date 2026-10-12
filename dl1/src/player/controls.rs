@@ -24,6 +24,7 @@
 
 use crate::engine;
 use crate::player::hand_world;
+use monaka_core::gesture::{Duck, DuckRules, TouchAway, TouchAwayRules};
 use monaka_hook::module::Module;
 use monaka_hook::{Hooks, InFlight, Original, mem};
 use monaka_producer::{Rejection, log};
@@ -96,19 +97,14 @@ const KEY_X: u32 = 0x0f02;
 const RELOAD_KEY: u32 = 0x0f10;
 
 /// The reload gesture (`reload_gesture`, with the hand rig and a gun drawn): the left hand brought
-/// within [`RELOAD_NEAR`] of the gun hand, then taken more than [`RELOAD_AWAY`] away within
-/// [`RELOAD_WITHIN`], reloads; not again for [`RELOAD_COOLDOWN`].
-const RELOAD_NEAR: f32 = 0.15;
-const RELOAD_AWAY: f32 = 0.25;
-const RELOAD_WITHIN: Duration = Duration::from_millis(1000);
-const RELOAD_COOLDOWN: Duration = Duration::from_millis(1500);
+/// within 0.15 m of the gun hand, then taken more than 0.25 m away within 1 s, reloads; not again
+/// for 1.5 s.
+const RELOAD_TOUCH: TouchAwayRules = TouchAwayRules::RELOAD;
 
-/// The head this far (metres) below standing crouches; back within [`STAND_DROP`] stands.
-const CROUCH_DROP: f32 = 0.35;
-const STAND_DROP: f32 = 0.22;
-/// While standing, the standing height follows a lower head down this fast (m/s): sitting down
-/// or the tracking drifting does not leave the player crouched.
-const STANDING_SINK: f32 = 0.02;
+/// The head 0.35 m below standing crouches; back within 0.22 m stands. While standing, the standing
+/// height follows a lower head down at 0.02 m/s: sitting down or the tracking drifting does not
+/// leave the player crouched.
+const DUCKING: DuckRules = DuckRules::CROUCH;
 
 type RegisterFn = unsafe extern "C" fn(*mut c_void, *mut u8);
 type DispatchFn = unsafe extern "C" fn(*mut c_void, usize, *mut c_void);
@@ -132,20 +128,16 @@ static Y_DOWN: Mutex<Option<Instant>> = Mutex::new(None);
 /// When the heal and reload buttons were pressed, while they are.
 static HEAL_HELD: Mutex<Option<Instant>> = Mutex::new(None);
 static HEALS: AtomicU64 = AtomicU64::new(0);
-/// The reload gesture: on, its button down, when the left hand last touched the gun, the last reload.
+/// The reload gesture: on, its button down, the left hand's touch of the gun, the reloads.
 static RELOAD_GESTURE: AtomicBool = AtomicBool::new(false);
 static RELOAD_HELD: Mutex<Option<Instant>> = Mutex::new(None);
-static GESTURE: Mutex<(Option<Instant>, Option<Instant>)> = Mutex::new((None, None));
+static GESTURE: Mutex<TouchAway> = Mutex::new(TouchAway::new());
 static RELOADS: AtomicU64 = AtomicU64::new(0);
 /// The input devices seen, with whether each is a pad (by its class).
 static PADS: Mutex<Vec<(usize, bool)>> = Mutex::new(Vec::new());
 
-/// The standing head height (tracking space) and when the head was last seen.
-struct Head {
-    standing: f32,
-    seen: Instant,
-}
-static HEAD: Mutex<Option<Head>> = Mutex::new(None);
+/// The head's height against the highest it has stood at (tracking space).
+static HEAD: Mutex<Duck> = Mutex::new(Duck::new());
 
 fn action_matches(gamedll: &Module, (entry, name, id): (usize, &str, u32)) -> Result<(), String> {
     let at = gamedll.at(entry);
@@ -211,19 +203,7 @@ pub fn note_head(y: f32) {
         return;
     }
     let Ok(mut head) = HEAD.lock() else { return };
-    let now = Instant::now();
-    let crouched = CROUCH_WANTED.load(Relaxed);
-    let state = head.get_or_insert(Head { standing: y, seen: now });
-    let dt = now.duration_since(state.seen).as_secs_f32().min(0.1);
-    state.seen = now;
-    if y > state.standing {
-        state.standing = y;
-    } else if !crouched {
-        state.standing = (state.standing - STANDING_SINK * dt).max(y);
-    }
-    let drop = state.standing - y;
-    let wanted = if crouched { drop > STAND_DROP } else { drop > CROUCH_DROP };
-    CROUCH_WANTED.store(wanted, Relaxed);
+    CROUCH_WANTED.store(head.feed(hand_world::now(), y, &DUCKING), Relaxed);
 }
 
 fn copy_with(entry: *const u8, action: u32, key: u32) -> [u8; ENTRY] {
@@ -349,21 +329,7 @@ fn reload_gestured() -> bool {
     // The controllers, not the arms: with a gun held two-handed the left hand rides the gun.
     let (Some(left), Some(right)) = (hand_world::controller(hand_world::LEFT), hand_world::controller(hand_world::RIGHT)) else { return false };
     let apart = hand_world::length([0, 1, 2].map(|k| left[k] - right[k]));
-    let Ok(mut gesture) = GESTURE.lock() else { return false };
-    let now = Instant::now();
-    let (touched, last) = &mut *gesture;
-    if apart < RELOAD_NEAR {
-        *touched = Some(now);
-        return false;
-    }
-    let fresh = touched.is_some_and(|at| now.duration_since(at) < RELOAD_WITHIN);
-    let rested = last.is_none_or(|at| now.duration_since(at) > RELOAD_COOLDOWN);
-    if apart > RELOAD_AWAY && fresh && rested {
-        *touched = None;
-        *last = Some(now);
-        return true;
-    }
-    false
+    GESTURE.lock().is_ok_and(|mut gesture| gesture.feed(hand_world::now(), apart, &RELOAD_TOUCH))
 }
 
 /// Whether the input pass's device `index` is a pad (its class, looked up once per device).

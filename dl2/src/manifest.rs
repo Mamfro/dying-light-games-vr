@@ -27,6 +27,8 @@ pub const MANIFESTS: &[Manifest] = &[Manifest {
         opt("room_scale", "Room-scale movement", "Your real steps and leans move your character; walls and enemies still stop it.", Kind::Switch { default: true })
             .on(Shown::Game)
             .only_when("aim", "hand_rig"),
+        // Monaka's own setting (on its tab, for every game), read here.
+        DISABLE_VIEW_BOBBING,
         opt("disable_zombie_grabs", "Disable zombie grabs", "Zombies never grab you. Off: they grab and bite until you break free, as in the game.", Kind::Switch { default: true })
             .on(Shown::Game),
         BINARY_FINGERS,
@@ -47,3 +49,30 @@ pub const MANIFESTS: &[Manifest] = &[Manifest {
     left_hand_aims: true,
     weapon_ring: true,
 }];
+
+#[cfg(test)]
+mod tests {
+    use monaka_core::capability::{Capabilities, FEATURES, unbacked};
+
+    /// What this game's producer supplies (`monaka_core::capability`): the eye cameras, the arms
+    /// with their fingers, what the hand holds, the look it steers, the buttons it presses, the
+    /// character's step, the HUD at a depth and in pieces, DLSS per eye. It reports no situations.
+    const CAPABILITIES: Capabilities = Capabilities::EYE_CAMERA
+        .with(Capabilities::SKELETON)
+        .with(Capabilities::FINGER_BONES)
+        .with(Capabilities::HELD_ITEM)
+        .with(Capabilities::LOOK_SINK)
+        .with(Capabilities::ACTION_PRESS)
+        .with(Capabilities::CHARACTER_STEP)
+        .with(Capabilities::HUD_LAYER)
+        .with(Capabilities::HUD_PIECES)
+        .with(Capabilities::PER_EYE_HISTORY);
+
+    #[test]
+    fn every_shared_option_offered_is_one_the_game_can_carry() {
+        for manifest in super::MANIFESTS {
+            let unbacked = unbacked(manifest, CAPABILITIES, FEATURES);
+            assert!(unbacked.is_empty(), "{}: {unbacked:?}", manifest.id);
+        }
+    }
+}

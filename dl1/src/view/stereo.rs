@@ -14,7 +14,7 @@ use monaka_channel::ChannelName;
 use monaka_channel::hands::HandChannel;
 use monaka_channel::pose::PoseChannel;
 use monaka_core::alternate::Schedule;
-use monaka_core::camera::{self, Frustum, Mat34, apply_head, distance, parallel_eyes, rigid_inverse, turn};
+use monaka_core::camera::{self, Frustum, Mat34, apply_head, distance, parallel_eyes, rigid_inverse};
 use monaka_core::protocol::{HandPose, HeadPose, LEFT_HAND, RIGHT_HAND};
 use monaka_hook::{InFlight, Original, mem};
 use monaka_producer::log;
@@ -313,6 +313,7 @@ fn report(_: &Driver, used: &mut HeadPose) {
 /// Before present `n`: the upscaler and the hybrid publish their own pairs (true); otherwise the
 /// driver's publisher copies this frame's eye.
 fn before_present(driver: &Driver, chain: &IDXGISwapChain, n: u64) -> bool {
+    monaka_producer::situation::report(monaka_producer::situation::Situation::WorldHidden, !world_drawn_recently(), 500);
     let config = &setup().config;
     let report = |used: &mut HeadPose| report(driver, used);
     if crate::output::upscale::enabled() {
@@ -557,10 +558,7 @@ fn origin_with(base: &Mat34, head_aim: bool, unlean: bool, baked: f32) -> Mat34 
             base[7] -= up;
         }
     }
-    let mut origin = match head_aim.then(|| camera::level(&base)).flatten() {
-        Some(flat) => turn(&flat, -baked),
-        None => base,
-    };
+    let mut origin = head_aim.then(|| camera::tracking_origin(&base, baked)).flatten().unwrap_or(base);
     // Climbing, backed off the wall to see the climb.
     if let Some((distance, [x, z])) = aim::climb_pullback() {
         origin[3] += x * distance;
@@ -575,11 +573,6 @@ fn origin_with(base: &Mat34, head_aim: bool, unlean: bool, baked: f32) -> Mat34 
 /// the climb pullback and the eyes move it well under that. The game looks things up near its
 /// camera, and a position not finite or far out crashes it.
 const CAMERA_REACH: f32 = 5.0;
-
-fn plausible_camera(written: &Mat34, game: &Mat34) -> bool {
-    let apart = [written[3] - game[3], written[7] - game[7], written[11] - game[11]];
-    written.iter().all(|v| v.is_finite()) && apart.iter().map(|v| v * v).sum::<f32>().sqrt() < CAMERA_REACH
-}
 
 fn note_implausible_camera(what: &str, written: &Mat34, game: &Mat34) {
     static COUNT: AtomicU64 = AtomicU64::new(0);
@@ -624,7 +617,7 @@ fn turn_live_camera(writer: &CameraWriter, pose: &HeadPose, pair: u64, head_aim:
     };
     let baked = aim::baked_yaw();
     let turned = view_center(&base, pose, head_aim, unlean, baked);
-    if !plausible_camera(&turned, &base) {
+    if !camera::within_reach(&turned, &base, CAMERA_REACH) {
         note_implausible_camera("live camera", &turned, &base);
         return;
     }
@@ -774,7 +767,7 @@ fn shift_render_camera(level: usize, view: usize) {
         sample.view = rigid_inverse(&sample.inverse);
         COUNTERS.head_applied.fetch_add(1, Relaxed);
     }
-    if !plausible_camera(&sample.inverse, &center.inverse) {
+    if !camera::within_reach(&sample.inverse, &center.inverse, CAMERA_REACH) {
         note_implausible_camera("eye camera", &sample.inverse, &center.inverse);
         COUNTERS.shift_failures.fetch_add(1, Relaxed);
         return;

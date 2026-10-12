@@ -12,7 +12,8 @@
 //! stick's when that is more. The game's own sweet spot, blocking and breaking stay as they are.
 
 use monaka_arms::controllers;
-use monaka_core::math::rotate;
+use monaka_core::gesture::wrist_roll;
+use monaka_core::math::wrap_degrees;
 use monaka_core::protocol::{HandPose, LEFT_HAND, RIGHT_HAND};
 use monaka_hook::module::Module;
 use monaka_hook::{Hooks, InFlight, Original, mem};
@@ -85,27 +86,13 @@ pub fn install(hooks: &mut Hooks, gamedll: &Module, build: Build) -> Result<(), 
     Ok(())
 }
 
-/// How far the wrist holding `palm` is twisted about where it points (degrees, clockwise as the
-/// player sees it), from its knuckles' up against the world's up.
-fn twist(palm: &HandPose) -> Option<f32> {
-    let forward = rotate(palm.orientation, [0.0, 0.0, -1.0]);
-    let up = rotate(palm.orientation, [0.0, 1.0, 0.0]);
-    // The world's up, square to where the hand points (the hand pointing up or down has none).
-    let level = [-forward[1] * forward[0], 1.0 - forward[1] * forward[1], -forward[1] * forward[2]];
-    let length = (level[0] * level[0] + level[1] * level[1] + level[2] * level[2]).sqrt();
-    if length < 0.2 {
-        return None;
-    }
-    let level = level.map(|v| v / length);
-    // Right of where the hand points: forward × level up.
-    let right = [forward[1] * level[2] - forward[2] * level[1], forward[2] * level[0] - forward[0] * level[2], forward[0] * level[1] - forward[1] * level[0]];
-    let dot = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-    Some(dot(up, right).atan2(dot(up, level)).to_degrees())
-}
+/// The tracking space's up.
+const UP: [f32; 3] = [0.0, 1.0, 0.0];
 
-/// `angle` turned into -180..180 degrees.
-fn wrapped(angle: f32) -> f32 {
-    (angle + 180.0).rem_euclid(360.0) - 180.0
+/// How far the wrist holding `palm` is twisted about where it points (degrees, clockwise as the
+/// player sees it), from its knuckles' up against the world's up; none pointing up or down.
+fn twist(palm: &HandPose) -> Option<f32> {
+    wrist_roll(palm.orientation, UP).map(f32::to_degrees)
 }
 
 fn wrist(side: usize) -> Option<f32> {
@@ -142,7 +129,7 @@ unsafe extern "C" fn pick_input(pick: usize, input: usize) {
     }
     let (Some(now), Some(left)) = (mem::read::<f32>(pick + build.target), wrist(LEFT_HAND)) else { return };
     let Some(lock) = lock(minigame, now) else { return };
-    let angle = (lock.pick_start + wrapped(left - lock.wrists_start[0]) * PICK_GAIN).rem_euclid(360.0).min(MOST_ANGLE);
+    let angle = (lock.pick_start + wrap_degrees(left - lock.wrists_start[0]) * PICK_GAIN).rem_euclid(360.0).min(MOST_ANGLE);
     mem::write(pick + build.target, angle);
     mem::write(pick + build.moving, 1u8);
 }
@@ -151,12 +138,12 @@ unsafe extern "C" fn poll(input: usize, action: u32) -> f32 {
     let _flight = InFlight::enter();
     // SAFETY: forwards the game's own call.
     let value = unsafe { POLL_ORIGINAL.get()(input, action) };
-    if !BUILD.get().is_some_and(|b| b.screwdriver_action == action) {
+    if BUILD.get().is_none_or(|b| b.screwdriver_action != action) {
         return value;
     }
     let Some(lock) = LOCK.lock().ok().and_then(|l| *l).filter(|l| l.seen.elapsed().as_secs_f32() < GONE) else { return value };
     let Some(right) = wrist(RIGHT_HAND) else { return value };
-    let turn = (wrapped(right - lock.wrists_start[1]).abs() / FULL_TURN).clamp(0.0, 1.0);
+    let turn = (wrap_degrees(right - lock.wrists_start[1]).abs() / FULL_TURN).clamp(0.0, 1.0);
     value.max(turn)
 }
 
@@ -184,11 +171,5 @@ mod tests {
         assert!((a.abs() - 90.0).abs() < 1e-2 && (b.abs() - 90.0).abs() < 1e-2 && a * b < 0.0, "{a} {b}");
         // Pointing straight up has no twist to read.
         assert!(twist(&palm([s, 0.0, 0.0, s])).is_none());
-    }
-
-    #[test]
-    fn angles_wrap_around() {
-        assert_eq!(wrapped(190.0), -170.0);
-        assert_eq!(wrapped(-190.0), 170.0);
     }
 }

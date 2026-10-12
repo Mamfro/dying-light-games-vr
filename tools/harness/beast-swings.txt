@@ -1,0 +1,35 @@
+# Dying Light: The Beast: melee swings at the air (attack on reach). In gameplay with a melee weapon in hand (the
+# hammer or a machete), facing open ground with nothing within a few metres. Three fast right-hand swings, each
+# drawn back, swung across in about 80 ms and brought back. None should start an attack: the log's "reached
+# nothing: no attack" lines, and its "physical melee look" lines list what the search found near the blade.
+0     focus DyingLightGame_TheBeast_x64_rwdi.exe
+0     head 0 0
+0     pad none 0 0
+0     hand left -0.2 -0.3 -0.35 0 0
+0     hand right 0.2 -0.3 -0.35 0 0
+3000  save ready
+3000  hand right 0.35 0.10 -0.05 0 40
+3600  hand right 0.30 0.05 -0.25 0 20
+3620  hand right 0.22 0.00 -0.40 0 0
+3640  hand right 0.10 -0.05 -0.50 0 -20
+3660  hand right -0.02 -0.10 -0.52 0 -40
+3680  hand right -0.14 -0.15 -0.45 0 -60
+3700  save swing_1
+4400  hand right 0.2 -0.3 -0.35 0 0
+5500  hand right 0.35 0.10 -0.05 0 40
+6100  hand right 0.30 0.05 -0.25 0 20
+6120  hand right 0.22 0.00 -0.40 0 0
+6140  hand right 0.10 -0.05 -0.50 0 -20
+6160  hand right -0.02 -0.10 -0.52 0 -40
+6180  hand right -0.14 -0.15 -0.45 0 -60
+6200  save swing_2
+6900  hand right 0.2 -0.3 -0.35 0 0
+8000  hand right 0.35 0.10 -0.05 0 40
+8600  hand right 0.30 0.05 -0.25 0 20
+8620  hand right 0.22 0.00 -0.40 0 0
+8640  hand right 0.10 -0.05 -0.50 0 -20
+8660  hand right -0.02 -0.10 -0.52 0 -40
+8680  hand right -0.14 -0.15 -0.45 0 -60
+8700  save swing_3
+9400  hand right 0.2 -0.3 -0.35 0 0
+11000 end
