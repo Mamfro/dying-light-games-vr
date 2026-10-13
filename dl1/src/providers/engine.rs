@@ -415,42 +415,6 @@ pub fn action_matches(gamedll: &monaka_hook::module::Module, (entry, name, id): 
 /// `int IModelObject::GetElementID(const char*) const`: an element's index by name.
 pub const ELEMENT_ID: &str = "?GetElementID@IModelObject@@QEBAHPEBD@Z";
 
-/// A UI renderable's `SetupDynRendering(renderable, IHLRenderContext*, const SRenderItemSort*,
-/// int)`: the renderer replaying the frame's UI queue hands each queued item to its renderable,
-/// which fills its vertices and draws them before it returns (closing the dynamic vertex buffer
-/// runs the pass).
-pub type UiSetupFn = unsafe extern "system" fn(usize, usize, usize, i32) -> usize;
-
-/// The drawing UI elements' `SetupDynRendering`, each called on the element's renderable part at
-/// [`UI_RENDERABLE`]: `CUIImage`, `CUIImageAdvancedTexture`, `CUIAARectangle`, `CUIShape`,
-/// `CUIEffectGroup`.
-pub const UI_ELEMENT_SETUPS: [Site<UiSetupFn>; 5] = [
-    site("CUIImage::SetupDynRendering", 0x5c95e0, &[Instruction::plain(&[0x4c, 0x89, 0x44, 0x24, 0x18])]), // mov [rsp+0x18], r8
-    site("CUIImageAdvancedTexture::SetupDynRendering", 0x5d0930, &[Instruction::plain(&[0x48, 0x89, 0x5c, 0x24, 0x10])]), // mov [rsp+0x10], rbx
-    site("CUIAARectangle::SetupDynRendering", 0x57c620, PUSH_RBP_RSI_RDI_R12),
-    site("CUIShape::SetupDynRendering", 0x28a2d0, PUSH_RBP_RSI_RDI_R12),
-    site(
-        "CUIEffectGroup::SetupDynRendering",
-        0x58aaa0,
-        &[
-            Instruction::plain(&[0x48, 0x83, 0xec, 0x38]), // sub rsp, 0x38
-            Instruction::plain(&[0x4c, 0x8b, 0x49, 0xe0]), // mov r9, [rcx-0x20]
-        ],
-    ),
-];
-
-/// `push rbp; push rsi; push rdi; push r12`.
-const PUSH_RBP_RSI_RDI_R12: &[Instruction] = &[Instruction::plain(&[0x40, 0x55]), Instruction::plain(&[0x56]), Instruction::plain(&[0x57]), Instruction::plain(&[0x41, 0x54])];
-
-/// Where a UI element's renderable part sits in the element (the engine object an `IUIElement`
-/// wraps): the setups above get the element's address plus this.
-pub const UI_RENDERABLE: usize = 0x48;
-
-/// `CPanelText::SetupDynRendering`: a text element's text, drawn by a panel text of its own whose
-/// element is at [`PANEL_TEXT_ELEMENT`].
-pub const PANEL_TEXT_SETUP: Site<UiSetupFn> = site("CPanelText::SetupDynRendering", 0x431750, &[Instruction::plain(&[0x48, 0x89, 0x5c, 0x24, 0x08])]); // mov [rsp+8], rbx
-pub const PANEL_TEXT_ELEMENT: usize = 0x228;
-
 /// The game DLL's HUD manager (`HUDDIManager`, the one the HUD's components register with): its
 /// per-frame update `(manager)`, which updates each registered component, and its components by
 /// id from [`HUD_COMPONENTS`] (8 bytes each, 0x89 of them, null where none is registered). Each

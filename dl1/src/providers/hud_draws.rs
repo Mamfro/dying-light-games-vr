@@ -102,6 +102,7 @@ pub fn frame_end(chain: &IDXGISwapChain) {
     hud11::frame_end(chain);
     depth::frame_end();
     crate::research::targets::frame_end();
+    crate::providers::hud_pieces::hud_phase(false);
     // SAFETY: COM calls on the game's live swapchain.
     let context = crate::providers::hud_pieces::active().then(|| unsafe { chain.GetDevice::<windows::Win32::Graphics::Direct3D11::ID3D11Device>().and_then(|d| d.GetImmediateContext()) }.ok()).flatten();
     crate::providers::hud_pieces::frame_end(context.as_ref());
@@ -147,12 +148,13 @@ fn any_draw(context: *mut c_void, draw: &hud11::Draw) {
 }
 
 /// The frame's 3D image reached the back buffer: the probes, AFW's scene depth, and the
-/// panels' HUD phase.
+/// panels' HUD phase (the HUD's matrices caught from here to the present).
 fn scene_copied(context: &ID3D11DeviceContext) {
     SCENE_COPIES.fetch_add(1, Relaxed);
     crate::research::depth::scene_copied();
     crate::research::targets::scene_copied(context);
     depth::scene_copied();
+    crate::providers::hud_pieces::hud_phase(true);
 }
 
 /// A HUD draw. The first after the scene copy captures the world for AFW and the upscaler.

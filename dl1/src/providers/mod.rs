@@ -13,7 +13,6 @@ pub(crate) mod frame_labels;
 pub(crate) mod fsr;
 pub(crate) mod hand_world;
 pub(crate) mod hud_draws;
-pub(crate) mod hud_drawing;
 pub(crate) mod hud_pieces;
 pub(crate) mod hud_widgets;
 pub(crate) mod lockpick;

@@ -8,17 +8,23 @@
 //!
 //! - the sweep runs only in a window that opens well after the attack starts (DL2: about 180 ms),
 //!   by when a real swing is over: here it opens at the attack's start ([`attack_start`]);
+//! - even so, the attack starts after the swing that pressed it (The Beast: 50 to 130 ms, more
+//!   while the last attack plays out), often once the hand has stopped: so the window's first
+//!   sweeps go along the path the hand took from just before that swing, a few posings at a time,
+//!   until they catch up with the hand ([`replay`]);
 //! - the hit's direction is the attack animation's, through the controller's direction getter:
 //!   here that getter returns zero, so each hit keeps the direction the hand moved ([`direction`]);
-//! - the blade is the weapon's range long (DL2: 1.49 m): here each swept segment is cut to the
-//!   weapon in the hand (`monaka_body::melee_hit::blade`), or a fist's reach ([`test_segments`]).
+//! - the blade is the weapon's range long (DL2: 1.49 m), which is kept; a swept segment shorter
+//!   than the reach of what is in the hand (`monaka_body::melee_hit::blade`: a fist's) is made
+//!   that long ([`test_segments`]).
 //!
 //! What the melee can hit ([`near`], where the build has been read for it): the objects the
 //! engine's level finds near a point (`ILevel::FindObjectsInRadius`, with the class the game's own
 //! combat target search passes), the player and the AI's target markers left out.
 
 use crate::feature::Chrome;
-use monaka_body::held::Kind;
+use monaka_body::held::{self, Kind};
+use monaka_core::camera::{Mat34, apply_3x3, inverse, position};
 use monaka_body::melee_hit;
 use monaka_core::sync::Locked;
 use monaka_hook::module::Module;
@@ -27,6 +33,7 @@ use monaka_hook::{Hooks, InFlight, Original, mem};
 use monaka_producer::game::{Lack, Missing, Start};
 use monaka_producer::{Rejection, log};
 use std::ffi::c_void;
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering::*};
 use std::sync::{Mutex, OnceLock};
 
@@ -143,6 +150,7 @@ unsafe extern "C" fn attack_start(controller: *mut c_void, attack: i32) {
     // The game's own fields of its own controller, written on the game thread inside its call.
     mem::write::<f32>(ctrl + build.window_start, 0.0);
     mem::write::<f32>(ctrl + build.window_start_copy, 0.0);
+    arm_replay();
     let n = ATTACKS.fetch_add(1, Relaxed);
     if n < 30 {
         log!("physical melee: attack {n} type {attack} with {held:?}: window from {window:.3} s -> 0");
@@ -170,6 +178,9 @@ fn segments(list: usize) -> Option<(usize, usize)> {
 unsafe extern "C" fn test_segments(player: *mut c_void, interface: *mut c_void, list: *mut u8, hits: *mut c_void, n: usize) -> usize {
     let _flight = InFlight::enter();
     let held = player_melee(player as usize);
+    if let (Some(_), Some(build), Some((data, count))) = (held, BUILD.get(), segments(list as usize)) {
+        replay(data, count, build.segment);
+    }
     if let (Some(held), Some(length), Some(build), Some((data, count))) = (held, held.and_then(melee_hit::blade), BUILD.get(), segments(list as usize)) {
         for i in 0..count {
             let segment = data + i * build.segment;
@@ -177,7 +188,7 @@ unsafe extern "C" fn test_segments(player: *mut c_void, interface: *mut c_void, 
                 let (Some(from), Some(to)) = (mem::read_finite::<3>(segment + start), mem::read_finite::<3>(segment + tip)) else { continue };
                 let along = [to[0] - from[0], to[1] - from[1], to[2] - from[2]];
                 let was = (along[0] * along[0] + along[1] * along[1] + along[2] * along[2]).sqrt();
-                if was > 1e-4 {
+                if was > 1e-4 && length > was {
                     let cut = along.map(|c| c / was * length);
                     // The game's own segment list, on the game thread inside its own call.
                     mem::write(segment + tip, [from[0] + cut[0], from[1] + cut[1], from[2] + cut[2]]);
@@ -191,6 +202,106 @@ unsafe extern "C" fn test_segments(player: *mut c_void, interface: *mut c_void, 
     }
     // SAFETY: forwards the game's own call.
     unsafe { TEST_SEGMENTS_ORIGINAL.get()(player, interface, list, hits, n) }
+}
+
+// ---- The swing replayed ----
+
+/// Posings of the aim hand kept (about 0.6 s at 150 a second).
+const TRAIL_LEN: usize = 96;
+/// An attack starting at most this long (ms) after a swing is that swing's: its sweeps replay it.
+/// Later, it is the game's own (a combo's next blow).
+const REPLAY_WITHIN_MS: u64 = 450;
+/// The replay starts this long (ms) before the swing was told: a swing is told once the blade is
+/// already fast.
+const REPLAY_LEAD_MS: u64 = 60;
+/// Posings a replayed sweep goes over at once.
+const REPLAY_STEP: usize = 3;
+
+/// The aim hand's holder at each posing (`monaka_channel::tick`, the holder in the world), oldest
+/// first.
+static TRAIL: Mutex<VecDeque<(u64, Mat34)>> = Mutex::new(VecDeque::new());
+/// While a swing is replayed: the posing (tick) its next sweep starts at.
+static REPLAY: Mutex<Option<u64>> = Mutex::new(None);
+/// The swing last replayed (its tick), the swings replayed and the sweeps that replayed them.
+static REPLAYED: AtomicU64 = AtomicU64::new(0);
+static REPLAYS: AtomicU64 = AtomicU64::new(0);
+static REPLAY_SWEEPS: AtomicU64 = AtomicU64::new(0);
+
+/// The hand rig posed the arms (the game's thread): where the aim hand (`side`) holds its item now.
+pub fn note_posed<G: Chrome>(side: usize) {
+    let Some(posed) = held::in_world::<G>(side) else { return };
+    let mut trail = TRAIL.locked();
+    if trail.back().is_some_and(|&(at, holder)| at == posed.posed || holder == posed.holder) {
+        return;
+    }
+    if trail.len() == TRAIL_LEN {
+        trail.pop_front();
+    }
+    trail.push_back((posed.posed, posed.holder));
+}
+
+/// An attack of the player's started: if a swing pressed it, its sweeps replay that swing; one
+/// with no swing of its own (a combo's next blow) sweeps where the hand is.
+fn arm_replay() {
+    let now = monaka_channel::tick();
+    let swing = monaka_body::melee::swung_at().filter(|&at| now.saturating_sub(at) <= REPLAY_WITHIN_MS);
+    let mut replay = REPLAY.locked();
+    match swing {
+        Some(at) if REPLAYED.swap(at, Relaxed) != at => {
+            *replay = Some(at.saturating_sub(REPLAY_LEAD_MS));
+            let n = REPLAYS.fetch_add(1, Relaxed);
+            if log::seldom(n, 8) {
+                log!("physical melee: the attack started {} ms after its swing: its sweeps go along the hand's path from {REPLAY_LEAD_MS} ms before the swing", now - at);
+            }
+        }
+        // The same swing's attack, set up again: its replay goes on.
+        Some(_) => {}
+        None => *replay = None,
+    }
+}
+
+/// `p` (in the frame of `m`) in the world.
+fn through(m: &Mat34, p: [f32; 3]) -> [f32; 3] {
+    let (r, t) = (apply_3x3(m, p), position(m));
+    [r[0] + t[0], r[1] + t[1], r[2] + t[2]]
+}
+
+/// While a swing is replayed, each of the `count` segments at `data` (`size` bytes each) goes
+/// along the hand's path instead: the game's own blade (its current start and tip, taken into the
+/// latest posing's holder) where the holder was [`REPLAY_STEP`] posings apart, from where the last
+/// sweep left off, until the newest posing.
+fn replay(data: usize, count: usize, size: usize) {
+    let mut replay = REPLAY.locked();
+    let Some(next) = *replay else { return };
+    let trail = TRAIL.locked();
+    let from = trail.iter().position(|&(at, _)| at >= next).filter(|&i| i + 1 < trail.len());
+    let (Some(from), Some(back)) = (from, trail.back().and_then(|(_, now)| inverse(now))) else {
+        *replay = None;
+        return;
+    };
+    let to = (from + REPLAY_STEP).min(trail.len() - 1);
+    let [(_, before), (_, after)] = [trail[from], trail[to]];
+    let [(start_was, tip_was), (start_now, tip_now)] = BLADES;
+    for i in 0..count {
+        let segment = data + i * size;
+        let (Some(start), Some(tip)) = (mem::read_finite::<3>(segment + start_now), mem::read_finite::<3>(segment + tip_now)) else { continue };
+        let blade = [through(&back, start), through(&back, tip)];
+        // The game's own segment list, on the game thread inside its own call.
+        mem::write(segment + start_was, through(&before, blade[0]));
+        mem::write(segment + tip_was, through(&before, blade[1]));
+        mem::write(segment + start_now, through(&after, blade[0]));
+        mem::write(segment + tip_now, through(&after, blade[1]));
+    }
+    REPLAY_SWEEPS.fetch_add(1, Relaxed);
+    *replay = (to + 1 < trail.len()).then_some(trail[to].0);
+}
+
+/// End of a run: the swings replayed.
+pub fn report_replays() {
+    let replays = REPLAYS.load(Relaxed);
+    if replays > 0 {
+        log!("physical melee: {replays} swings replayed into the game's sweeps, over {} sweeps", REPLAY_SWEEPS.load(Relaxed));
+    }
 }
 
 // ---- What the melee can hit ----
@@ -318,3 +429,6 @@ fn left_out(object: usize) -> bool {
 pub fn name(object: usize) -> String {
     class_name(object).unwrap_or_else(|| "?".into())
 }
+
+#[cfg(test)]
+mod tests;

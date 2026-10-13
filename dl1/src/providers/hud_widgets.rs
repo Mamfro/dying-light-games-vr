@@ -4,10 +4,13 @@
 //! The game's HUD manager (`HUDDIManager`) keeps its HUD components by id ([`COMPONENTS`]), each
 //! one the `IUIElement` of its piece of the HUD (the radar, the weapon indicators, the quest
 //! objectives, health), and updates them every frame. Right after that update, on the game thread,
-//! the panels' components are read through the engine's own exported `IUIElement` functions
-//! ([`Layout`]): each piece's box (its drawable leaves' union) and every element under it, by its
-//! engine object. The renderer says which element each draw is
-//! ([`crate::providers::hud_drawing`]), so a draw's piece is looked up, never matched.
+//! the HUD's tree is read through the engine's own exported `IUIElement` functions ([`Layout`]):
+//! the drawable leaves of every widget of the HUD's root (`HUD_DI`), in tree order, each with its
+//! widget's panel (the panels' components are widgets of it), and each piece's box (its leaves'
+//! union). The renderer replays the frame's recorded UI commands later, on another thread, so a
+//! draw itself carries no element; but the draws follow the leaves, and each says where it is: an
+//! image draw's matrix puts its quad's corner exactly on its leaf's global position; a text draw's
+//! first glyph sits on its text leaf's row ([`image_leaf`], [`text_leaf`]).
 //!
 //! Each `IUIElement` wraps an engine object at +0x18 (its name: the string `[[object+8]]`).
 //! Positions are layout pixels, in the space of the HUD root's box ([`Layout::root`]).
@@ -39,23 +42,25 @@ pub const COMPONENTS: [Component; 5] = [
     Component { id: 0x11, widget: "HudSecondaryWeaponIndicator" },
 ];
 
-/// One drawable leaf: its engine object, the panel it is on, a text or not, and its box (left, top,
-/// right, bottom, layout pixels; its corner first, the global transform's place; a text's box
-/// takes in its characters, wherever they are drawn).
+/// One drawable leaf: the panel its widget is on (`None`: none, the HUD in the eye keeps it), a
+/// text or not, its corner (the global transform's place), its own box and the box it is drawn in
+/// (left, top, right, bottom; a text's takes in its characters, wherever they are drawn), in
+/// layout pixels; and whether it is its widget's last (a draw after it is another widget's).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Leaf {
-    pub object: usize,
-    pub piece: usize,
+    pub piece: Option<usize>,
     pub text: bool,
+    pub at: [f32; 2],
     pub rect: [f32; 4],
+    pub drawn: [f32; 4],
+    pub last: bool,
 }
 
-/// Every element under a panel's component, by its engine object (the element the renderer says
-/// it draws, [`crate::providers::hud_drawing::drawing`]) with its panel, and each panel's box (the
+/// The HUD's drawable leaves in tree order (the order they are drawn), and each panel's box (the
 /// union of its leaves; `None`: nothing of it is drawn).
 #[derive(Debug, Default)]
 pub struct Layout {
-    pub elements: HashMap<usize, usize>,
+    pub leaves: Vec<Leaf>,
     pub pieces: [Option<[f32; 4]>; COMPONENTS.len()],
     /// The root's own box (left, top, right, bottom, layout pixels): the space the boxes are in,
     /// which the HUD's draws map onto their viewport. Not the back buffer's size: with FSR the
@@ -198,6 +203,12 @@ unsafe extern "system" fn update(manager: *mut c_void) {
     if !crate::providers::eye_site::capturing() {
         return;
     }
+    // A loading screen: a level is being loaded or unloaded and its UI freed. Reading the cached
+    // tree then reads freed elements, so it is let go and read afresh once the world is drawn.
+    if !monaka_stereo::eye_site::world_drawn_recently::<crate::Dl1>() {
+        forget_tree();
+        return;
+    }
     let now = monaka_channel::tick();
     if now.saturating_sub(TAKEN.load(Relaxed)) < SNAPSHOT_EVERY_MS {
         return;
@@ -210,6 +221,24 @@ unsafe extern "system" fn update(manager: *mut c_void) {
     note_layout(&layout);
     if let Ok(mut latest) = LAYOUT.lock() {
         *latest = Some(Arc::new(layout));
+    }
+}
+
+/// Lets go of everything cached of the HUD's tree (on the game thread, in [`update`]).
+fn forget_tree() {
+    let forgot = CACHE.lock().is_ok_and(|mut cache| {
+        let had = cache.root != 0;
+        *cache = Cache::EMPTY;
+        had
+    });
+    if forgot {
+        if let Ok(mut latest) = LAYOUT.lock() {
+            *latest = None;
+        }
+        static LOGGED: AtomicU64 = AtomicU64::new(0);
+        if LOGGED.fetch_add(1, Relaxed) < 20 {
+            log!("HUD elements: the world is not drawn (a loading screen): the UI tree is let go until it is");
+        }
     }
 }
 
@@ -306,13 +335,41 @@ fn corners(a: [f32; 2], b: [f32; 2]) -> [f32; 4] {
     [a[0].min(b[0]), a[1].min(b[1]), a[0].max(b[0]), a[1].max(b[1])]
 }
 
-/// The panels' components under `manager` (the HUD manager), each with every element under it and
-/// its drawable leaves, and the panels' boxes.
+/// One of the root's widgets, with its drawable leaves as last read.
+struct Widget {
+    element: usize,
+    name: String,
+    leaves: Vec<Leaf>,
+    read: bool,
+}
+
+/// The widgets between snapshots: listed again every [`RELIST_EVERY`] snapshots (or for another
+/// root), the panels' read every other snapshot, the rest [`ROTATE`] at a time in turn. Read whole
+/// each time, the tree costs the game thread over a millisecond a frame (hundreds of elements,
+/// each read through engine calls); the rest only tells where a panel's draws end.
+struct Cache {
+    root: usize,
+    widgets: Vec<Widget>,
+    next: usize,
+    snapshots: u64,
+}
+
+impl Cache {
+    const EMPTY: Cache = Cache { root: 0, widgets: Vec::new(), next: 0, snapshots: 0 };
+}
+
+static CACHE: Mutex<Cache> = Mutex::new(Cache::EMPTY);
+const RELIST_EVERY: u64 = 64;
+const ROTATE: usize = 4;
+
+/// The drawable leaves of the HUD's root (above the panels' components under `manager`, the HUD
+/// manager), each with its widget's panel, and the panels' boxes.
 fn snapshot(calls: &Calls, manager: usize, now: u64) -> Layout {
     let mut layout = Layout { taken: now, ..Layout::default() };
     let opaque = crate::providers::eye_site::config().world_hud_opaque;
-    // A probe's widget (`research::widget`).
-    let probed: Option<&str> = crate::research::widget::watched();
+    // Each panel's widget (0: its component is not registered), and the root above them.
+    let mut shown = [0usize; COMPONENTS.len()];
+    let mut root = None;
     for (piece, component) in COMPONENTS.iter().enumerate() {
         let registered = mem::read::<usize>(manager + engine::HUD_COMPONENTS + component.id * 8).filter(|&c| c != 0 && engine_object(c).is_some());
         let Some(registered) = registered else {
@@ -320,27 +377,67 @@ fn snapshot(calls: &Calls, manager: usize, now: u64) -> Layout {
             continue;
         };
         let element = shown_element(calls, piece, registered);
-        let Some((opacity, root)) = above(calls, element) else { continue };
-        if layout.root.is_none() {
-            layout.root = element_box(calls, root);
-        }
+        let Some((_, top)) = above(calls, element) else { continue };
+        root.get_or_insert(top);
         if opaque {
             hold_opaque(calls, piece, element);
         }
-        let mut leaves = Vec::new();
-        let mut objects = Vec::new();
-        walk(calls, element, piece, opacity, &mut leaves, &mut objects);
-        if let Some(name) = probed.filter(|p| name_of(element).as_deref() == Some(*p)) {
-            crate::research::widget::note(name, &leaves);
+        shown[piece] = element;
+    }
+    let Some(root) = root else { return layout };
+    layout.root = element_box(calls, root);
+    let Ok(mut cache) = CACHE.lock() else { return layout };
+    let cache = &mut *cache;
+    let n = cache.snapshots;
+    cache.snapshots += 1;
+    let r = root as *mut c_void;
+    // SAFETY: the engine's own getters on the HUD's root, on the game thread.
+    let opacity = if unsafe { (calls.visible)(r) } { unsafe { (calls.opacity)(r) } } else { 0.0 };
+    if cache.root != root || cache.widgets.is_empty() || n.is_multiple_of(RELIST_EVERY) {
+        // SAFETY: as above.
+        let count = unsafe { (calls.children)(r) };
+        let mut old = std::mem::take(&mut cache.widgets);
+        cache.widgets = children(calls, root, count)
+            .into_iter()
+            .map(|element| {
+                let kept = old.iter_mut().find(|w| w.element == element).map(|w| std::mem::take(&mut w.leaves));
+                let name = name_of(element).unwrap_or_default();
+                Widget { element, name, read: kept.is_some(), leaves: kept.unwrap_or_default() }
+            })
+            .collect();
+        cache.root = root;
+    }
+    // A widget's panel: the one whose component it shows, else by its name.
+    let piece_of = |w: &Widget| shown.iter().position(|&e| e != 0 && e == w.element).or_else(|| COMPONENTS.iter().position(|c| c.widget == w.name));
+    let count = cache.widgets.len().max(1);
+    let next = cache.next;
+    // A probe's widget is read at every snapshot (`research::widget`).
+    let probed: Option<&str> = crate::research::widget::watched();
+    for (i, widget) in cache.widgets.iter_mut().enumerate() {
+        let watched = probed == Some(widget.name.as_str());
+        let due = watched || !widget.read || if piece_of(widget).is_some() { n.is_multiple_of(2) } else { (i + count - next) % count < ROTATE };
+        if due {
+            widget.leaves.clear();
+            walk(calls, widget.element, opacity, &mut widget.leaves);
+            widget.read = true;
+            if watched {
+                crate::research::widget::note(&widget.name, &widget.leaves);
+            }
         }
-        layout.elements.extend(objects.iter().map(|&o| (o, piece)));
-        // A leaf outside the HUD's own box shows nothing (now and then a minimap icon sits
-        // thousands of pixels off the screen): it would grow its piece's box past the screen for as
-        // long as the piece stays, and shrink the piece to a speck on its panel.
-        let root = layout.root;
-        let on_screen = |r: [f32; 4]| root.is_none_or(|b| r[0] >= b[0] - OFF_SCREEN_SLACK && r[1] >= b[1] - OFF_SCREEN_SLACK && r[2] <= b[2] + OFF_SCREEN_SLACK && r[3] <= b[3] + OFF_SCREEN_SLACK);
-        for leaf in leaves.iter().filter(|l| on_screen(l.rect)) {
-            layout.pieces[piece] = Some(piece_box(piece, layout.pieces[piece], leaf.rect));
+    }
+    cache.next = (next + ROTATE) % count;
+    // A leaf outside the HUD's own box shows nothing (now and then a minimap icon sits thousands of
+    // pixels off the screen): it would grow its piece's box past the screen for as long as the piece
+    // stays, and shrink the piece to a speck on its panel.
+    let bounds = layout.root;
+    let on_screen = |r: [f32; 4]| bounds.is_none_or(|b| r[0] >= b[0] - OFF_SCREEN_SLACK && r[1] >= b[1] - OFF_SCREEN_SLACK && r[2] <= b[2] + OFF_SCREEN_SLACK && r[3] <= b[3] + OFF_SCREEN_SLACK);
+    for widget in &cache.widgets {
+        let piece = piece_of(widget);
+        for (i, leaf) in widget.leaves.iter().enumerate() {
+            if let Some(piece) = piece.filter(|_| on_screen(leaf.drawn)) {
+                layout.pieces[piece] = Some(piece_box(piece, layout.pieces[piece], leaf.drawn));
+            }
+            layout.leaves.push(Leaf { piece, last: i + 1 == widget.leaves.len(), ..*leaf });
         }
     }
     layout
@@ -351,7 +448,7 @@ fn snapshot(calls: &Calls, manager: usize, now: u64) -> Layout {
 const OFF_SCREEN_SLACK: f32 = 8.0;
 
 /// The minimap's piece in [`COMPONENTS`] (the radar).
-const MINIMAP: usize = 0;
+pub const MINIMAP: usize = 0;
 
 /// A piece's box with one more of its leaves: the union of its leaves, except the minimap's, which
 /// is its largest leaf, the radar's frame. The radar also holds the icons of targets beyond its
@@ -393,9 +490,9 @@ fn children(calls: &Calls, element: usize, count: i32) -> Vec<usize> {
 }
 
 /// `element` and what is under it, drawn with `above` times its own opacity: its drawable leaves
-/// into `leaves`, every element's engine object (containers draw too: an effect group) into
-/// `objects`. Hidden or transparent elements are skipped with all under them.
-fn walk(calls: &Calls, element: usize, piece: usize, above: f32, leaves: &mut Vec<Leaf>, objects: &mut Vec<usize>) {
+/// into `leaves` (their panel left for the snapshot to set). Hidden or transparent elements are
+/// skipped with all under them.
+fn walk(calls: &Calls, element: usize, above: f32, leaves: &mut Vec<Leaf>) {
     let e = element as *mut c_void;
     // SAFETY: the engine's own getters on an element of the tree (game thread).
     if !unsafe { (calls.visible)(e) } {
@@ -407,12 +504,11 @@ fn walk(calls: &Calls, element: usize, piece: usize, above: f32, leaves: &mut Ve
         return;
     }
     let Some(object) = engine_object(element) else { return };
-    objects.push(object);
     // SAFETY: as above.
     let count = unsafe { (calls.children)(e) };
     if count > 0 {
         for child in children(calls, element, count) {
-            walk(calls, child, piece, opacity, leaves, objects);
+            walk(calls, child, opacity, leaves);
         }
         return;
     }
@@ -429,11 +525,11 @@ fn walk(calls: &Calls, element: usize, piece: usize, above: f32, leaves: &mut Ve
     }
     // A text drawn longer than its box (right-aligned, it starts left of it; wrapped, its lines go
     // below it) takes in where its characters are.
-    let rect = match text.then(|| text_box(calls, element, at, scale, rect)).flatten() {
+    let drawn = match text.then(|| text_box(calls, element, at, scale, rect)).flatten() {
         Some(characters) => union(rect, characters),
         None => rect,
     };
-    leaves.push(Leaf { object, piece, text, rect });
+    leaves.push(Leaf { piece: None, text, at, rect, drawn, last: false });
 }
 
 /// Where a text's characters are drawn (left, top, right, bottom, layout pixels): where they start
@@ -489,7 +585,7 @@ fn note_layout(layout: &Layout) {
     static FIRST: AtomicU64 = AtomicU64::new(0);
     static SHOWN: AtomicUsize = AtomicUsize::new(usize::MAX);
     if FIRST.fetch_add(1, Relaxed) == 0 {
-        log!("HUD elements: {} elements under the panels' components; the HUD's root box {:?}", layout.elements.len(), layout.root);
+        log!("HUD elements: {} drawable leaves under the HUD's root, {} of them on panels; the root's box {:?}", layout.leaves.len(), layout.leaves.iter().filter(|l| l.piece.is_some()).count(), layout.root);
     }
     let shown = layout.pieces.iter().enumerate().filter(|(_, b)| b.is_some()).fold(0usize, |bits, (i, _)| bits | 1 << i);
     let before = SHOWN.swap(shown, Relaxed);
@@ -498,6 +594,33 @@ fn note_layout(layout: &Layout) {
         log!("HUD elements: drawn now: {}", if names.is_empty() { "none of the panels' widgets".to_owned() } else { names.join(", ") });
     }
 }
+
+/// The leaf an image draw is, by its quad's corner (layout pixels): the next one in tree order
+/// from `from` at that corner, else any (the snapshot can be a frame off the draws).
+pub fn image_leaf(leaves: &[Leaf], from: usize, corner: [f32; 2]) -> Option<usize> {
+    let at = |l: &Leaf| !l.text && (l.at[0] - corner[0]).abs() <= CORNER_TOLERANCE && (l.at[1] - corner[1]).abs() <= CORNER_TOLERANCE;
+    (from..leaves.len()).find(|&i| at(&leaves[i])).or_else(|| (0..from.min(leaves.len())).find(|&i| at(&leaves[i])))
+}
+
+/// The text leaf a text draw is, by its first glyph's place (layout pixels): one whose row it is
+/// on (its own box's top within [`ROW_TOLERANCE`]), across the leaf or up to a leaf's width before
+/// it (a right-aligned text longer than its box starts left of it), the nearest row first.
+pub fn text_leaf(leaves: &[Leaf], glyph: [f32; 2]) -> Option<usize> {
+    leaves
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| l.text && (l.rect[1] - glyph[1]).abs() <= ROW_TOLERANCE)
+        .filter(|(_, l)| glyph[0] >= l.rect[0] - (l.rect[2] - l.rect[0]) - ROW_TOLERANCE && glyph[0] <= l.rect[2] + ROW_TOLERANCE)
+        .min_by(|(_, a), (_, b)| (a.rect[1] - glyph[1]).abs().total_cmp(&(b.rect[1] - glyph[1]).abs()))
+        .map(|(i, _)| i)
+}
+
+/// An image draw's corner lies on its leaf's within this (layout pixels; the two agree to a
+/// tenth).
+const CORNER_TOLERANCE: f32 = 1.0;
+/// A text's first glyph lies on its leaf's row within this (layout pixels; the glyph is up to
+/// about 3 off, the shadow and outline passes a pixel or two off the text).
+const ROW_TOLERANCE: f32 = 6.0;
 
 #[cfg(test)]
 mod tests;

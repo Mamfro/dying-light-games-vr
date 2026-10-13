@@ -214,7 +214,6 @@ pub const HUD: Component<Dl1> = Component { options: &monaka_stereo::hud_layer::
 /// each HUD draw told apart by the game's UI elements ([`providers::hud_pieces`]).
 pub const HUD_PANELS: Component<Dl1> = Component {
     needs: &[&HUD],
-    on: |run| On::when(run.shared.hud.world && !Config::from_options(run.options, run.manifest).afw, "the dynamic HUD is off"),
     install: providers::hud_pieces::install_panels,
     ..monaka_stereo::hud_panels::hud_panels()
 };

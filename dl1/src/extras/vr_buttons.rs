@@ -96,6 +96,8 @@ const KEY_B: u32 = 0x0f01;
 const KEY_Y: u32 = 0x0f03;
 const KEY_DPAD_UP: u32 = 0x0f0a;
 const KEY_DPAD_DOWN: u32 = 0x0f0b;
+const KEY_DPAD_LEFT: u32 = 0x0f0c;
+const KEY_DPAD_RIGHT: u32 = 0x0f0d;
 /// `EJoy__BUTTON_15`: no pad sends it (the engine reads no SDL button that maps to it).
 const HEAL_KEY: u32 = 0x0f0e;
 /// `EJoy__BUTTON_16`: no pad sends it either.
@@ -135,6 +137,8 @@ static CHANGED: AtomicU64 = AtomicU64::new(0);
 /// When the pad's Y went down (while held), and a tap of Y no input pass has taken yet.
 static Y_DOWN: Mutex<Option<Instant>> = Mutex::new(None);
 static Y_TAPPED: AtomicBool = AtomicBool::new(false);
+/// The d-pad left and right held (the tools and weapons wheels open): a Y then is a pick.
+static WHEEL_HELD: [AtomicBool; 2] = [const { AtomicBool::new(false) }; 2];
 /// When the heal button was pressed, while it is.
 static HEAL_HELD: Mutex<Option<Instant>> = Mutex::new(None);
 static HEALS: AtomicU64 = AtomicU64::new(0);
@@ -336,14 +340,21 @@ fn reload_wanted(gesture: impl FnOnce() -> bool, take: impl FnOnce() -> bool) ->
     take().then_some(if gestured { "the gesture" } else { "the reload action" })
 }
 
-/// The pad button event: a Y let go within [`TAP`] of going down is noted for the next input pass.
+/// The pad button event: a Y let go within [`TAP`] of going down is noted for the next input pass,
+/// unless it went down while a wheel was open (d-pad left or right held): that Y picked from it.
 unsafe extern "C" fn pad_button(manager: usize, pad: i32, key: u32, pressed: u8) {
     let _flight = InFlight::enter();
+    match key {
+        KEY_DPAD_LEFT => WHEEL_HELD[0].store(pressed != 0, Relaxed),
+        KEY_DPAD_RIGHT => WHEEL_HELD[1].store(pressed != 0, Relaxed),
+        _ => {}
+    }
     if key == KEY_Y
         && let Ok(mut down) = Y_DOWN.lock()
     {
         if pressed != 0 {
-            *down = Some(Instant::now());
+            let picking = WHEEL_HELD.iter().any(|held| held.load(Relaxed));
+            *down = (!picking).then(Instant::now);
         } else if down.take().is_some_and(|at| at.elapsed() < TAP) {
             Y_TAPPED.store(true, Relaxed);
         }

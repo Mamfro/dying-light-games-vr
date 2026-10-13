@@ -108,6 +108,10 @@ impl Hits for Beast {
     fn name(id: usize) -> String {
         eng_chr::providers::melee::name(id)
     }
+
+    fn report() {
+        eng_chr::providers::melee::report_replays();
+    }
 }
 
 /// The fire hook on the bow's arrow (`eng_chr::providers::bow`): each arrow takes its eye point and

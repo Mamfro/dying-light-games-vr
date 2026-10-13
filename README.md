@@ -20,16 +20,16 @@ This is a game pack for [Monaka VR](https://github.com/Mamfro/monaka_vr), which 
 
 | Game | Status | Controls | Aim | HUD |
 |---|---|---|---|---|
-| **Dying Light** | Alpha | Motion controls | Head, controller | Dynamic, game HUD |
+| **Dying Light** | Alpha | Motion controls | Head, controller | Dynamic HUD, monitor layout |
 | **Dying Light 2** | Pre-alpha | Motion controls | Head, controller | Dynamic, game HUD, monitor layout |
-| **Dying Light: The Beast** | Experimental | Motion controls | Head, controller | Dynamic, monitor layout |
+| **Dying Light: The Beast** | Alpha | Motion controls | Head, controller | Dynamic HUD, monitor layout |
 | **Dead Island: Riptide (Definitive Edition)** | Experimental | None | None | ? |
 
 **Status Meaning**, from most to least finished:
 - **Beta**: I'm confident that you can play the whole game this way. Small features/polish and deeper integration may be lacking.
 - **Alpha**: I'm somewhat confident you can play the whole game this way, but I haven't played multiple hours at a time.
 - **Pre-alpha**: It runs, but probably will be a bad experience. Very rough edges remain.
-- **Experimental**: probably runs, but rough.
+- **Experimental**: Probably runs, but rough. May crash and will work incorrectly.
 
 **Motion controls**: your VR controllers work as a gamepad, and your in-game hands and what they
 hold follow the controllers. 

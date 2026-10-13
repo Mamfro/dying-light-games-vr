@@ -123,11 +123,13 @@ impl Rig {
         };
         let outcome = fpp::around::<G, _>(vis, &self.facts.arms, &fpp_options, crate::providers::coskeleton::CoSkeleton::of, aim.player_camera(key), original, hands);
         // The bow by hand's and the melee's posing moment, after the rig: the bow model read,
-        // turned toward the left reticle and drawn, and where the blade reaches.
+        // turned toward the left reticle and drawn, where the blade reaches, and the aim hand's
+        // path for the swings' replay.
         if options.rig {
             monaka_body::bow::posed::<G>(outcome.placed.is_some(), crate::providers::hands::reticle(LEFT_HAND));
             if outcome.placed.is_some() {
                 monaka_body::melee_hit::look::<G>();
+                crate::providers::melee::note_posed::<G>(options.melee.aim_side);
             }
         }
     }
