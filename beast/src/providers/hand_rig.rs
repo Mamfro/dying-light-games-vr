@@ -15,7 +15,7 @@
 //! the skeleton's elements and the weapon visuals' classes.
 
 use crate::Beast;
-use crate::providers::{engine, eye_site};
+use crate::providers::{controllers, engine, eye_site};
 use eng_chr::providers::rig::{Facts, Moment, Rig};
 use monaka_body::hand_rig::{self, Climbing, HandRig};
 use monaka_body::hand_trail::HandTrails;
@@ -37,15 +37,21 @@ pub static RIG: Rig = Rig::new(Facts {
     camera_key_at: Some(engine::CAMERA_RENDERER),
 });
 
-/// What the arms callback sees: stereo running and the present loop's head (no game frame).
+/// What the arms callback sees: stereo running and the present loop's head (no game frame). The
+/// game's word on climbing goes to the hand rig here, before the arms are posed
+/// ([`controllers`]).
 pub fn moment() -> Moment {
+    if let Some(climbing) = controllers::climbing() {
+        monaka_body::traverse::report_climbing(climbing);
+    }
     Moment { active: eye_site::running(), head: monaka_stereo::feature::DRIVER.head().current(), counter: None }
 }
 
-/// The hand rig (Monaka's) on The Beast's bone axes; the climbing measured from the hands, the
-/// palms kept for the hands' throw, bow and reload (`eng_chr::providers::hands::PALMS`).
+/// The hand rig (Monaka's) on The Beast's bone axes and left mirroring; the climbing said by the
+/// game ([`controllers`]), the palms kept for the hands' throw, bow and reload
+/// (`eng_chr::providers::hands::PALMS`).
 impl HandRig for Beast {
-    const RIG: hand_rig::Rig = eng_chr::providers::fpp::chrome_rig(engine::BONE_AXES, None, Climbing::Animated);
+    const RIG: hand_rig::Rig = eng_chr::providers::fpp::chrome_rig(engine::BONE_AXES, Some(engine::LEFT_MIRROR), Climbing::Reported);
 
     fn held(side: usize) -> Kind {
         eng_chr::providers::held::kind(side)

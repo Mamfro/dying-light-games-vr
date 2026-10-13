@@ -164,6 +164,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "monaka_riptide"
+version = "0.2.0"
+dependencies = [
+ "eng_chr",
+ "monaka_body",
+ "monaka_channel",
+ "monaka_core",
+ "monaka_hook",
+ "monaka_launch",
+ "monaka_pad",
+ "monaka_producer",
+ "monaka_stereo",
+ "monaka_warp",
+ "windows",
+]
+
+[[package]]
 name = "monaka_stereo"
 version = "0.1.0"
 dependencies = [

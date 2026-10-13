@@ -299,8 +299,24 @@ pub const VIEW_BOB: Component<Beast> = Component { needs: &[&LOOK], ..eng_chr::f
 // ---- The arms ----
 
 /// The arms on the controllers (`eng_chr::feature::hand_rig`, on The Beast's rig:
-/// [`providers::hand_rig`]), at the callback head aim steers in.
-pub const HAND_RIG: Component<Beast> = Component { needs: &[&LOOK], ..eng_chr::feature::hand_rig() };
+/// [`providers::hand_rig`]), at the callback head aim steers in, with the game's word on when the
+/// player climbs ([`providers::controllers`]).
+pub const HAND_RIG: Component<Beast> = Component { needs: &[&LOOK], install: install_hand_rig, release: release_hand_rig, reports: &[monaka_core::situation::Situation::Traversal], ..eng_chr::feature::hand_rig() };
+
+fn install_hand_rig(start: &mut Start<'_, Beast>) -> Result<(), Lack> {
+    eng_chr::feature::install_rig(start, true)?;
+    // Without it the hand rig tells climbing from the hands' height.
+    if let Err(why) = providers::controllers::install(start) {
+        log!("climbing: {why:?}; told from the hands' height");
+    }
+    Ok(())
+}
+
+/// The game's anti-wall scales back before the hooks go ([`providers::anti_wall`]).
+fn release_hand_rig() {
+    providers::anti_wall::give_back();
+    (eng_chr::feature::hand_rig::<Beast>().release)();
+}
 
 /// A free hand's fingers on the tracked fingers (the hand rig's, at the arms' pose).
 pub const FINGERS: Component<Beast> = Component { needs: &[&HAND_RIG], ..monaka_body::feature::fingers() };

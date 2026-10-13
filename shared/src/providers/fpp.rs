@@ -60,13 +60,45 @@ pub fn is_throwable(weapon: usize) -> bool {
 }
 
 /// What the arms' weapon visual `weapon` (0 for none) is, for the shared melee: a gun
-/// ([`is_gun`]), another weapon, or nothing.
+/// ([`is_gun`]), the bare hand's ([`bare_hand`]) or none, or another weapon.
 pub fn held_of(weapon: usize) -> Kind {
     match weapon {
         0 => Kind::Nothing,
         w if is_gun(w) => Kind::Gun,
+        w if bare_hand(w) => Kind::Nothing,
         _ => Kind::Melee,
     }
+}
+
+/// The elements a weapon model has for the game's hit test alone: where the hand holds it, its hit
+/// trail's ends and its hit box.
+const HIT_HELPERS: [&str; 3] = ["holder", "dtrail", "oh_box"];
+
+/// Whether the weapon visual `weapon` is the bare hand's. The Beast's bare fists are a weapon
+/// (item type `Fists`) with a `WeaponVis` of their own, as a melee weapon's, so the arms' weapon
+/// visual is never empty there: the fists' model has nothing but [`HIT_HELPERS`] (`holder`,
+/// `dtrailend1`, `dtrailstart1`, `oh_box01`), where a weapon's has its own parts too. Taken for an
+/// empty hand, fists swing as fists (a punch's speed, a fist's reach), keep the hands apart and
+/// their fingers tracked. Each visual's model is read once, and logged.
+fn bare_hand(weapon: usize) -> bool {
+    static KNOWN: Mutex<Vec<(usize, bool)>> = Mutex::new(Vec::new());
+    let Ok(mut known) = KNOWN.lock() else { return false };
+    if let Some(&(_, bare)) = known.iter().find(|(w, _)| *w == weapon) {
+        return bare;
+    }
+    let names: Option<Vec<String>> = crate::providers::model::Model::of(weapon).map(|model| (0..model.count()).map(|e| model.name(e)).collect());
+    let bare = names.as_ref().is_some_and(|names| !names.is_empty() && names.iter().all(|n| HIT_HELPERS.iter().any(|h| n.to_ascii_lowercase().starts_with(h))));
+    if known.len() >= 64 {
+        known.remove(0);
+    }
+    known.push((weapon, bare));
+    log!(
+        "hand rig: a {} visual in hand, {}; its model's elements: {}",
+        class_name(weapon).as_deref().unwrap_or("?"),
+        if bare { "the bare hand" } else { "a weapon" },
+        names.map_or("(no model)".into(), |n| n.iter().take(24).cloned().collect::<Vec<_>>().join(", "))
+    );
+    bare
 }
 
 /// The fingers of every Chrome Engine arms skeleton: under `r_hand` and `l_hand` the thumb
@@ -234,7 +266,7 @@ pub fn around<G: HeldItems, S: ArmsSkeleton>(
     // The held item says a throwable where the game does; the swings below take it as before.
     let kind = crate::providers::held::reported(held, held == Kind::Melee && is_throwable(weapon), options.throw_in_hand);
     crate::providers::held::note(crate::providers::held::Noted::of(options.melee.aim_side, weapon, kind, bow_vis, holders, options.apart));
-    let swung = LAST_WEAPON.lock().map(|mut last| swung_as(held, &mut last)).unwrap_or(held);
+    let swung = LAST_WEAPON.lock().map(|mut last| swung_as(held, weapon != 0, &mut last)).unwrap_or(held);
     if let Ok(mut seen) = BOW_SEEN.lock() {
         *seen = bow.then(std::time::Instant::now);
     }
@@ -271,9 +303,10 @@ static LAST_WEAPON: Mutex<Kind> = Mutex::new(Kind::Nothing);
 /// What the swings take the arms to hold, given what they hold (`held`) and the last weapon they
 /// held (`last`, kept up to date here): hands left empty after a gun (the game puts it away for a
 /// climb or a vault, and back a few seconds later) still hold the gun, so an empty hand's swing
-/// does not press the attack, which would draw the gun and fire it. Another weapon ends it.
-fn swung_as(held: Kind, last: &mut Kind) -> Kind {
-    if held != Kind::Nothing {
+/// does not press the attack, which would draw the gun and fire it. Another weapon ends it, and so
+/// does a visual in hand that is the bare hand's (`visual`: fists drawn, not a gun put away).
+fn swung_as(held: Kind, visual: bool, last: &mut Kind) -> Kind {
+    if held != Kind::Nothing || visual {
         *last = held;
         return held;
     }
@@ -430,10 +463,12 @@ mod tests {
     #[test]
     fn empty_hands_after_a_gun_still_hold_it_until_another_weapon() {
         let mut last = Kind::Nothing;
-        assert_eq!(swung_as(Kind::Nothing, &mut last), Kind::Nothing, "bare hands from the start punch");
-        assert_eq!(swung_as(Kind::Gun, &mut last), Kind::Gun);
-        assert_eq!(swung_as(Kind::Nothing, &mut last), Kind::Gun, "the gun put away for a climb");
-        assert_eq!(swung_as(Kind::Melee, &mut last), Kind::Melee);
-        assert_eq!(swung_as(Kind::Nothing, &mut last), Kind::Nothing, "after a melee weapon, empty hands punch");
+        assert_eq!(swung_as(Kind::Nothing, false, &mut last), Kind::Nothing, "bare hands from the start punch");
+        assert_eq!(swung_as(Kind::Gun, true, &mut last), Kind::Gun);
+        assert_eq!(swung_as(Kind::Nothing, false, &mut last), Kind::Gun, "the gun put away for a climb");
+        assert_eq!(swung_as(Kind::Nothing, true, &mut last), Kind::Nothing, "fists drawn after the gun punch");
+        assert_eq!(swung_as(Kind::Gun, true, &mut last), Kind::Gun);
+        assert_eq!(swung_as(Kind::Melee, true, &mut last), Kind::Melee);
+        assert_eq!(swung_as(Kind::Nothing, false, &mut last), Kind::Nothing, "after a melee weapon, empty hands punch");
     }
 }

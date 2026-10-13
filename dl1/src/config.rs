@@ -263,7 +263,7 @@ mod tests {
         let rig = Config::parse("aim=hand_rig\nhand_hold=-0.02, 0.01,0.03");
         assert!(rig.aim.rig && rig.hand_hold == [-0.02, 0.01, 0.03]);
         assert!(rig.melee.swing && rig.aim_settings.melee_aim_head, "melee by swinging comes with the rig");
-        assert_eq!(rig.physical_melee, Some(melee::Physical { blade: 1.1, fist: 0.15, press_ms: Some(40) }), "and physical melee");
+        assert_eq!(rig.physical_melee, Some(melee::Physical { blade: 1.1, fist: 0.75, press_ms: Some(40) }), "and physical melee");
         assert!(Config::parse("aim=head").physical_melee.is_none());
         assert!(!Config::parse("swing_attack=0").melee.swing);
         assert_eq!(Config::parse("hand_hold=0,2,0").hand_hold, [0.0; 3]);

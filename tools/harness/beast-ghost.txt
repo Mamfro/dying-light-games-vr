@@ -1,0 +1,30 @@
+# Dying Light: The Beast: the hands during head turns, for AFW's ghost of the hand in the warped eye. In gameplay,
+# unpaused, the game window in front, nothing touched. Both hands held up in view; the head holds, turns 30
+# degrees left at about 100 degrees a second and back; frames are saved held and mid-turn (the warped eye's gaps
+# beside the hands are widest then). Compare the eyes of each saved pair.
+0     head 0 0
+0     pad none 0 0
+0     stick 0 0 0 0
+0     hand right 0.12 -0.12 -0.35 0 0
+0     hand left -0.12 -0.12 -0.35 0 0
+500   focus DyingLightGame_TheBeast_x64_rwdi.exe
+8000  save held
+9000  head 5 0
+9050  head 10 0
+9100  head 15 0
+9120  save turn-left-a
+9150  head 20 0
+9170  save turn-left-b
+9200  head 25 0
+9250  head 30 0
+11000 save left
+12000 head 25 0
+12050 head 20 0
+12100 head 15 0
+12120 save turn-back-a
+12150 head 10 0
+12170 save turn-back-b
+12200 head 5 0
+12250 head 0 0
+14000 save back
+15000 end

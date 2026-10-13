@@ -158,6 +158,27 @@ pub const CAMERA_SOURCES: eng_chr::providers::look_fields::CameraSources = eng_c
 pub const CAMERA_RENDERER: usize = 0x38;
 pub const FPP_VIS_VTABLE: usize = 0x259eda8;
 pub const PLAYER_VTABLE: usize = 0x259c450;
+/// The player's look controller's update (vtable slot 143, `(controller, dt)`): in almost every
+/// controller group, so it runs every frame (`crate::providers::controllers`).
+pub const LOOK_UPDATE: usize = 0x1026380;
+/// The player's parameter block's getter (vtable slot of `PlayerDI_PH`, `() -> block`).
+pub const PARAMETERS_SLOT: usize = 0x5e0;
+/// The first-person arms' anti-wall scales in the parameter block (f32 each, the arms drawn scaled
+/// toward the camera by them): `AntiWallHandsScale`, `AntiWallHangHandsScale`,
+/// `AntiWallAimHandsScale`, `AntiWallLowCrawlScale` (`crate::providers::anti_wall`).
+pub const ANTI_WALL_SCALES: [usize; 4] = [0xb528, 0xb558, 0xb570, 0xb588];
+/// The controllers the player climbs with (`controllers_setup.scr`: the groups `Ladder`, `EdgeGrab`,
+/// `ZipLine`, `FreeClimb`, each controller in its own group only) and their updates (vtable slot
+/// 143, `(controller, dt)`), for [`crate::providers::controllers`].
+pub const CLIMBING_UPDATES: [(&str, usize); 7] = [
+    ("ladder", 0x10259f0),
+    ("edge", 0x1022320),
+    ("hang", 0x1023720),
+    ("climb", 0x1020d90),
+    ("shimmy", 0x10308a0),
+    ("zip line", 0x1037130),
+    ("free climb", 0x10227f0),
+];
 /// The character from the camera target.
 pub const TARGET_CHARACTER: usize = 0x580;
 pub const LOOK_YAW: usize = 0xbb0;
@@ -193,6 +214,9 @@ pub const ARMS_LAYOUT: eng_chr::providers::fpp::Layout = eng_chr::providers::fpp
 /// wrist frame matches DL2's within about a degree. The gun holder has no correction of its own,
 /// as in DL2.
 pub const BONE_AXES: monaka_body::BoneAxes = monaka_body::BoneAxes::DYING_LIGHT_2;
+/// How the left arm's bones mirror the right ones' (as Dying Light 1's): declared, not measured at
+/// the start, which needs the arms posed alike (a run that starts crawling never is).
+pub const LEFT_MIRROR: [f32; 9] = [1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0];
 // --- The engine's gui tree (the dynamic HUD; `eng_chr::providers::gui`) -------------------------------
 /// The implementations the exported `gui::IElement` getters jump to: `GetWorldMatrix`'s
 /// `push rbx; sub rsp, 0x20; test byte

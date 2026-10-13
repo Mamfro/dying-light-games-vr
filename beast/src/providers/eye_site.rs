@@ -252,13 +252,12 @@ pub fn eye_vectors(camera: usize, update: &PlayerUpdate) -> Option<[Vec3; 3]> {
     Some([column(2), column(1), column(3)])
 }
 
-/// The game camera the player camera update sets: its vectors as a camera (finite, orthonormal
-/// within 0.01), made exactly orthonormal.
+/// The game camera the player camera update sets: its vectors made a camera as the renderer makes
+/// them, the back kept and the up made square to it (`monaka_core::camera::from_back_up`). A hit
+/// shakes the camera with an up that is not square to the back (by 0.02 and more): the renderer
+/// draws it all the same, so it is not refused here either.
 fn game_camera(update: &PlayerUpdate) -> Option<Mat34> {
-    let (back, up, p) = (update.back, update.up, update.position);
-    let right = monaka_core::math::cross(up, back);
-    let given: Mat34 = [right[0], up[0], back[0], p[0], right[1], up[1], back[1], p[1], right[2], up[2], back[2], p[2]];
-    update.matrix.filter(|_| camera::is_rigid(&given, 0.01))
+    update.matrix
 }
 
 /// Just before the game rebuilds `camera`'s projection from its near-plane extents: for the player
@@ -458,8 +457,15 @@ mod tests {
     }
 
     #[test]
-    fn a_skewed_camera_or_a_field_of_view_not_the_games_is_refused() {
-        assert!(game_camera(&update([0.0, 0.0, 1.0], [0.0, 0.5, 0.5], [0.0; 3])).is_none());
+    fn a_shaken_camera_is_drawn_square_and_an_impossible_one_refused() {
+        // A hit's shake: the up 0.023 off square to the back (as logged). Drawn, as the renderer
+        // draws it: the back kept, the up made square.
+        let back = [-0.864_596_55, -0.051_314_674, -0.499_839_75];
+        let shaken = camera_of(back, [-0.066_191_9, 0.997_211_6, -0.034_462_232], [0.0; 3]);
+        assert!(camera::is_rigid(&shaken, 1e-4));
+        assert!((0..3).all(|k| (shaken[k * 4 + 2] - back[k]).abs() < 1e-4), "the back kept");
+        // No up to square (along the back) or no field of view a game has: refused.
+        assert!(game_camera(&update([0.0, 0.0, 1.0], [0.0, 0.0, 2.0], [0.0; 3])).is_none());
         let game = camera_of([0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [0.0; 3]);
         assert!(eye_camera(&game, &level_pose(), 0, &shared_with(HeadPosition::Lean), [3.1, 1.0], 0.0, None).is_none(), "wider than a game's");
     }

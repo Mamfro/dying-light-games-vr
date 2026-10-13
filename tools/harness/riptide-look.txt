@@ -1,0 +1,13 @@
+# Dead Island Riptide: stereo and head aim. The head looks ahead, then turns left and up; each save
+# writes the eye pair (look for depth between the eyes, the view following the head, the HUD in
+# front). Start in play, not in a menu.
+0 focus DeadIslandRiptideGame.exe
+0 head 0 0
+5000 save ahead
+6000 head 30 0
+9000 save left
+10000 head 30 20
+13000 save left-up
+14000 head 0 0
+17000 save back
+18000 end

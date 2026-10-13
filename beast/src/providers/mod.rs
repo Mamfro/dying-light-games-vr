@@ -4,8 +4,10 @@
 //! says which provider it is, or will be once Monaka has the trait.
 
 pub(crate) mod actions;
+pub(crate) mod anti_wall;
 pub(crate) mod camera_update;
 pub(crate) mod cameras;
+pub(crate) mod controllers;
 pub(crate) mod dlss;
 pub mod engine;
 pub(crate) mod eye_site;

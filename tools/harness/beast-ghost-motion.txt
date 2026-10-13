@@ -1,0 +1,43 @@
+# Dying Light: The Beast: the hands moving, for AFW's ghost of a moving hand in the warped eye, and the flashlight
+# between the eyes. In gameplay in a lit spot, unpaused, flashlight off, the game window in front, nothing touched. The flashlight
+# goes on; four pairs in a row are saved with everything still (the light should match between pairs); then the
+# right hand sweeps left and right with the head still, pairs saved mid-sweep; then the head turns with the hand
+# still. Compare the eyes of each pair, and pairs in a row.
+0     head 0 0
+0     pad none 0 0
+0     stick 0 0 0 0
+0     hand right 0.12 -0.12 -0.35 0 0
+0     hand left -0.12 -0.12 -0.35 0 0
+500   focus DyingLightGame_TheBeast_x64_rwdi.exe
+4000  pad down 0 0
+4150  pad none 0 0
+8000  save still-1
+8030  save still-2
+8060  save still-3
+8090  save still-4
+9000  hand right 0.16 -0.12 -0.35 0 0
+9020  hand right 0.20 -0.12 -0.35 0 0
+9040  hand right 0.24 -0.12 -0.35 0 0
+9060  hand right 0.28 -0.12 -0.35 0 0
+9070  save sweep-out-a
+9080  hand right 0.32 -0.12 -0.35 0 0
+9100  save sweep-out-b
+9200  hand right 0.28 -0.12 -0.35 0 0
+9220  hand right 0.22 -0.12 -0.35 0 0
+9240  hand right 0.16 -0.12 -0.35 0 0
+9260  hand right 0.10 -0.12 -0.35 0 0
+9270  save sweep-in-a
+9280  hand right 0.04 -0.12 -0.35 0 0
+9300  save sweep-in-b
+9320  hand right -0.02 -0.12 -0.35 0 0
+9330  save sweep-in-c
+10500 hand right 0.12 -0.12 -0.35 0 0
+11000 head 5 0
+11050 head 10 0
+11100 head 15 0
+11120 save turn-a
+11150 head 20 0
+11170 save turn-b
+12500 pad down 0 0
+12650 pad none 0 0
+13500 end
