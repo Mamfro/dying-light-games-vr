@@ -50,6 +50,13 @@ pub(crate) fn install_streamline(start: &mut Start<'_, Beast>) -> Result<(), Lac
         reset_every_frame: options.switch("dlss_reset", false),
         per_eye: per_eye.then_some(PerEye { options_slot: engine::DLSS_SET_OPTIONS_POINTER, rebase: monaka_framegen::motion::rebase, fix_motion: options.switch("dlss_fix_motion", true) }),
     };
+    // Each eye's scene renders against its own previous frame (`crate::providers::eye_history`),
+    // unless it is off: then the rebase, and this experiment, how far object motion is carried onto
+    // it (two game frames back with alternate eyes, one with same-frame).
+    let same_frame = crate::config::method(options) == monaka_core::rendering::StereoMethod::SameFrame;
+    let frames_back = if same_frame { 1.0 } else { 2.0 };
+    monaka_streamline::per_eye::use_game_history(per_eye && crate::providers::eye_history::wanted(options));
+    monaka_streamline::per_eye::set_object_scale(options.number("dlss_object_scale", 0.0, 4.0, frames_back) as f32);
     // SAFETY: rd3d12 is the game's D3D12 renderer DLL.
     unsafe { imports::install(start.hooks, r12, install) };
     research::motion::arm();

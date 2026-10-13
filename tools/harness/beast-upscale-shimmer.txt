@@ -1,0 +1,32 @@
+# Dying Light: The Beast: the upscaler's history per eye (upscale_per_eye, dlss_jitter_per_eye,
+# dlss_fix_motion). In gameplay, unpaused, the game window in front, a lit spot, the bow (or any
+# weapon) in hand. The head and both hands hold still while twelve pairs are saved 100 ms apart: a
+# still scene, so whatever changes from pair to pair in an eye is the upscaler's shimmer (or the
+# ghost beside the near hand). Then a slow turn and three more pairs for motion.
+0     head 0 0
+0     pad none 0 0
+0     stick 0 0 0 0
+0     hand right 0.12 -0.12 -0.35 0 0
+0     hand left -0.12 -0.12 -0.35 0 0
+500   focus DyingLightGame_TheBeast_x64_rwdi.exe
+8000  save still-01
+8100  save still-02
+8200  save still-03
+8300  save still-04
+8400  save still-05
+8500  save still-06
+8600  save still-07
+8700  save still-08
+8800  save still-09
+8900  save still-10
+9000  save still-11
+9100  save still-12
+9500  head 2 0
+9700  head 4 0
+9900  head 6 0
+9950  save slow-a
+10100 head 8 0
+10150 save slow-b
+10300 head 10 0
+10350 save slow-c
+11000 end

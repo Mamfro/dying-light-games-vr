@@ -1,0 +1,24 @@
+# Dying Light: The Beast: how fast the clouds move, against the renderer counting a frame per eye's
+# render (same-frame). Outdoors, sky in view, unpaused, the game window in front. The head and hands
+# hold still; a pair is saved every half second for six seconds: the clouds' drift between them is
+# measured from the sky.
+0     head 0 0
+0     pad none 0 0
+0     stick 0 0 0 0
+0     hand right 0.12 -0.12 -0.35 0 0
+0     hand left -0.12 -0.12 -0.35 0 0
+500   focus DyingLightGame_TheBeast_x64_rwdi.exe
+7000  save sky-01
+7500  save sky-02
+8000  save sky-03
+8500  save sky-04
+9000  save sky-05
+9500  save sky-06
+10000 save sky-07
+10500 save sky-08
+11000 save sky-09
+11500 save sky-10
+12000 save sky-11
+12500 save sky-12
+13000 save sky-13
+14000 end

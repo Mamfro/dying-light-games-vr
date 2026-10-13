@@ -16,6 +16,10 @@
 //! game rebuilds the camera from the character's look angles every update, so nothing stacks.
 //! Each eye is rendered with the headset's field of view, centred ([`before_frustum`]), or the
 //! game's; its pose goes out with the one it was rendered with ([`report`]).
+//!
+//! Same-frame stereo (`stereo=same`, [`crate::providers::same_frame`]): every update writes the left
+//! eye, and the right eye of the same pose and game camera waits ([`right_eye_for`]) for the frame
+//! that renders that left eye, which renders it in a second scene call.
 
 use crate::providers::camera_update::Vec3;
 use crate::providers::engine;
@@ -47,6 +51,22 @@ static EYE_TEST: AtomicF32 = AtomicF32::zero();
 static GAME_SCALE: [AtomicF32; 2] = [AtomicF32::zero(), AtomicF32::zero()];
 /// PC check of the pose records' timing: the head of every other pair turned this far (radians).
 static LATENCY_TEST: AtomicF32 = AtomicF32::zero();
+/// Same-frame stereo: each update writes the left eye, its right eye waits for its frame.
+static SAME_FRAME: AtomicBool = AtomicBool::new(false);
+/// Right eyes waiting for the frame that renders their left eye: by the left eye's position.
+static WAITING: Mutex<[Option<Waiting>; WAITING_KEPT]> = Mutex::new([None; WAITING_KEPT]);
+static WAITING_NEXT: AtomicUsize = AtomicUsize::new(0);
+const WAITING_KEPT: usize = 4;
+
+/// A pair's right eye, waiting for the frame its left eye renders in.
+#[derive(Clone, Copy)]
+struct Waiting {
+    /// Which update wrote it (later ones are newer).
+    sequence: u64,
+    left_at: [f32; 3],
+    right: Mat34,
+    pose: HeadPose,
+}
 
 /// Each eye rendered with the headset's field of view (centred, see [`Frustum::symmetric`]): the
 /// player camera's near-plane extents are written just before the game rebuilds its projection
@@ -78,6 +98,8 @@ pub struct Settings {
     /// The HUD's size (1 its size on a monitor) and distance (metres) in front of the eyes, when
     /// it is laid over them (`eng_chr::providers::hud_over`).
     pub hud: Option<(f32, f32)>,
+    /// Same-frame stereo: both eyes rendered in each game frame.
+    pub same_frame: bool,
 }
 
 /// The run's eye settings (the loop itself is the present component's).
@@ -87,10 +109,13 @@ pub fn install(settings: Settings) {
     LATENCY_TEST.store(settings.latency_test_degrees.to_radians());
     *FOV.locked() = FovState { game: None, written: [0.0; 4], restore: false, restored: false };
     HEADSET_FOV.store(settings.headset_fov, Release);
+    SAME_FRAME.store(settings.same_frame, Release);
+    *WAITING.locked() = [None; WAITING_KEPT];
     eng_chr::providers::hud_over::set(settings.hud);
     let test = |name: &str, degrees: f32| if degrees != 0.0 { format!(", {name} test {degrees} degrees") } else { String::new() };
     log!(
-        "alternate-eye stereo (eye separation {} m, head position {:?}, {} field of view{}{})",
+        "{} stereo (eye separation {} m, head position {:?}, {} field of view{}{})",
+        if settings.same_frame { "same-frame" } else { "alternate-eye" },
         settings.shared.eye_separation,
         settings.shared.head_position,
         if settings.headset_fov { "headset" } else { "game" },
@@ -221,7 +246,13 @@ pub fn eye_vectors(camera: usize, update: &PlayerUpdate) -> Option<[Vec3; 3]> {
     let call = CAMERAS.call();
     let taken = DRIVER.take_in_turn()?;
     PLAYER_CAMERA.store(camera, Relaxed);
-    let (eye, pose) = (taken.eye, taken.pose);
+    let same_frame = SAME_FRAME.load(Acquire);
+    // Same-frame: every update is a pair's left eye, from a pose sampled for it (a choice out of
+    // step would give the right eye's, a pair's older pose).
+    let (eye, pose) = match (same_frame, taken.eye) {
+        (false, _) | (true, 0) => (taken.eye, taken.pose),
+        (true, _) => (0, DRIVER.head().current().unwrap_or(taken.pose)),
+    };
     *PENDING.locked() = pose;
     CURRENT_EYE.store(eye as i32, Release);
     if let Some(scale) = mem::read::<[f32; 6]>(camera + engine::CAMERA_PROJECTION) {
@@ -239,11 +270,17 @@ pub fn eye_vectors(camera: usize, update: &PlayerUpdate) -> Option<[Vec3; 3]> {
     if baked.is_some() {
         CAMERAS.aimed();
     }
-    let made = shared().zip(game_camera(update)).and_then(|(shared, game)| eye_camera(&game, &pose, eye, &shared, game_fov(), EYE_TEST.load(), baked));
-    let Some(m) = made else {
+    let made = shared().zip(game_camera(update)).and_then(|(shared, game)| eye_cameras(&game, &pose, &shared, game_fov(), EYE_TEST.load(), baked));
+    let Some(eyes) = made else {
         CAMERAS.refused(call, format_args!("eye {eye}, game camera {update:?}, field of view {:?}", game_fov()));
         return None;
     };
+    let m = eyes[eye.min(1)];
+    if same_frame {
+        let sequence = WAITING_NEXT.fetch_add(1, Relaxed);
+        let waiting = Waiting { sequence: sequence as u64, left_at: [m[3], m[7], m[11]], right: eyes[1], pose };
+        WAITING.locked()[sequence % WAITING_KEPT] = Some(waiting);
+    }
     CAMERAS.drawn();
     let at = [m[3], m[7], m[11]];
     crate::research::history::eye_written(eye, at);
@@ -302,23 +339,69 @@ pub fn before_frustum(camera: usize) {
     }
 }
 
+/// Same-frame: the right eye waiting for the frame whose camera (the level's) holds the left eye at
+/// `left_at`, with the pair's pose; taken (each right eye renders once).
+pub fn right_eye_for(left_at: [f32; 3]) -> Option<(Mat34, HeadPose)> {
+    take_matching(&mut WAITING.locked(), left_at)
+}
+
+/// The waiting right eye whose left eye is at `left_at`: the nearest within a millimetre, the newest
+/// of equally near ones (a still head writes left eyes a fraction of a millimetre apart); it and
+/// every older one are taken (an older one's frame has gone).
+fn take_matching(waiting: &mut [Option<Waiting>; WAITING_KEPT], left_at: [f32; 3]) -> Option<(Mat34, HeadPose)> {
+    let distance = |a: [f32; 3]| (0..3).map(|k| (a[k] - left_at[k]).abs()).fold(0.0, f32::max);
+    let found = waiting
+        .iter()
+        .flatten()
+        .filter(|w| distance(w.left_at) < 1e-3)
+        .min_by(|a, b| distance(a.left_at).total_cmp(&distance(b.left_at)).then(b.sequence.cmp(&a.sequence)))
+        .copied()?;
+    for slot in waiting.iter_mut() {
+        if slot.is_some_and(|w| w.sequence <= found.sequence) {
+            *slot = None;
+        }
+    }
+    Some((found.right, found.pose))
+}
+
+/// Same-frame: the near-plane extents (left, right, bottom, top) eye `eye` of `pose` is rendered
+/// with at `near`, when each eye takes the headset's field of view (`None`: the game's own, the
+/// left eye's).
+pub fn eye_extents(pose: &HeadPose, eye: usize, near: f32) -> Option<[f32; 4]> {
+    if !HEADSET_FOV.load(Acquire) || pose.valid == 0 || !(near.is_finite() && near > 0.0) {
+        return None;
+    }
+    Some(Frustum::from_fov(pose.fov[eye.min(1)])?.symmetric().extents(near))
+}
+
+/// Both eyes' camera-to-world matrices for the game camera `game` (its full angles `game_fov`) and a
+/// head pose in the camera's space, from one room-scale following (each eye as [`EyeView`] places
+/// it; `test` turns eye 0 left and eye 1 right by that angle; `baked`, the head yaw head aim put into
+/// this camera, levels it and turns that yaw back out).
+pub fn eye_cameras(game: &Mat34, pose: &HeadPose, shared: &Shared, game_fov: [f32; 2], test: f32, baked: Option<f32>) -> Option<[Mat34; 2]> {
+    let (game, base) = match baked {
+        Some(baked_yaw) => {
+            let base = Base::Level { baked_yaw };
+            (monaka_body::roomscale::follow_view(game, base, shared.head_position.position(pose))?, base)
+        }
+        None => (*game, Base::Game),
+    };
+    let eye = |eye: usize| -> Option<Mat34> {
+        let m = EyeView::of(&game, base, pose, eye, shared, true, game_fov)?.camera;
+        Some(if test != 0.0 { camera::turn(&m, if eye == 0 { test } else { -test }) } else { m })
+    };
+    Some([eye(0)?, eye(1)?])
+}
+
 /// The camera-to-world matrix of eye `eye` for the game camera `game` (its full angles
 /// `game_fov`) and a head pose in the camera's space ([`EyeView`]: the head placed by the head
 /// model, the eye half the eye distance aside); `test` turns eye 0 left and eye 1 right by that
 /// angle. With head aim (`baked`: the head yaw it put into this camera, radians) the eyes are built
 /// on the camera levelled with that yaw turned back out, moved back by room-scale following: the
 /// head alone turns and pitches the view.
+#[cfg(test)]
 pub fn eye_camera(game: &Mat34, pose: &HeadPose, eye: usize, shared: &Shared, game_fov: [f32; 2], test: f32, baked: Option<f32>) -> Option<Mat34> {
-    let (game, base) = match baked {
-        Some(baked_yaw) => {
-            let base = Base::Level { baked_yaw };
-            // Room-scale following: the head's movement the character has walked is in the camera.
-            (monaka_body::roomscale::follow_view(game, base, shared.head_position.position(pose))?, base)
-        }
-        None => (*game, Base::Game),
-    };
-    let m = EyeView::of(&game, base, pose, eye.min(1), shared, true, game_fov)?.camera;
-    Some(if test != 0.0 { camera::turn(&m, if eye == 0 { test } else { -test }) } else { m })
+    Some(eye_cameras(game, pose, shared, game_fov, test, baked)?[eye.min(1)])
 }
 
 /// The eye cameras' counts since the last report (`seconds` ago), with the loop's own.
@@ -345,6 +428,7 @@ fn install_eyes(start: &mut Start<'_, Beast>) -> Result<(), Lack> {
         latency_test_degrees: options.angle("latency_test", 30.0).unwrap_or(0.0),
         headset_fov: shared.headset_fov,
         hud: shared.hud.shown.then_some((shared.hud.scale, shared.hud.distance)),
+        same_frame: crate::config::method(options) == monaka_core::rendering::StereoMethod::SameFrame,
     });
     Ok(())
 }
@@ -377,6 +461,22 @@ mod tests {
     }
 
     const GAME_FOV: [f32; 2] = [1.5, 1.0];
+
+    #[test]
+    fn a_frame_takes_its_own_right_eye_not_an_older_one() {
+        let at = |x: f32| [x, 1.0, 2.0];
+        let entry = |sequence: u64, x: f32| Some(Waiting { sequence, left_at: at(x), right: [sequence as f32; 12], pose: level_pose() });
+        // A still head: three left eyes a fraction of a millimetre apart, the newest exact.
+        let mut waiting = [entry(5, 10.0003), entry(6, 10.0001), entry(7, 10.0), None];
+        assert_eq!(take_matching(&mut waiting, at(10.0)).map(|(right, _)| right[0]), Some(7.0), "the exact one");
+        assert!(waiting.iter().all(Option::is_none), "it and the older ones taken");
+        // Equally near: the newest.
+        let mut waiting = [entry(1, 10.0), entry(2, 10.0), entry(3, 11.0), None];
+        assert_eq!(take_matching(&mut waiting, at(10.0)).map(|(right, _)| right[0]), Some(2.0));
+        assert!(waiting[2].is_some(), "a newer one stays");
+        // Nothing within a millimetre: none.
+        assert!(take_matching(&mut waiting, at(12.0)).is_none());
+    }
 
     #[test]
     fn eyes_straddle_the_game_camera() {

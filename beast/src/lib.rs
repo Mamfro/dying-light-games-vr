@@ -64,6 +64,7 @@ impl Game for Beast {
             &PRESENT,
             &EYE_SIZE,
             &EYES,
+            &SAME_FRAME,
             &FRAMEGEN,
             &PER_EYE_FRAMEGEN,
             &AFW,
@@ -89,6 +90,7 @@ impl Game for Beast {
             &PER_EYE,
             &STREAMLINE,
             &FSR,
+            &EYE_HISTORY,
             &FOVEATION,
             &HUD,
             &PANELS,
@@ -235,6 +237,19 @@ pub const EYES: Component<Beast> = Component {
     quiet: || eye_site::quiet(1000),
     every: &[Every::millis(2000, eye_site::report_rates)],
     ..monaka_stereo::eye_site::eyes()
+};
+
+/// Same-frame stereo (`stereo=same`, [`providers::same_frame`]): both eyes rendered in each game
+/// frame, the right eye by a second scene call at the frame's present request; the eyes'
+/// component writes each update's left eye and keeps its right eye waiting. `same_frame_skips=0`
+/// has the right eye redo the eye-independent work too.
+pub const SAME_FRAME: Component<Beast> = Component {
+    name: "same frame",
+    needs: &[&EYES],
+    on: |run| On::when(config::method(run.options) == StereoMethod::SameFrame, "another stereo method"),
+    install: providers::same_frame::install,
+    release: providers::same_frame::report,
+    ..Component::NONE
 };
 
 /// FSR frame generation loaded (`framegen=fsr`), for AFW's in-between pairs ([`AFW_FRAMEGEN`]) and
@@ -401,6 +416,20 @@ pub const STREAMLINE: Component<Beast> = Component {
     install: dlss::install_streamline,
     every: &[Every::millis(2000, monaka_streamline::imports::report)],
     release: monaka_streamline::imports::release,
+    ..Component::NONE
+};
+
+/// Each eye's scene rendered against its own previous frame with alternate eyes
+/// ([`providers::eye_history`]), while the upscaler per eye runs: the game's constants and motion
+/// vectors then describe each eye's own motion, passed to the eye's upscaler as they are (same-frame
+/// does the same in its own scene calls). `eye_history=0` leaves the game's previous frame, the
+/// other eye's, and the upscaler per eye rebases onto each eye's own.
+pub const EYE_HISTORY: Component<Beast> = Component {
+    name: "eye history",
+    needs: &[&PER_EYE],
+    on: |run| On::when(config::method(run.options) != StereoMethod::SameFrame && providers::eye_history::wanted(run.options), "same-frame keeps its own, or eye_history=0"),
+    install: providers::eye_history::install,
+    release: providers::eye_history::report,
     ..Component::NONE
 };
 

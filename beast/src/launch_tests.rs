@@ -67,15 +67,15 @@ fn the_wheels_open_by_reach() {
 
 #[test]
 fn the_stereo_method_and_frame_generation() {
-    // AER and no frame generation by default; AFW warps each frame into the other eye; the methods
-    // The Beast does not have are not offered.
+    // AER and no frame generation by default; AFW warps each frame into the other eye; same-frame
+    // renders both; depth stereo is not offered.
     let beast = &MANIFESTS[0];
     assert_eq!(beast.choice_default("stereo"), Some("aer"));
     assert_eq!(beast.choice_default("framegen"), Some("off"));
-    for method in ["aer", "afw"] {
+    for method in ["aer", "afw", "same"] {
         assert!(Values::default().set_checked(beast, "stereo", method).is_ok(), "{method}");
     }
-    assert!(Values::default().set_checked(beast, "stereo", "same").is_err());
+    assert!(Values::default().set_checked(beast, "stereo", "depth").is_err());
     assert!(Values::default().set_checked(beast, "stereo", "off").is_ok(), "stereo off, from the command line");
     let text = options_file(beast, &values_of(beast, &["stereo=afw", "framegen=fsr"]));
     assert!(text.starts_with("stereo=afw\n") && text.contains("\nframegen=fsr\n"), "{text}");

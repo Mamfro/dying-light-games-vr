@@ -1,0 +1,42 @@
+# Dying Light: The Beast: the ghost of a near object beside it (each eye showing it where the other eye sees it) and
+# the hands' flicker, in AER or AFW. In gameplay in a lit spot, unpaused, the game window in front, nothing touched,
+# the bow (or any weapon) in hand. Four pairs in a row with everything still; the right hand sweeping left and right
+# with the head still, pairs saved mid-sweep; the head turning with the hands still. Compare the eyes of each pair at
+# full size around the hands, and pairs in a row.
+0     head 0 0
+0     pad none 0 0
+0     stick 0 0 0 0
+0     hand right 0.12 -0.12 -0.35 0 0
+0     hand left -0.12 -0.12 -0.35 0 0
+500   focus DyingLightGame_TheBeast_x64_rwdi.exe
+8000  save still-1
+8030  save still-2
+8060  save still-3
+8090  save still-4
+9000  hand right 0.16 -0.12 -0.35 0 0
+9020  hand right 0.20 -0.12 -0.35 0 0
+9040  hand right 0.24 -0.12 -0.35 0 0
+9060  hand right 0.28 -0.12 -0.35 0 0
+9070  save sweep-out-a
+9080  hand right 0.32 -0.12 -0.35 0 0
+9100  save sweep-out-b
+9200  hand right 0.28 -0.12 -0.35 0 0
+9220  hand right 0.22 -0.12 -0.35 0 0
+9240  hand right 0.16 -0.12 -0.35 0 0
+9260  hand right 0.10 -0.12 -0.35 0 0
+9270  save sweep-in-a
+9280  hand right 0.04 -0.12 -0.35 0 0
+9300  save sweep-in-b
+9320  hand right -0.02 -0.12 -0.35 0 0
+9330  save sweep-in-c
+10500 hand right 0.12 -0.12 -0.35 0 0
+11000 head 5 0
+11050 head 10 0
+11100 head 15 0
+11120 save turn-a
+11150 head 20 0
+11170 save turn-b
+11200 head 25 0
+11250 head 30 0
+12500 save turned
+13500 end

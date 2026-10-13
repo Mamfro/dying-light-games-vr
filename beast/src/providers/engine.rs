@@ -69,6 +69,61 @@ pub const COMPUTE_FRUSTUM: Site<ComputeFrustumFn> = exported(
     &[Instruction::plain(&[0x4c, 0x8b, 0xdc]), Instruction::plain(&[0x49, 0x89, 0x4b, 0x08])], // mov r11, rsp; mov [r11+8], rcx
 );
 
+// --- The frame, engine side ---------------------------------------------------------------------
+/// The game object (`[engine + GAME_GLOBAL]`) and its frame counter, +1 per rendered game frame.
+pub const GAME_GLOBAL: usize = 0x260dfc0;
+pub const GAME_COUNTER: usize = 0x108;
+/// One whole scene render `(game, token, a, b)`: begin, prepare, submit, each level's post, end.
+pub type SceneFn = unsafe extern "system" fn(game: usize, token: u32, a: usize, b: usize) -> usize;
+pub const SCENE: Site<SceneFn> = site("scene", 0x85aaa0, &[Instruction::plain(&[0x48, 0x89, 0x5c, 0x24, 0x18])]); // mov [rsp+0x18], rbx
+/// The scene's frame data fill `(game, data)`: the data's main view camera (+0xf0, the level's
+/// camera at level + 0x13a0) and its viewport (+8).
+pub type PrepareFn = unsafe extern "system" fn(game: usize, data: usize) -> usize;
+pub const PREPARE: Site<PrepareFn> = site("prepare", 0x84e270, &[Instruction::plain(&[0x48, 0x89, 0x5c, 0x24, 0x20])]); // mov [rsp+0x20], rbx
+pub const DATA_VIEWPORT: usize = 8;
+pub const LEVEL_CAMERA: usize = 0x13a0;
+/// The renderer's present request for the frame (`CRenderer` slot +0xc8, renderer RVA): `(renderer,
+/// a, b)`, the frame's timing, swap and end; the engine's own call returns to
+/// [`NORMAL_PRESENT_CALLER`].
+pub type FramePresentFn = unsafe extern "system" fn(renderer: usize, a: usize, b: usize) -> usize;
+pub const FRAME_PRESENT: Site<FramePresentFn> = site("frame present request", 0xacaa0, &[Instruction::plain(&[0x48, 0x89, 0x5c, 0x24, 0x08])]); // mov [rsp+8], rbx
+pub const NORMAL_PRESENT_CALLER: usize = 0x84fd3a;
+/// The level's "prepared this frame" stamps undone `(level)` (engine RVA), so a second scene call in
+/// the same game frame prepares the level again.
+pub type LevelFn = unsafe extern "system" fn(level: usize);
+pub const RESET_LEVEL: (usize, &[u8]) = (0xba9be0, &[0x48, 0x89, 0x5c, 0x24, 0x08, 0x57, 0x48, 0x83, 0xec, 0x20, 0x48, 0x8b, 0xf9, 0x48, 0x8b, 0x89]);
+/// The renderer's render lock `(renderer, name)` in and `(renderer)` out (`CRenderer` slots +0x1d8
+/// and +0x1e0, renderer RVAs), held around a second scene call as the frame's own task holds it.
+pub type EnterFn = unsafe extern "system" fn(renderer: usize, name: *const u8);
+pub type LeaveFn = unsafe extern "system" fn(renderer: usize);
+pub const RENDERER_ENTER: (usize, &[u8]) = (0xa68a0, &[0x40, 0x53, 0x48, 0x83, 0xec, 0x20, 0x48, 0x8b, 0xd9, 0xf0, 0xff, 0x41, 0x70, 0x80, 0xb9, 0xb0]);
+pub const RENDERER_LEAVE: (usize, &[u8]) = (0xacee0, &[0x40, 0x53, 0x48, 0x83, 0xec, 0x20, 0x80, 0xb9, 0xb0, 0x00, 0x00, 0x00, 0x00, 0x48, 0x8b, 0xd9]);
+/// The camera's frustum block (left, right, bottom, top, near, far, ..., 12 floats) at
+/// `CAMERA_EXTENTS`, its projection (16 floats) at `CAMERA_PROJECTION`.
+pub const CAMERA_FRUSTUM_FLOATS: usize = 12;
+/// Render-script commands whose work does not depend on the eye (renderer vtable RVAs, each with
+/// its execute in slot 1): particles and their sorting, environment probes, videos, the heightmap,
+/// ray-tracing structures, global illumination's scene updates, the voxelizer and cloth. A second
+/// scene call in the same game frame skips them: some step state (particles, cloth) and would run
+/// twice as fast. Not the wind's three: skipped, the second render's foliage bends far out of
+/// shape; run again, it matches the first and sways at its own speed.
+pub const ONCE_COMMANDS: [(usize, &str); 14] = [
+    (0x2395c0, "Envprobes_Update"),
+    (0x239860, "GpuFx_Update"),
+    (0x239920, "SortBitonic"),
+    (0x239980, "GpuFx_Sort_Parallel"),
+    (0x23a7a8, "UpdateVideos"),
+    (0x23ab68, "UpdateHeightmap"),
+    (0x23ac88, "DXRTUpdateVertexTransformBLASes"),
+    (0x23ace8, "DXRTUpdateSkinnedBLASes"),
+    (0x23ada8, "DXRTBuildBLASes"),
+    (0x23ae08, "DXRTBuildTLAS"),
+    (0x23b6a8, "GILUpdateBVH"),
+    (0x23b648, "GILUpdateSDFs"),
+    (0x239620, "Voxelizer_Update"),
+    (0x23a1a8, "ClothSimulation"),
+];
+
 // --- D3D12 renderer ------------------------------------------------------------------------------
 pub const RENDERER_12: &str = eng_chr::RD3D12;
 pub const RENDERER_12_SHA256: &str = "68BCDE0658BA0E93F5CA448C40AB10C1165A3B748CA06D50F3EF85239DDF2530";

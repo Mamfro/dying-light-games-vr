@@ -33,12 +33,16 @@ pub unsafe extern "system" fn set_vectors(camera: usize, forward: usize, up: usi
     if let Some(pitch) = player.and_then(|update| update.pitch()).filter(|_| !crate::providers::look_fields::AIM.live()) {
         crate::providers::look_fields::AIM.note_camera_pitch(pitch);
     }
+    if player.is_some() {
+        crate::research::frame_order::player_update(camera);
+    }
     if let Some(update) = player
         && let Some([back, up, position]) = eye_site::eye_vectors(camera, &update)
     {
         // SAFETY: the original, with the game's camera and our own vectors, which live until it
         // returns.
-        unsafe { SET_VECTORS_ORIGINAL.get()(camera, back.address(), up.address(), position.address()) }
+        unsafe { SET_VECTORS_ORIGINAL.get()(camera, back.address(), up.address(), position.address()) };
+        crate::research::frame_order::player_updated();
     } else if let Some((forward, up)) = camera_update::turned(caller, forward, up) {
         // SAFETY: the original, with the game's camera and position and our own vectors, which
         // live until it returns.

@@ -10,6 +10,7 @@
 //! research notes, its facts in `engine.rs`.
 
 pub mod cameras;
+pub mod frame_order;
 pub mod give;
 pub mod history;
 pub mod motion;
@@ -48,6 +49,8 @@ pub struct Options {
     /// `give=Name:count,...` (testing only): items given to the player once, a few seconds into play
     /// (`give`).
     pub give: Option<String>,
+    /// `probe_frame_order=1`: the order and threads of a frame's steps (`frame_order`).
+    pub frame_order: bool,
 }
 
 impl Options {
@@ -63,6 +66,7 @@ impl Options {
             vp: options.text("vp_probe").map(str::to_owned),
             frames: options.switch("frame_probe", false),
             give: options.text("give").map(str::to_owned),
+            frame_order: options.switch("probe_frame_order", false),
         }
     }
 
@@ -87,6 +91,10 @@ pub(crate) fn install_probes(start: &mut Start<'_, Beast>) -> Result<(), Lack> {
     unsafe {
         install(start.hooks, &start.build.renderer, stereo)?;
         install_game(start.hooks, start.build.gamedll.as_ref())?;
+        // Same-frame stereo hooks the same three functions.
+        if options().frame_order && crate::config::method(start.options) != monaka_core::rendering::StereoMethod::SameFrame {
+            frame_order::install(start.hooks, &start.build.engine, &start.build.renderer)?;
+        }
     }
     self::start(stereo, start.build.renderer.base());
     Ok(())
@@ -168,6 +176,7 @@ pub fn report() {
     if options().cameras {
         cameras::report(None);
     }
+    frame_order::report();
 }
 
 #[cfg(test)]

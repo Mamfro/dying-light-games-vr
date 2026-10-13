@@ -8,7 +8,7 @@ use monaka_core::rendering::{self, FrameGenerator, STEREO_OFF, StereoMethod};
 
 /// The stereo methods The Beast offers: AER (Alt-eye) by default, AFW (Frame-warp) marked experimental
 /// (its warped eye ghosts a moving hand and borrows the other eye's flashlight light).
-pub(crate) const STEREO: Opt = rendering::stereo_method(&[StereoMethod::Aer.offer(), StereoMethod::Afw.experimental(), STEREO_OFF], StereoMethod::Aer);
+pub(crate) const STEREO: Opt = rendering::stereo_method(&[StereoMethod::Aer.offer(), StereoMethod::Afw.experimental(), StereoMethod::SameFrame.experimental(), STEREO_OFF], StereoMethod::Aer);
 /// The frame generators The Beast offers: off by default, FSR's.
 pub(crate) const FRAMEGEN: Opt = rendering::frame_generation(&[FrameGenerator::Off.offer(), FrameGenerator::Fsr.offer()], FrameGenerator::Off);
 

@@ -33,6 +33,8 @@ pub(crate) fn install_fsr(start: &mut Start<'_, Beast>) -> Result<(), Lack> {
     let r12 = start.build.renderer_12.as_ref().or_missing("the game is not on D3D12")?;
     RENDERER.store(start.build.renderer.base(), Relaxed);
     let per_eye = start.is_on(&crate::PER_EYE);
+    // Each eye's scene renders against its own previous frame (`crate::providers::eye_history`).
+    monaka_framegen::upscale_per_eye::use_game_history(per_eye && crate::providers::eye_history::wanted(start.options));
     let install = Install { handlers: Handlers { dispatch: Some(dispatched), ..Handlers::default() }, per_eye: per_eye.then_some(PerEye { eye: upscaled_eye }) };
     // SAFETY: rd3d12 imports ffxCreateContext, ffxDispatch and ffxDestroyContext from AMD's loader.
     if unsafe { ffx_imports::install(start.hooks, r12, install) }? {
