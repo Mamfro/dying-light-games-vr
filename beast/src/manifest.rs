@@ -10,7 +10,7 @@ const BEAST: [Opt; options_len::<Beast>("beast")] = options::<Beast, { options_l
 pub const MANIFESTS: &[Manifest] = &[Manifest {
     id: "beast",
     name: "Dying Light: The Beast",
-    status: Status::Experimental,
+    status: Status::PreAlpha,
     executables: &["DyingLightGame_TheBeast_x64_rwdi.exe"],
     steam_app: 3008130,
     producer: "monaka_beast",

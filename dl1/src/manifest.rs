@@ -56,7 +56,6 @@ const CONTROLS: &[HowTo] = &[
     HowTo { action: "Throw", ways: &[way("Hold the left trigger, throw, let go.", &[MOTION])], options: &[] },
     HowTo { action: "Bow", ways: &[way("Bow in the left hand, draw with the right.", &[MOTION])], options: &[] },
     HowTo { action: "Lockpicking", ways: &[way("Twist the left hand for the pick, the right for the screwdriver.", &[MOTION])], options: &[] },
-    HowTo { action: "Zombie grabs", ways: &[], options: &["disable_zombie_grabs"] },
 ];
 
 pub const MANIFESTS: &[Manifest] = &[Manifest {

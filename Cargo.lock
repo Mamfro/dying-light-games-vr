@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "eng_chr"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "monaka_body",
  "monaka_channel",
@@ -18,7 +18,7 @@ dependencies = [
 
 [[package]]
 name = "monaka_beast"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "eng_chr",
  "monaka_body",
@@ -36,7 +36,7 @@ dependencies = [
 
 [[package]]
 name = "monaka_body"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "monaka_channel",
  "monaka_core",
@@ -47,7 +47,7 @@ dependencies = [
 
 [[package]]
 name = "monaka_channel"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "monaka_core",
  "windows",
@@ -55,11 +55,11 @@ dependencies = [
 
 [[package]]
 name = "monaka_core"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "monaka_dl1"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "eng_chr",
  "monaka_body",
@@ -78,7 +78,7 @@ dependencies = [
 
 [[package]]
 name = "monaka_dl2"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "eng_chr",
  "monaka_body",
@@ -97,7 +97,7 @@ dependencies = [
 
 [[package]]
 name = "monaka_framegen"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "monaka_channel",
  "monaka_core",
@@ -109,7 +109,7 @@ dependencies = [
 
 [[package]]
 name = "monaka_fsr11"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "monaka_channel",
  "monaka_core",
@@ -121,7 +121,7 @@ dependencies = [
 
 [[package]]
 name = "monaka_gl"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "monaka_channel",
  "monaka_core",
@@ -130,7 +130,7 @@ dependencies = [
 
 [[package]]
 name = "monaka_hook"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "monaka_core",
  "windows",
@@ -138,7 +138,7 @@ dependencies = [
 
 [[package]]
 name = "monaka_launch"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "monaka_core",
  "windows",
@@ -146,7 +146,7 @@ dependencies = [
 
 [[package]]
 name = "monaka_pad"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "monaka_channel",
  "monaka_core",
@@ -157,7 +157,7 @@ dependencies = [
 
 [[package]]
 name = "monaka_producer"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "monaka_core",
  "monaka_hook",
@@ -165,7 +165,7 @@ dependencies = [
 
 [[package]]
 name = "monaka_riptide"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "eng_chr",
  "monaka_body",
@@ -182,7 +182,7 @@ dependencies = [
 
 [[package]]
 name = "monaka_stereo"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "monaka_channel",
  "monaka_core",
@@ -198,7 +198,7 @@ dependencies = [
 
 [[package]]
 name = "monaka_streamline"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "monaka_channel",
  "monaka_core",
@@ -209,7 +209,7 @@ dependencies = [
 
 [[package]]
 name = "monaka_warp"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "monaka_channel",
  "monaka_core",
