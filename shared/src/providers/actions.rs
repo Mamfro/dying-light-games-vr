@@ -3,7 +3,12 @@
 //! The Chrome Engine games' actions on the pad, as far as all three games share them, for each
 //! game's actions provider (`monaka_pad::actions::Actions`, implemented by each game on this): the
 //! right trigger is the light attack (what a swing has always pressed). Dying Light 1 adds the
-//! ones it knows ([`binding`] for the rest).
+//! ones it knows ([`binding`] for the rest); Dying Light 2 and The Beast the ones their shared pad
+//! layout has ([`binding_dl2`]: B toggles crouching, a tap of the d-pad's down the flashlight).
+//!
+//! Their VR button layout ([`VR_BUTTONS`], as Dying Light 1's): in play the controllers' B reaches
+//! the game as the d-pad's down, so B is the flashlight, and crouching is by ducking, which taps the
+//! game's B itself (`monaka_body::duck`). In a menu or a wheel B stays B ([`in_play`]).
 //!
 //! The reload, Dying Light 2's and The Beast's own way ([`engine`]), once the gun's update is hooked
 //! ([`install_reload`]). The gun's controller (`WeaponFireController`) starts a reload from its
@@ -13,10 +18,11 @@
 //! player's ready gun, reloading by hand reads its gesture there (`monaka_body::reload::update`),
 //! and a reload asked is started by that same call; the reload then runs as the game's.
 
-use monaka_core::pad::Gamepad;
+use monaka_core::pad::{Gamepad, button};
 use monaka_hook::module::Module;
 use monaka_hook::{Hooks, InFlight, Original, mem};
-use monaka_pad::actions::{Action, Ask, Binding};
+use monaka_pad::actions::{Action, Ask, Binding, buttons};
+use monaka_pad::remap::Remap;
 use monaka_producer::{Rejection, log};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::*};
@@ -38,6 +44,41 @@ fn binding_with(action: Action, hooked: bool) -> Binding {
         Action::Reload if hooked => Binding::Engine,
         _ => Binding::None,
     }
+}
+
+/// How Dying Light 2 and The Beast take `action`: their pad's default layout, on top of what the
+/// three games share ([`binding`]). B toggles crouching; a tap of the d-pad's down toggles the
+/// flashlight (the game takes a press let go within 0.21 s, so the flashlight is pressed, not held).
+pub fn binding_dl2(action: Action) -> Binding {
+    match action {
+        Action::Crouch => Binding::Toggle(buttons(button::B)),
+        Action::Flashlight => Binding::Pad(buttons(button::DPAD_DOWN)),
+        _ => binding(action),
+    }
+}
+
+/// The VR button layout of Dying Light 2 and The Beast (a game's `Remaps`): the controllers' B
+/// reaches the game as the d-pad's down, the flashlight, instead of the crouch toggle.
+pub const VR_BUTTONS: &[Remap] = &[Remap { from: button::B, to: button::DPAD_DOWN }];
+
+/// The d-pad directions that open the tools' (left) and the weapons' (right) wheels.
+const WHEEL_BUTTONS: u16 = button::DPAD_LEFT | button::DPAD_RIGHT;
+/// How old the pad's last read may be for its buttons to count (ms).
+const READ_MAX_AGE_MS: u64 = 250;
+
+/// Whether the VR button layout applies to a button going down now ([`VR_BUTTONS`]): in play. In a
+/// menu (`crate::providers::gui::menu_open`), and while the world is not drawn or a video plays (a
+/// cutscene's skip, a loading screen), B goes back or skips; with a wheel open or opening (the
+/// d-pad's left or right held at the pad's last read) B picks a slot.
+pub fn in_play() -> bool {
+    use monaka_producer::situation::{Situation, active};
+    let away = crate::providers::gui::menu_open() || active(Situation::WorldHidden) || active(Situation::Video);
+    playing(away, monaka_pad::buttons(READ_MAX_AGE_MS))
+}
+
+/// [`in_play`] with a menu open or not (`menu`) and the buttons at the pad's last read.
+fn playing(menu: bool, buttons: Option<u16>) -> bool {
+    !menu && buttons.is_none_or(|b| b & WHEEL_BUTTONS == 0)
 }
 
 /// The Chrome games' own way (a game's `Actions::engine`): a reload asked is kept for the player's
@@ -156,73 +197,4 @@ pub fn report_reload() {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use monaka_body::held::Kind;
-    use monaka_body::reload::{Reloading, gestured};
-    use monaka_core::gesture::{TouchAway, TouchAwayRules};
-    use monaka_pad::actions::standard;
-    use std::cell::Cell;
-
-    #[test]
-    fn the_attack_is_the_trigger_a_swing_pressed() {
-        assert_eq!(binding_with(Action::Attack, false), standard(Action::Attack));
-        assert!(Action::ALL.iter().filter(|&&a| a != Action::Attack).all(|&a| binding_with(a, false) == Binding::None));
-    }
-
-    #[test]
-    fn the_reload_is_the_games_own_once_the_gun_is_hooked() {
-        assert_eq!(binding_with(Action::Reload, true), Binding::Engine);
-        assert!(Action::ALL.iter().filter(|&&a| a != Action::Attack && a != Action::Reload).all(|&a| binding_with(a, true) == Binding::None));
-        if !HOOKED.load(Acquire) {
-            assert!(!engine(Action::Reload, Ask::Tap { ms: 100 }), "not hooked: refused");
-        }
-        assert!(!engine(Action::Attack, Ask::Tap { ms: 100 }));
-    }
-
-    /// The Chrome games' reload by hand before the ready-made, after each gun update: the
-    /// player's ready gun, then the gesture read from both palms.
-    fn old_update(gesture: &mut TouchAway, time: f64, players: bool, state: Option<i32>, apart: Option<f32>) -> bool {
-        players && state == Some(READY) && apart.is_some_and(|apart| gesture.feed(time, apart, &TouchAwayRules::RELOAD))
-    }
-
-    #[test]
-    fn a_reload_starts_at_the_gun_updates_the_old_code_started_one() {
-        let (mut old, mut new) = (TouchAway::new(), TouchAway::new());
-        let asked = Cell::new(false);
-        let mut starts_seen = 0;
-        for i in 0..3000 {
-            let time = i as f64 / 60.0;
-            // The left palm to the gun and away about each 1.3 s; the gun firing (not ready) now
-            // and then, sometimes through a touch; another character's gun updating too; the
-            // palms not fresh for a while.
-            let phase = i % 80;
-            let apart = match phase {
-                _ if (1000..1050).contains(&i) => None,
-                0..=19 => Some(0.4 - 0.015 * phase as f32),
-                20..=29 => Some(0.08),
-                _ => Some((0.08 + 0.02 * (phase - 29) as f32).min(0.5)),
-            };
-            let state = if (i / 37) % 5 == 4 { Some(2) } else { Some(READY) };
-            for players in [false, true] {
-                let was = old_update(&mut old, time, players, state, apart);
-                // The ready-made at the moment: a gun in the aiming hand, the reload pressed
-                // through the game's own way (kept as asked) and taken here.
-                let now = starts(
-                    players,
-                    || state,
-                    || {
-                        let done = gestured(&mut new, time, Kind::Gun, apart, &Reloading::FRESH.touch);
-                        asked.set(asked.get() || done);
-                        done
-                    },
-                    || asked.replace(false),
-                );
-                assert_eq!(now, was, "update {i}, the player's: {players}");
-                starts_seen += now as usize;
-            }
-        }
-        assert_eq!(old, new, "the gestures end in the same state");
-        assert!(starts_seen >= 10, "{starts_seen}");
-    }
-}
+mod tests;

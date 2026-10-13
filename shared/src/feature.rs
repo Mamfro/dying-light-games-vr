@@ -5,19 +5,18 @@
 //! for leaves that component off for the run, said in the log.
 
 use crate::providers::look_fields::HeadAim;
-use crate::cooking::{hudfix, panels};
 use crate::providers::look_fields::{self, IdLoad, InputActionFn, PitchActions};
 use crate::providers::{actions, grabs, gui, hudlayer, model, rig, view_bob, walk};
 use monaka_body::hand_rig;
 use monaka_body::held::HeldItems;
 use monaka_body::reload::Reloads;
 use monaka_hook::Site;
-use monaka_core::feature::Feature;
-use monaka_core::manifest::{DISABLE_VIEW_BOBBING, Kind, Opt, Shown, WORLD_HUD, opt};
+use monaka_core::manifest::{DISABLE_VIEW_BOBBING, Kind, Opt, Shown, opt};
 use monaka_hook::module::Module;
 use monaka_producer::game::{Component, Lack, Missing, On, OrMissing, Run, Start, Switch};
 use monaka_producer::log;
 use monaka_producer::situation::Situation;
+use monaka_stereo::hud_panels::LayerPieces;
 use monaka_stereo::providers::GameQueue;
 use std::sync::atomic::{AtomicBool, Ordering::*};
 
@@ -56,7 +55,8 @@ pub struct Facts {
     /// The gun's update and reload start, for the reload taken the game's own way.
     pub reload: Option<actions::Reload>,
     pub gui: Option<gui::Build>,
-    /// The HUD's pieces the dynamic HUD takes, by the game's widget names.
+    /// The HUD's pieces the dynamic HUD takes, by the game's widget names (in the order of its
+    /// `monaka_stereo::hud_panels::HudPieces::PIECES`: [`gui::panels`]).
     pub pieces: &'static [gui::Piece],
     /// The game's present lays the HUD layer over the eyes whenever the HUD is shown (The Beast);
     /// otherwise the layer is made only for the dynamic HUD (Dying Light 2's eyes draw the HUD in).
@@ -111,6 +111,8 @@ pub fn install_look<G: Chrome>(start: &mut Start<'_, G>) -> Result<(), Lack> {
     }
     if look.cutscenes {
         look.aim.cutscene().resolve(G::engine(start.build)).missing()?;
+    } else if look.aim.fields().camera_sources.is_some() {
+        log!("head aim: stands down while an animation drives the camera (the game's own flag; the engine has no movie query)");
     } else {
         log!("head aim: steers through cutscenes (the engine does not export IsObjectOnSomeMovie)");
     }
@@ -205,7 +207,7 @@ fn install_view_bob<G: Chrome>(start: &mut Start<'_, G>) -> Result<(), Lack> {
 // ---- Grabs ----
 
 pub const DISABLE_ZOMBIE_GRABS: Opt =
-    opt("disable_zombie_grabs", "Disable zombie grabs", "Zombies never grab you. Off: they grab and bite until you break free, as in the game.", Kind::Switch { default: true })
+    opt("disable_zombie_grabs", "Disable zombie grabs", "Off: zombies grab you as in the game.", Kind::Switch { default: true })
         .on(Shown::Game);
 
 /// Grabs never land on the player (`grabs`).
@@ -285,16 +287,10 @@ pub fn hook_reload<G: Chrome + Reloads>(start: &mut Start<'_, G>) -> Result<(), 
 
 /// The gui tree is hooked this run (the dynamic HUD's pieces can be read).
 static GUI: AtomicBool = AtomicBool::new(false);
-/// The dynamic HUD runs: the pieces go onto the hands at each present.
-static PANELS: AtomicBool = AtomicBool::new(false);
-
-/// Whether the dynamic HUD runs ([`panels`]).
-pub fn panels_on() -> bool {
-    PANELS.load(Acquire)
-}
 
 /// The HUD as a layer of its own, from the game's command lists (`hudlayer`; `probe_hud=1` probes
-/// it): laid over the eyes in front of them, or kept for the dynamic HUD's pieces. The gui tree
+/// it): laid over the eyes in front of them (by the lay-over, `monaka_stereo::hud_layer::present12`,
+/// where the game's present entry runs it), or kept for the dynamic HUD's pieces. The gui tree
 /// comes with it (`gui`; `probe_gui=1` probes it), telling when a menu is open (shown flat). On the
 /// HUD layer's base (`monaka_stereo::hud_layer`: its size and distance).
 pub const fn hud<G: Chrome>() -> Component<G> {
@@ -336,28 +332,20 @@ fn remove_hud() {
 fn close_hud() {
     hudlayer::leave();
     GUI.store(false, Release);
-    panels::close();
-    hudfix::close();
     monaka_stereo::hudover12::close();
     gui::report();
 }
 
-/// The dynamic HUD: the HUD's pieces read from the gui tree and put on the hands, out of the eyes.
-pub const fn panels<G: Chrome>() -> Component<G> {
-    Component {
-        name: "panels",
-        features: &[Feature::HudPanels],
-        options: &[WORLD_HUD],
-        on: |run| On::when(run.shared.hud.world, "the dynamic HUD is off"),
-        install: install_panels::<G>,
-        arm: || PANELS.store(true, Release),
-        quiet: || PANELS.store(false, Release),
-        ..Component::NONE
-    }
+/// The dynamic HUD (Monaka's `monaka_stereo::hud_panels`, by layer crops): the HUD's pieces read
+/// from the gui tree ([`gui::boxes`], the game's `LayerPieces`) and put on the hands, out of the
+/// eyes. A game lists it on top of its HUD by struct update.
+pub const fn panels<G: Chrome + LayerPieces>() -> Component<G> {
+    Component { install: install_panels::<G>, ..monaka_stereo::hud_panels::hud_panels() }
 }
 
-fn install_panels<G: Chrome>(start: &mut Start<'_, G>) -> Result<(), Lack> {
+fn install_panels<G: Chrome + LayerPieces>(start: &mut Start<'_, G>) -> Result<(), Lack> {
     GUI.load(Acquire).then_some(()).or_missing("no gui tree to read the pieces from")?;
+    monaka_stereo::hud_panels::install_layer::<G>(start)?;
     gui::configure(start.options.switch("probe_gui", false), G::FACTS.pieces, G::showing);
     Ok(())
 }

@@ -4,35 +4,38 @@
 //! size (`HudLayer for Dl2`, `crate::providers::stereo`), the crosshair at the game's aim point, the
 //! pieces on the hands left out (the left eye cuts them out onto the hands' panels), the world
 //! markers at their targets' depth. Also: when the game's UI is a menu, from the UI layer it tags
-//! in play only ([`in_menu`]).
+//! in play only ([`in_menu`]); and the HUD pieces for Monaka's dynamic HUD
+//! (`monaka_stereo::hud_panels::LayerPieces`, its layer crops), read from the engine's gui tree.
 
 use crate::Dl2;
 use crate::config;
+use crate::providers::engine;
 use crate::providers::eye_site::local;
-use monaka_channel::ChannelName;
 use monaka_core::camera::Frustum;
 use monaka_core::hud::Placement;
 use monaka_core::sync::Locked;
+use monaka_stereo::hud_panels::{self, HudPieces, LayerPieces, Piece};
 use monaka_stereo::providers::HudLayer;
 use monaka_stereo::same_frame::{EyeHud, PAIRS, PairHud};
 use monaka_warp::warp12::{Marker, Params};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
 use windows::Win32::Graphics::Direct3D12::{D3D12_RESOURCE_DESC, ID3D12CommandQueue, ID3D12Resource};
 
 /// The HUD layer over each eye of a pair.
 pub const PAIR_HUD: PairHud = PairHud { take, done };
 
-/// The stereo channel's name (the hands' panels sit beside it).
-static CHANNEL_NAME: OnceLock<ChannelName> = OnceLock::new();
-
-pub fn set_channel(name: ChannelName) {
-    let _ = CHANNEL_NAME.set(name);
+/// DL2's pieces ([`engine::PIECES`]).
+impl HudPieces for Dl2 {
+    const PIECES: &'static [Piece] = &engine::PANELS;
+    const MARGIN: f32 = eng_chr::providers::gui::MARGIN;
 }
 
-/// The panels' channels let go (the end of a run).
-pub fn close() {
-    eng_chr::cooking::panels::close();
+/// Where each piece lies in the HUD layer this frame (the gui tree's boxes, in the frame's pixels).
+impl LayerPieces for Dl2 {
+    fn boxes(boxes: &mut [Option<[f32; 4]>]) {
+        eng_chr::providers::gui::boxes(boxes);
+    }
 }
 
 // --- The UI layer the game tags ---------------------------------------------------------------------
@@ -66,7 +69,7 @@ fn take(queue: &ID3D12CommandQueue, buffer: &ID3D12Resource, eye: usize) -> Opti
         return None;
     }
     monaka_stereo::providers::before_hud(queue, buffer);
-    let params = hud_params(queue, &desc, &layer, eye == 0, monaka_channel::tick());
+    let params = hud_params(queue, &desc, &layer, eye == 0);
     Some(EyeHud { layer, params })
 }
 
@@ -118,15 +121,15 @@ pub fn world_markers(desc: &D3D12_RESOURCE_DESC, frustum: Option<Frustum>, ipd: 
 /// each eye where `HudLayer for Dl2` puts it (at HUD distance with its disparity; the whole frame
 /// where it says nothing), the crosshair at the aim point, the pieces left out; the left eye
 /// (`left`) cuts the pieces out onto the hands' panels first.
-pub fn hud_params(queue: &ID3D12CommandQueue, desc: &D3D12_RESOURCE_DESC, layer: &ID3D12Resource, left: bool, tick: u64) -> Params<'static> {
+pub fn hud_params(queue: &ID3D12CommandQueue, desc: &D3D12_RESOURCE_DESC, layer: &ID3D12Resource, left: bool) -> Params<'static> {
     let size = (desc.Width as u32, desc.Height);
     let pair_head = local(|l| l.pair_head.get());
     let mut params = Params::depth_stereo(0.0, 0, eye_hud_rects(size), aim(size), monaka_stereo::hudover12::CROSS_RADIUS * desc.Height as f32);
     params.ui_out_of_frame = true;
     let mut pieces = LAST_PIECES.locked();
-    if left && let Some(name) = CHANNEL_NAME.get() {
+    if left {
         *pieces = [[0.0; 4]; 5];
-        for (slot, rect) in pieces.iter_mut().zip(eng_chr::cooking::panels::publish(queue, layer, name, tick)) {
+        for (slot, rect) in pieces.iter_mut().zip(hud_panels::d3d12::publish(queue, layer)) {
             *slot = rect;
         }
     }
@@ -136,11 +139,8 @@ pub fn hud_params(queue: &ID3D12CommandQueue, desc: &D3D12_RESOURCE_DESC, layer:
 }
 
 /// The pieces of the hands' panels, cut out of a centre frame's layer (depth stereo) for both eyes.
-pub fn publish_pieces(queue: &ID3D12CommandQueue, layer: &ID3D12Resource, tick: u64) -> Vec<[f32; 4]> {
-    match CHANNEL_NAME.get() {
-        Some(name) => eng_chr::cooking::panels::publish(queue, layer, name, tick),
-        None => Vec::new(),
-    }
+pub fn publish_pieces(queue: &ID3D12CommandQueue, layer: &ID3D12Resource) -> Vec<[f32; 4]> {
+    hud_panels::d3d12::publish(queue, layer)
 }
 
 /// Where the HUD layer goes over each rendered eye of `size`: where `HudLayer for Dl2` puts it, the

@@ -53,7 +53,7 @@ use visibility::*;
 /// Streamline's imports, the renderer's DLSS calls; and what the run sets for the eyes.
 fn install_site(start: &mut Start<'_, Dl2>) -> Result<(), Lack> {
     let Facts { engine, renderer, d3d11, .. } = start.build;
-    crate::providers::hud::set_channel(start.channel()?.clone());
+    start.channel()?;
     // SAFETY: the engine's and the renderer's hashes were checked.
     unsafe {
         install(start.hooks, engine)?;
@@ -101,9 +101,8 @@ pub fn give_back() {
     abandon_pair();
 }
 
-/// The eyes' release: the panels and the depth warp let go, the counts logged.
+/// The eyes' release: the depth warp let go, the counts logged.
 pub fn release() {
-    crate::providers::hud::close();
     crate::extras::depth_stereo::close();
     rate();
 }
@@ -374,6 +373,8 @@ fn track_left(game: usize, token: u32, a: usize, b: usize) -> Option<(SceneInput
         }
     }
     *FRAME_HEAD.locked() = base.head;
+    // Crouching by ducking follows the head's height.
+    monaka_body::duck::note_head(base.head.position[1]);
     // Decoupled aim: the view is built on the game camera without its pitch (only the head looks
     // up and down) while the game keeps its pitched camera for aiming. With head aim the game camera
     // also carries the head's yaw; that share is turned back out.

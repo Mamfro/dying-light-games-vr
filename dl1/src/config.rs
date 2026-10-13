@@ -22,9 +22,9 @@ pub const FSR: Opt = opt("fsr", "FSR upscaling", "Renders each eye smaller, then
         line: "fsr_dlls",
         missing: "FSR is off: it needs AMD's FidelityFX DLLs, which come with Dying Light 2 (not installed).",
     });
-/// The stereo methods DL1 offers: AER (Alt-eye) by default, AFW (Frame-warp: each frame warped into
-/// the other eye with its depth, on D3D11).
-pub const STEREO: Opt = rendering::stereo_method(&[StereoMethod::Aer.offer(), StereoMethod::Afw.offer(), STEREO_OFF], StereoMethod::Aer);
+/// The stereo methods DL1 offers: AFW (Frame-warp: each frame warped into the other eye with its
+/// depth, on D3D11) by default, AER (Alt-eye).
+pub const STEREO: Opt = rendering::stereo_method(&[StereoMethod::Aer.offer(), StereoMethod::Afw.offer(), STEREO_OFF], StereoMethod::Afw);
 
 pub const FSR_SCALE: Opt = opt("fsr_scale", "FSR quality", "How much smaller each eye renders.", choice(&[("1.5", "Quality"), ("1.7", "Balanced"), ("2", "Performance"), ("3", "Ultra performance")], "1.5"))
     .on(Shown::Rendering)
@@ -75,7 +75,7 @@ pub struct Config {
     /// Diagnostic: the real pad's input is dropped from the reads the VR pad merges into.
     pub pad_mask_real: bool,
     /// Room-scale following (with the hand rig; `monaka_body::roomscale` on
-    /// [`crate::cooking::room_scale_rules`]).
+    /// [`crate::providers::steps`]).
     pub room_scale: Option<roomscale::Settings>,
     /// Physical melee (with the hand rig; `monaka_body::melee_hit`). DL1 starts a light attack
     /// when it is let go: swings press briefly.
@@ -251,7 +251,8 @@ mod tests {
         assert!(config.no_raster_occlusion && config.hud_active() && config.hud.world);
         assert_eq!((config.hud.scale, config.hud.distance, config.mesh_cull_scale), (0.36, 2.0, 0.2));
         assert_eq!((config.synthetic, config.detail_zoom), (None, None));
-        assert!(!config.symmetric_projection && !config.afw, "experiments are opt-in, AER the method");
+        assert!(!config.symmetric_projection, "experiments are opt-in");
+        assert!(config.afw, "AFW the method");
         assert!(config.fsr.is_none(), "FSR is opt-in");
         let without = Config::parse("aim=off");
         assert!(!without.aim.head && without.turn_live_camera && !without.aim_settings.head_aim);

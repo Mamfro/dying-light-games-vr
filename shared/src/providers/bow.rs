@@ -152,7 +152,7 @@ unsafe extern "C" fn update(controller: usize, dt: f32) {
 
 /// The ready-made's eye and look for the player's arrow, from the game's own.
 fn answer(eye: [f32; 3], look: [f32; 3]) -> Option<([f32; 3], [f32; 3])> {
-    let shot = launch::shot(&Fired { weapon: Weapon::Bow, game: Flight { from: eye, velocity: look }, aim: Some(look) })?;
+    let shot = launch::shot(&Fired { weapon: Weapon::Bow, game: Flight { from: eye, velocity: look }, aim: Some(look), side: None })?;
     ARROWS.fetch_add(1, Relaxed);
     Some((shot.from, shot.direction))
 }

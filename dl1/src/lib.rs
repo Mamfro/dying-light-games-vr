@@ -13,16 +13,14 @@
 //! VR buttons, grabs, the pad and the probes.
 //!
 //! The code is sorted by who should own it: [`providers`] (what only Dying Light 1 knows: its
-//! facts, its hooks, reading and writing the game), [`extras`] (features only this game has),
-//! [`cooking`] (DL1's own versions of features a Monaka ready-made should own, each waiting for a
-//! provider) and [`research`] (the probes). The components are listed here, the extras' beside
-//! their features.
+//! facts, its hooks, reading and writing the game), [`extras`] (features only this game has) and
+//! [`research`] (the probes); it has no cooking left. The components are listed here, the extras'
+//! beside their features.
 //!
 //! `flat=1` (research) runs the probes alone on the game as it plays on the monitor: everything
 //! that needs stereo is off; `flat_buttons=1` keeps the buttons and grabs.
 
 mod config;
-mod cooking;
 mod extras;
 mod manifest;
 #[cfg(test)]
@@ -184,12 +182,12 @@ pub const UPSCALE: Component<Dl1> = Component {
 };
 
 /// AFW (Frame-warp, `stereo=afw`): alternate-eye rendering with depth, a pair every frame, the other
-/// eye reprojected from the real one (`monaka_stereo::afw11::ready`, on [`providers::depth`]); the
+/// eye reprojected from the real one (`monaka_stereo::afw11`, on [`providers::depth`]); the
 /// HUD a layer over both eyes.
 pub const AFW: Component<Dl1> = Component {
     needs: &[&EYES],
-    on: |run| On::when(Config::from_options(run.options, run.manifest).afw, "AER chosen"),
-    ..monaka_stereo::afw11::ready::frame_warping()
+    on: |run| monaka_stereo::afw::on(monaka_core::rendering::StereoMethod::chosen(&config::STEREO, run.options)),
+    ..monaka_stereo::afw11::frame_warping()
 };
 
 // ---- The HUD ----
@@ -223,9 +221,7 @@ pub const HUD_PANELS: Component<Dl1> = Component {
 
 /// The tools (left) and weapons (right) stay open while the d-pad is held; picked with A, B, X, Y.
 const DPAD_HOLD: Opt = dpad_hold(&["--dpad-hold", "left,right"]);
-const MENU_REACH: Opt = menu_reach(
-    "Rest your left hand over your left shoulder for the tools, your right hand over your right shoulder for the weapons. Flick a stick toward the one you want; bring the hand back to close.",
-);
+const MENU_REACH: Opt = menu_reach("Open the wheels by reaching over a shoulder.");
 
 /// The actions provider ([`providers::actions`]): ready-mades press the game's actions by its
 /// bindings.
@@ -305,8 +301,7 @@ pub const GUN: Component<Dl1> = Component { needs: &[&HAND_RIG], ..monaka_body::
 pub const LOCKPICK: Component<Dl1> = Component { needs: &[&HAND_RIG], ..monaka_body::lockpick::lockpick() };
 
 /// The character follows the player's real steps (`monaka_body::feature::room_scale` at DL1's own
-/// walk body, [`providers::steps`], with DL1's waits and step measure,
-/// [`room_scale_rules`](crate::cooking::room_scale_rules)), with the hand rig.
+/// walk body, [`providers::steps`], each step measured at the next one), with the hand rig.
 pub const ROOM_SCALE: Component<Dl1> = Component { needs: &[&HAND_RIG], ..monaka_body::feature::room_scale() };
 
 /// Crouching by ducking (`monaka_body::duck`), held on the VR button layout's hold-to-crouch

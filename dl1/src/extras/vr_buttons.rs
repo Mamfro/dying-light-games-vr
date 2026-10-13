@@ -40,7 +40,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::*};
 use std::time::{Duration, Instant};
 
 const VR_BUTTONS: Opt =
-    opt("vr_buttons", "VR buttons", "B turns the flashlight on and off, tap Y to heal (hold Y still repairs), and duck in your room to crouch. Off: the game's own buttons.", Kind::Switch { default: true })
+    opt("vr_buttons", "VR buttons", "Off: the game's own buttons.", Kind::Switch { default: true })
         .on(Shown::Game);
 
 /// The VR button layout: B the flashlight, tap Y to heal, the hold-to-crouch and (with the hand rig

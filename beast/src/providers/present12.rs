@@ -1,19 +1,19 @@
 //! Provider: the present entry (`monaka_stereo::feature::Presents`: where a frame leaves the game,
 //! and the present loop's steps for The Beast), with the game's queue
-//! (`monaka_stereo::providers::GameQueue`). The HUD layer's work at the present (laying it over the
-//! frame, the dynamic HUD's pieces) is done here too: it would be the HUD layer's ready-made's.
+//! (`monaka_stereo::providers::GameQueue`). The HUD layer's work at the present is Monaka's
+//! lay-over (`monaka_stereo::hud_layer::present12`), run from here.
 //!
 //! The D3D12 present request: how often the game presents, on its first present the swapchain and
 //! the game's queue checked by interface queries (the swapchain may be a Streamline proxy), the
-//! features' work on the frame before its HUD (`monaka_stereo::providers::before_hud`: frame
-//! warping), the HUD layer's work over the frame and the features' images, and each
-//! present made inside Monaka's present loop (`monaka_stereo::feature`'s `DRIVER`: the eye kept or
-//! its pair published before it, the next eye chosen after it).
+//! lay-over (the features' work on the frame before its HUD, the HUD's pieces onto the hands, the
+//! HUD over the frame and the features' images), and each present made inside Monaka's present
+//! loop (`monaka_stereo::feature`'s `DRIVER`: the eye kept or its pair published before it, the
+//! next eye chosen after it).
 
 use crate::Beast;
 use crate::providers::engine;
 use crate::providers::eye_site;
-use monaka_stereo::providers::HudLayer;
+use monaka_stereo::hud_layer::present12 as hud_layer;
 use monaka_hook::{InFlight, Original};
 use monaka_producer::game::{Lack, OrMissing, Start};
 use monaka_producer::log;
@@ -23,7 +23,7 @@ use monaka_stereo::{afw12, framegen12};
 use eng_chr::providers::rd3d12::{PresentRequestFn, query};
 use std::sync::atomic::Ordering::{AcqRel, Relaxed};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize};
-use windows::Win32::Graphics::Direct3D12::{D3D12_RESOURCE_STATE_PRESENT, ID3D12CommandQueue, ID3D12Resource};
+use windows::Win32::Graphics::Direct3D12::{ID3D12CommandQueue, ID3D12Resource};
 use windows::Win32::Graphics::Dxgi::{IDXGISwapChain, IDXGISwapChain3};
 use windows::core::Interface;
 
@@ -56,47 +56,22 @@ pub unsafe extern "system" fn present_request(object: usize) -> usize {
         let swap = query::<IDXGISwapChain3>(engine::RD3D12.swapchain(object));
         // SAFETY: a plain query of the live swapchain on the thread that presents it.
         let size = swap.as_ref().and_then(|s| unsafe { s.GetDesc1() }.ok()).map(|desc| (desc.Width, desc.Height));
-        // The HUD layer of this frame: its pieces onto the hands (the dynamic HUD), and the eye
-        // about to be taken (the back buffer, in PRESENT) given its HUD in front of it (kept out of
-        // the frame, laid back over it) or, with the HUD drawn in, the pieces taken out. A menu is
-        // the game's whole screen, shown flat: its frame keeps the menu as the game draws it.
-        let menu = crate::providers::eye_site::running() && eng_chr::providers::gui::menu_open();
+        // The HUD layer's work on this frame (Monaka's lay-over): in play the features' work on the
+        // frame still without its HUD (frame warping, frame generation), the pieces onto the hands
+        // (the dynamic HUD), and the eye about to be taken (the back buffer, in PRESENT) given its
+        // HUD in front of it or, with the HUD drawn in, the pieces taken out. A menu is the game's
+        // whole screen, shown flat: its frame keeps the menu as the game draws it.
+        let running = crate::providers::eye_site::running();
         let queue = game_queue();
         // SAFETY: COM calls on the game's live swapchain, on the thread that presents it.
         let buffer = swap.as_ref().and_then(|swap| unsafe { swap.GetBuffer::<ID3D12Resource>(swap.GetCurrentBackBufferIndex()) }.ok());
-        // In play: the features' work on the frame, still without its HUD (frame warping: the
-        // frame warped into the other eye, with frame generation the in-between frames made); the HUD goes
-        // over their images below too.
-        let in_play = !menu && crate::providers::eye_site::running();
-        if in_play && let (Some(queue), Some(buffer)) = (&queue, &buffer) {
-            monaka_stereo::providers::before_hud(queue, buffer);
-        }
-        let layer = queue.as_ref().zip(size).and_then(|(queue, size)| eng_chr::providers::hudlayer::take_layer(queue, size));
-        if let (Some(queue), Some(layer), Some(buffer), Some((width, height))) = (&queue, &layer, &buffer, size) {
-            let rects = match (eng_chr::feature::panels_on(), crate::providers::eye_site::channel()) {
-                (true, Some(channel)) => eng_chr::cooking::panels::publish(queue, layer, &channel, monaka_channel::tick()),
-                _ => Vec::new(),
-            };
-            if eng_chr::providers::hudlayer::redirecting() {
-                // The HUD back where the game laid it out: in a menu (the frame that opened it), or
-                // with stereo not running yet (or any more).
-                let whole = monaka_stereo::providers::whole_frame((width, height));
-                let over = if menu { whole } else { Beast::over((width, height), None).unwrap_or(whole).leaving_out(&rects) };
-                monaka_stereo::hudover12::lay(queue, buffer, D3D12_RESOURCE_STATE_PRESENT, layer, &over);
-                if in_play {
-                    monaka_stereo::providers::lay_hud_beside::<Beast>(queue, layer, (width, height), &rects);
-                }
-            } else if !menu {
-                eng_chr::cooking::hudfix::take_out(queue, buffer, D3D12_RESOURCE_STATE_PRESENT, layer, &rects);
-            }
-        }
-        // From the next frame's draws on: a menu's go to the frame.
-        eng_chr::providers::hudlayer::let_through(menu);
-        drop(layer);
-        if let Some(queue) = &queue {
-            eng_chr::providers::hudlayer::return_layer(queue);
-        }
-        eng_chr::providers::hudlayer::frame_end();
+        hud_layer::at_present::<Beast>(hud_layer::Present {
+            queue: queue.as_ref(),
+            buffer: buffer.as_ref(),
+            size,
+            menu: running && eng_chr::providers::gui::menu_open(),
+            running,
+        });
         match swap.and_then(|swap| swap.cast::<IDXGISwapChain>().ok()) {
             Some(chain) => monaka_stereo::feature::DRIVER.around_present(&chain, call),
             None => call(),
@@ -166,7 +141,9 @@ impl Presents for Beast {
         before: Some(eye_site::before_present),
         after: Some(eye_site::after_present),
         adjust_pose: Some(eye_site::latency_test),
-        flat: Some(|| eng_chr::providers::gui::menu_open().then_some(Flat::Menu)),
+        // Flat for a menu, and while no eye view has drawn the world for a few presents (a video,
+        // a loading screen).
+        flat: Some(|| eng_chr::providers::gui::menu_open().then_some(Flat::Menu).or_else(monaka_stereo::eye_site::world_hidden::<Beast>)),
         in_turn: true,
         pose_each_frame: Some(pose_each_frame),
         ..Loop::new(|_| Graphics::D3D12, ("eye cameras", &eye_site::CAMERAS.drawn))

@@ -7,16 +7,15 @@
 //! weapon's model, grabs held off the player, the game object behind the video settings, the HUD as
 //! a layer and its pieces, its place over each eye, the player's movement step, view bobbing, the
 //! hooks behind melee hits, the throw, the bow, the reload and the lockpick, and the D3D12
-//! renderer's present request and queue) and [`cooking`] (the engine's own versions of features a
-//! Monaka ready-made should own, each waiting for a provider: head aim's steering and the dynamic
-//! HUD), and [`research`] (the probes the games share).
+//! renderer's present request and queue) and [`research`] (the probes the games share). It has no
+//! cooking left: the dynamic HUD is Monaka's (`monaka_stereo::hud_panels`, its layer crops), on the
+//! pieces' boxes read here.
 //!
 //! The features as ready-made components, for a game that implements [`feature::Chrome`] (the
 //! Chrome facts its build has been read for): [`feature`]. It stays at the crate's root: it is the
 //! engine's component list, the provider trait every Chrome game implements beside the components
-//! it lists, and not one provider or one piece of cooking.
+//! it lists, and not one provider.
 
-pub mod cooking;
 pub mod feature;
 pub mod providers;
 pub mod research;

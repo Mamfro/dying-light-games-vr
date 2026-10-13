@@ -21,6 +21,7 @@ pub static AIM: HeadAim = HeadAim::new(Fields {
     player_vtable: engine::PLAYER_VTABLE,
     vis_vtable: engine::FPP_VIS_VTABLE,
     target_character: engine::TARGET_CHARACTER,
+    camera_sources: Some(engine::CAMERA_SOURCES),
 });
 
 /// Head aim on the character (`monaka_body::look`, into its look targets), steered at the arms

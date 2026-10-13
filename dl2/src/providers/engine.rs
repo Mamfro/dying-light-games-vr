@@ -255,14 +255,23 @@ pub const GUI_BUILD: eng_chr::providers::gui::Build = eng_chr::providers::gui::B
 /// the minimap's panel, the objectives on the quests', the stamina bar on the quick item's.
 pub const PIECES: [eng_chr::providers::gui::Piece; 5] = {
     use eng_chr::providers::gui::{Extent, Piece};
+    use monaka_stereo::hud_panels::Piece as Panel;
     [
-        Piece { name: "minimap", document: "hud_screen_layer_radar", path: &["radar"], extent: Extent::Declared, size: (896, 192) },
-        Piece { name: "weapon", document: "hud_screen_layer_0", path: &["extendend_hud_group", "weapon_selector"], extent: Extent::Declared, size: (768, 384) },
-        Piece { name: "quests", document: "hud_screen_layer_0", path: &["extendend_hud_group", "group1", "group1", "wrap_panel", "hud_objectives"], extent: Extent::Leaves, size: (1280, 352) },
-        Piece { name: "health", document: "hud_screen_layer_0", path: &["extendend_hud_group", "health_buff_revive_groupped"], extent: Extent::Leaves, size: (1152, 160) },
-        Piece { name: "tool", document: "hud_screen_layer_0", path: &["extendend_hud_group", "stamina_bar"], extent: Extent::Leaves, size: (768, 96) },
+        Piece { panel: Panel { name: "minimap", size: (896, 192) }, document: "hud_screen_layer_radar", path: &["radar"], parts: &[], extent: Extent::Declared },
+        Piece { panel: Panel { name: "weapon", size: (768, 384) }, document: "hud_screen_layer_0", path: &["extendend_hud_group", "weapon_selector"], parts: &[], extent: Extent::Declared },
+        Piece {
+            panel: Panel { name: "quests", size: (1280, 352) },
+            document: "hud_screen_layer_0",
+            path: &["extendend_hud_group", "group1", "group1", "wrap_panel", "hud_objectives"],
+            parts: &[],
+            extent: Extent::Leaves,
+        },
+        Piece { panel: Panel { name: "health", size: (1152, 160) }, document: "hud_screen_layer_0", path: &["extendend_hud_group", "health_buff_revive_groupped"], parts: &[], extent: Extent::Leaves },
+        Piece { panel: Panel { name: "tool", size: (768, 96) }, document: "hud_screen_layer_0", path: &["extendend_hud_group", "stamina_bar"], parts: &[], extent: Extent::Leaves },
     ]
 };
+/// The pieces' panels (`monaka_stereo::hud_panels::HudPieces::PIECES`).
+pub const PANELS: [monaka_stereo::hud_panels::Piece; 5] = eng_chr::providers::gui::panels(&PIECES);
 
 // --- Physical melee and the movement step (gamedll, engine) -------------------------------------------
 /// The melee code (`eng_chr::providers::melee`): the attack start's

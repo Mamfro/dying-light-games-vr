@@ -18,7 +18,8 @@
 //! size, Monaka's same-frame loop with the pair on the engine side, frame generation, depth to the
 //! headset, foveation, the frame inputs), look (head aim at the player camera update, the pitch
 //! lock, the level view), the arms (the hand rig, fingers, melee, the bow, throw and lockpick,
-//! reloading by hand, room-scale), [`GRABS`], the pad, the HUD (the layer, its pieces on the hands,
+//! reloading by hand, room-scale), [`GRABS`], the pad (with the VR button layout and crouching by
+//! ducking), the HUD (the layer, its pieces on the hands,
 //! the world markers) and the probes.
 //!
 //! The code is sorted by who should own it: [`providers`] (what only Dying Light 2 knows: its
@@ -43,7 +44,7 @@ use monaka_core::manifest::{CONTROLLER_PAD, CONTROLLER_PROXY, HEAD_MOVEMENT, Man
 use monaka_core::options::Options;
 use monaka_hook::module::Module;
 use monaka_body::reload::Reloads;
-use monaka_producer::game::{Adapter, Component, Game, Lack, On, Start};
+use monaka_producer::game::{Adapter, Component, Game, Lack, On, Start, Switch};
 use monaka_producer::{Rejection, Session, log, require_build};
 use monaka_stereo::eye_size;
 use monaka_stereo::providers::{GameQueue, frame_inputs};
@@ -91,6 +92,8 @@ impl Game for Dl2 {
             &GRABS,
             &ACTIONS,
             &GAMEPAD,
+            &CONTROLS,
+            &CROUCH_BY_DUCKING,
             &HUD,
             &PANELS,
             &extras::markers::MARKERS,
@@ -301,6 +304,19 @@ pub const ACTIONS: Component<Dl2> = monaka_pad::feature::actions();
 /// The controllers as the game's pad, the whole right stick to the game (head aim and the pitch
 /// lock decide what its pitch does).
 pub const GAMEPAD: Component<Dl2> = Component { options: &[CONTROLLER_PAD, CONTROLLER_PROXY], arm: monaka_pad::feature::whole_stick, ..monaka_pad::feature::gamepad() };
+
+/// The VR button layout (`vr_buttons`, on by default; off: the game's own buttons), as Dying Light
+/// 1's: in play the controllers' B toggles the flashlight (the game's d-pad down) instead of
+/// crouching ([`providers::actions`]); crouching is by ducking.
+pub const CONTROLS: Component<Dl2> = Component {
+    switch: Some(Switch::new("vr_buttons", true, "the game's own buttons")),
+    needs: &[&GAMEPAD],
+    ..monaka_pad::feature::remap()
+};
+
+/// Crouching by ducking (`monaka_body::duck`), on the game's crouch toggle, which the VR button
+/// layout leaves to it: the eye site hands it the head's height.
+pub const CROUCH_BY_DUCKING: Component<Dl2> = Component { needs: &[&CONTROLS], ..monaka_body::duck::duck() };
 
 // ---- The HUD ----
 

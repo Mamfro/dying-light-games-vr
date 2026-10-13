@@ -10,7 +10,7 @@
 //! capsule toward the target with collision. Following moves that target by its own velocity ×
 //! dt, inside the player's step only, and measures how far the capsule got.
 
-use monaka_body::roomscale;
+use monaka_body::roomscale::{self, Wait};
 use monaka_hook::module::Module;
 use monaka_hook::{Hooks, InFlight, Original, mem, thread_id};
 use monaka_producer::{Rejection, log};
@@ -47,7 +47,7 @@ const TARGET: usize = 0x128;
 const POSITION: usize = 0x140;
 
 /// Why the game moves the body itself this step (an index into [`REASONS`]; 0: it does not).
-const REASONS: [Option<&str>; 5] = [None, Some("move-to target"), Some("attached"), Some("animated"), Some("no time")];
+const REASONS: [Option<Wait>; 5] = [None, Some(Wait::ScriptedMove), Some(Wait::Attached), Some(Wait::Animated), Some(Wait::NoTime)];
 
 type ModuleStepFn = unsafe extern "C" fn(*mut c_void, f32) -> usize;
 type GameStepFn = unsafe extern "C" fn(*mut c_void, f32, *mut c_void, *mut c_void) -> usize;

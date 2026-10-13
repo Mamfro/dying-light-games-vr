@@ -23,7 +23,7 @@ fn defaults_write_the_manifests_values() {
     let beast = &MANIFESTS[0];
     assert_eq!(
         options_file(beast, &Values::default()),
-        "stereo=aer\nhead_position=lean\nlatency=2\neye_separation=0.064\nframegen=off\nheadset_depth=1\naim=hand_rig\nlock_pitch=1\nfinger_tracking=1\nfinger_binary=0\nroom_scale=1\ndisable_view_bobbing=1\ndisable_zombie_grabs=1\ncontroller_pad=1\nupscale_per_eye=0\nfoveated_rendering=1\nfoveated_inner=15\nfoveated_middle=30\nfoveated_outer=2x4\nhud_scale=0.5\nhud_distance=2\nworld_hud=1\nother_builds=0"
+        "stereo=aer\nhead_position=lean\nlatency=2\neye_separation=0.064\nframegen=off\nheadset_depth=1\naim=hand_rig\nlock_pitch=1\nfinger_tracking=1\nfinger_binary=0\nroom_scale=1\ndisable_view_bobbing=1\ndisable_zombie_grabs=1\ncontroller_pad=1\nupscale_per_eye=0\nfoveated_rendering=0\nfoveated_inner=15\nfoveated_middle=30\nfoveated_outer=2x4\nhud_scale=0.5\nhud_distance=2\nworld_hud=1\nother_builds=0"
     );
     let plan = plan(&Values::default(), beast, Some((2160, 2160)));
     assert!(plan.files[0].1.ends_with("\neye_size=2160x2160"));

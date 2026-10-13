@@ -1,7 +1,7 @@
 //! What only Dying Light 1 knows: its engine facts, its hooks, and reading and writing the game's
 //! state. The rule for this folder: a provider supplies something once for Monaka's ready-mades to
-//! read, and does no feature's work itself (that is cooking, in [`crate::cooking`]). Each file says
-//! which provider it is, or will be once Monaka has the trait.
+//! read, and does no feature's work itself (that would be cooking, waiting in a `cooking` folder).
+//! Each file says which provider it is, or will be once Monaka has the trait.
 
 pub(crate) mod actions;
 pub(crate) mod bow;

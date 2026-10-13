@@ -53,7 +53,7 @@ impl Asked {
     /// projectile with no velocity, an answer of none).
     fn placed(&self, game: Flight) -> Option<Flight> {
         unit(game.velocity)?;
-        let shot = launch::shot(&Fired { weapon: self.weapon, game, aim: self.aim })?;
+        let shot = launch::shot(&Fired { weapon: self.weapon, game, aim: self.aim, side: None })?;
         shot.flight(&game)
     }
 }

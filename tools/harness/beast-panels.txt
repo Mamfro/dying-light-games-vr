@@ -1,0 +1,13 @@
+# Dying Light: The Beast: the dynamic HUD, the hands' panels and the HUD in front of the eyes side by
+# side. In gameplay, unpaused, health, the tool slots, the weapon slot and an objective showing. Each
+# save writes the eye pair and every HUD panel (<name>-panel-<piece>.png): health, tool, weapon,
+# quests, minimap. The eyes should show none of those pieces.
+0     focus DyingLightGame_TheBeast_x64_rwdi.exe
+0     head 0 -10
+0     pad none 0 0
+0     hand right 0.22 -0.25 -0.35 0 -20
+0     hand left -0.22 -0.25 -0.35 0 -20
+6000  save panels-a
+9000  save panels-b
+12000 save panels-c
+14000 end

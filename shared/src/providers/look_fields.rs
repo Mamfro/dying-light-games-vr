@@ -30,7 +30,30 @@ pub struct Fields {
     /// `target_character` before that base.
     pub vis_vtable: usize,
     pub target_character: usize,
+    /// How the camera target chooses where the camera looks, where it can take it from something
+    /// other than the look angles (a movie, a scripted moment): head aim stands down while it does,
+    /// where the engine has no movie query. `None` where it is not known.
+    pub camera_sources: Option<CameraSources>,
 }
+
+/// The camera target's own choice of where the camera looks, as its direction getter makes it:
+/// before the look angles, the camera components on the character (while a byte `components`
+/// before the target is set, the first of them that says it gives the camera), else an animated
+/// bone (while a byte `animated` before the target is set).
+#[derive(Clone, Copy, Debug)]
+pub struct CameraSources {
+    pub animated: usize,
+    pub components: usize,
+    /// The game DLL's component lookup `(character, type id) -> component` (RVA).
+    pub lookup: usize,
+    /// Where the camera components' type ids are kept (RVAs; -1 until the game registers them).
+    pub component_ids: [usize; 2],
+    /// The component's "gives the camera now" (byte offset of its virtual slot).
+    pub gives_camera: usize,
+}
+
+type ComponentLookupFn = unsafe extern "system" fn(character: usize, id: u32) -> usize;
+type GivesCameraFn = unsafe extern "system" fn(component: usize) -> bool;
 
 /// The game's player camera update setting its camera, once a frame: Dying Light 2 seen at the
 /// engine's `IBaseCamera::FromForwardUpPos`, The Beast at the renderer's `CCamera::SetView(vec3)`
@@ -83,6 +106,20 @@ pub struct Cutscene {
     on: AtomicBool,
 }
 
+/// Logs each change of what gives the camera its direction (the first few).
+fn note_camera_sources(component: bool, animated: bool) {
+    static LAST: AtomicU32 = AtomicU32::new(0);
+    static CHANGES: AtomicU32 = AtomicU32::new(0);
+    let now = 1 | (component as u32) << 1 | (animated as u32) << 2;
+    if LAST.swap(now, Relaxed) != now && CHANGES.fetch_add(1, Relaxed) < 40 {
+        monaka_producer::log!("head aim: the camera's direction comes from {}", match (component, animated) {
+            (true, _) => "a camera component on the character",
+            (false, true) => "an animated bone",
+            (false, false) => "the look angles",
+        });
+    }
+}
+
 /// One answer of [`Cutscene::ask`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Asked {
@@ -119,6 +156,12 @@ impl Cutscene {
         // SAFETY: the engine's own query on the character's IModelObject, on the game thread inside
         // the game's camera update.
         let cutscene = whole.is_some_and(|whole| unsafe { query(whole) });
+        self.note(cutscene)
+    }
+
+    /// An answer found another way (the game's own flag that an animation drives the camera):
+    /// reported as the query's would be.
+    pub fn note(&self, cutscene: bool) -> Asked {
         monaka_producer::situation::report(monaka_producer::situation::Situation::CameraTaken, cutscene, CUTSCENE_FRESH_MS);
         Asked { cutscene, changed: self.on.swap(cutscene, Relaxed) != cutscene }
     }
@@ -148,6 +191,8 @@ pub struct HeadAim {
     pub(crate) player_camera: Mutex<(usize, Mat34)>,
     /// A cutscene has the player: head aim stands down ([`HeadAim::steer`]).
     cutscene: Cutscene,
+    /// The arms visual's camera target at its latest callback ([`HeadAim::note_target`]).
+    camera_target: AtomicUsize,
     /// The game camera's own pitch (radians, positive up, f32 bits), for the pitch lock
     /// ([`HeadAim::game_pitch`]); whether it is known, and whether a player camera update gave it.
     pitch: AtomicU32,
@@ -162,6 +207,7 @@ impl HeadAim {
             gamedll: AtomicUsize::new(0),
             player_camera: Mutex::new((0, [0.0; 12])),
             cutscene: Cutscene::new(),
+            camera_target: AtomicUsize::new(0),
             pitch: AtomicU32::new(0),
             pitch_known: AtomicBool::new(false),
             pitch_from_update: AtomicBool::new(false),
@@ -221,7 +267,10 @@ impl HeadAim {
     /// [`Cutscene::ask`]); a throw or a bow by hand aims itself (`crate::providers::fpp::head_aims`);
     /// the view held level while it steers (`crate::providers::view_bob::hold`).
     pub fn steer(&self, character: usize, head: Option<HeadPose>, counter: Option<u64>) -> Option<Steered> {
-        let asked = self.cutscene.ask(character);
+        let asked = match self.camera_animated() {
+            Some(animated) if !self.cutscene.resolved() => self.cutscene.note(animated),
+            _ => self.cutscene.ask(character),
+        };
         let stand_down = StandDown { now: asked.cutscene, changed: asked.changed };
         let steered = targets::steer(self.look_fields(), character, head, counter, stand_down, crate::providers::fpp::head_aims);
         crate::providers::view_bob::hold(character, steered.is_some());
@@ -248,6 +297,45 @@ impl HeadAim {
 
     pub fn fields(&self) -> &Fields {
         &self.fields
+    }
+
+    /// The arms visual's camera target at its callback, for [`HeadAim::camera_animated`].
+    pub fn note_target(&self, target: usize) {
+        self.camera_target.store(target, Release);
+    }
+
+    /// Whether something other than the look angles gives the camera its direction now, by the
+    /// camera target's own choice ([`CameraSources`]); `None` where it is not known or no target is
+    /// noted yet. Called on the game's thread, at the arms visual's callback.
+    fn camera_animated(&self) -> Option<bool> {
+        let sources = self.fields.camera_sources?;
+        let target = self.camera_target.load(Acquire);
+        let gamedll = self.gamedll.load(Acquire);
+        if target == 0 || gamedll == 0 {
+            return None;
+        }
+        let set = |offset: usize| mem::read::<u8>(target.wrapping_sub(offset)).is_some_and(|flag| flag != 0);
+        let component = set(sources.components) && self.component_camera(&sources, target, gamedll);
+        let animated = set(sources.animated);
+        note_camera_sources(component, animated);
+        Some(component || animated)
+    }
+
+    /// Whether one of the character's camera components gives the camera now, asked as the camera
+    /// target's direction getter asks it.
+    fn component_camera(&self, sources: &CameraSources, target: usize, gamedll: usize) -> bool {
+        let Some(character) = mem::read::<usize>(target.wrapping_sub(self.fields.target_character)).filter(|&c| c != 0) else { return false };
+        // SAFETY: the game DLL's component lookup, which the direction getter calls with the same
+        // arguments on the same thread (the arms visual's callback runs inside the camera update).
+        let lookup = unsafe { std::mem::transmute::<usize, ComponentLookupFn>(gamedll + sources.lookup) };
+        sources.component_ids.iter().any(|&at| {
+            let Some(id) = mem::read::<u32>(gamedll + at).filter(|&id| id != u32::MAX) else { return false };
+            // SAFETY: as above; a registered type id.
+            let component = unsafe { lookup(character, id) };
+            let Some(gives) = mem::read::<usize>(component).filter(|_| component != 0).and_then(|vtable| mem::read::<usize>(vtable + sources.gives_camera)) else { return false };
+            // SAFETY: the component's own virtual call, as the direction getter makes it.
+            unsafe { std::mem::transmute::<usize, GivesCameraFn>(gives)(component) }
+        })
     }
 
     /// Whether `target` is the arms visual's camera target (by vtable).

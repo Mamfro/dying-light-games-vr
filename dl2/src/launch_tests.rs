@@ -14,7 +14,7 @@ fn defaults_write_the_manifests_values() {
     let dl2 = &MANIFESTS[0];
     assert_eq!(
         options_file(dl2, &Values::default()),
-        "stereo=same\nframegen=fsr\nhead_position=lean\nheadset_depth=1\nfoveated_rendering=1\nfoveated_inner=15\nfoveated_middle=30\nfoveated_outer=2x4\naim=hand_rig\nlock_pitch=1\nfinger_tracking=1\nfinger_binary=0\nroom_scale=1\ndisable_view_bobbing=1\ndisable_zombie_grabs=1\ncontroller_pad=1\nhud_scale=0.55\nhud_distance=2\nworld_hud=1\nworld_markers=1\nother_builds=0"
+        "stereo=same\nframegen=fsr\nhead_position=lean\nheadset_depth=1\nfoveated_rendering=0\nfoveated_inner=15\nfoveated_middle=30\nfoveated_outer=2x4\naim=hand_rig\nlock_pitch=1\nfinger_tracking=1\nfinger_binary=0\nroom_scale=1\ndisable_view_bobbing=1\ndisable_zombie_grabs=1\ncontroller_pad=1\nhud_scale=0.55\nhud_distance=2\nworld_hud=1\nworld_markers=1\nother_builds=0"
     );
     assert_eq!(plan(&Values::default(), dl2, None).licences, ["DyingLight2VR-LICENSE.txt"]);
 }
@@ -34,7 +34,7 @@ fn methods_and_render_sizes() {
     assert_eq!(choices[..window].iter().map(|(id, _)| *id).collect::<Vec<_>>(), ["same", "aer", "depth"]);
     assert_eq!(choices[window..].iter().map(|(id, _)| *id).collect::<Vec<_>>(), ["off"]);
     let text = options_file(dl2, &values_of(dl2, &["stereo=same", "framegen=off", "render_size=game", "aim=off", "world_hud=off"]));
-    assert!(text.starts_with("stereo=same\nframegen=off\nhead_position=lean\nheadset_depth=1\nfoveated_rendering=1\nfoveated_inner=15\nfoveated_middle=30\nfoveated_outer=2x4\naim=off\n") && text.contains("\nworld_hud=0\n") && !text.contains("finger_tracking"), "{text}");
+    assert!(text.starts_with("stereo=same\nframegen=off\nhead_position=lean\nheadset_depth=1\nfoveated_rendering=0\nfoveated_inner=15\nfoveated_middle=30\nfoveated_outer=2x4\naim=off\n") && text.contains("\nworld_hud=0\n") && !text.contains("finger_tracking"), "{text}");
     assert_eq!(eye_size(&values_of(dl2, &["render_size=game"]), dl2), EyeSize::GameOwn);
     assert_eq!(eye_size(&values_of(dl2, &["render_size=2160x2160"]), dl2), EyeSize::Fixed(2160, 2160));
 }

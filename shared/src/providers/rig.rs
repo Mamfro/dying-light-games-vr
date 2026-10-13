@@ -184,6 +184,7 @@ unsafe extern "system" fn camera_target<G: Chrome>(target: usize, camera: usize)
         return;
     };
     let moment = (arms.moment)();
+    look.aim.note_target(target);
     if arms.head_aim_here
         && let Some(character) = look.aim.character_of(target)
     {

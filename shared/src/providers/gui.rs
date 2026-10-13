@@ -1,5 +1,6 @@
-//! Provider, to be: HUD pieces (each HUD piece's rectangle, for the panels on the hands), from the
-//! HUD as the engine knows it; and whether a menu is open.
+//! Provider part: HUD pieces (`monaka_stereo::hud_panels::LayerPieces`: each HUD piece's box in the
+//! HUD layer, for the panels on the hands), from the HUD as the engine knows it; and whether a menu
+//! is open.
 //!
 //! The HUD as the engine knows it: Dying Light 2's UI is the engine's `gui::` tree of documents
 //! (a `gui::IGroup` root with named `gui::IElement`s under it), reached through the engine's own
@@ -8,10 +9,10 @@
 //! Each element wraps a `gui::IObject` at offset 0 (its RTTI bases), whose `GetName`
 //! is the element's name.
 //!
-//! The dynamic HUD ([`crate::cooking::panels`]) takes its pieces' boxes from here: each piece is a
-//! widget of a document (the game's [`Piece`] table), found by name from the root once and read
-//! every frame ([`layout`]: the union of its shown leaves' boxes on screen, from their world
-//! matrices).
+//! The dynamic HUD (`monaka_stereo::hud_panels`, its layer crops) takes its pieces' boxes from here
+//! ([`boxes`]): each piece is a widget of a document, or some of a widget's children together (the
+//! game's [`Piece`] table), found by name from the root once and read every frame ([`layout`]: its
+//! box as laid out, or the union of its shown leaves' boxes on screen, from their world matrices).
 //!
 //! The probe (`probe-gui.enable`), riding on these reads, is in [`crate::research::gui`].
 //!
@@ -34,6 +35,8 @@ use std::ffi::c_void;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
 use monaka_core::sync::Locked;
+use monaka_core::hud::LAYOUT_FRESH_MS;
+use monaka_stereo::hud_panels::Piece as HudPiece;
 
 const IS_ACTUALLY_VISIBLE: &str = "?IsActuallyVisible@IElement@gui@@QEBA_NXZ";
 const GET_VISIBLE: &str = "?GetVisible@IElement@gui@@QEBA_NXZ";
@@ -120,22 +123,42 @@ pub enum Extent {
     Leaves,
 }
 
-/// One piece of the HUD the dynamic HUD takes: the panel it goes on (the viewer's pieces, as
-/// Dying Light 1 fills them: `minimap`, `quests`, `weapon`, `health`, `tool`), the document, the
-/// path of names from its root (the first child of each name at each step), how its box is read,
-/// and its panel's size in pixels (the viewer gives each a fixed width on the hand; the height
-/// follows the shape).
+/// One piece of the HUD the dynamic HUD takes: the panel it goes on (the viewer's piece name, as
+/// Dying Light 1 fills them: `minimap`, `quests`, `weapon`, `health`, `tool`, and its panel's size
+/// in pixels: the viewer gives each a fixed width on the hand, the height follows the shape), the
+/// document, the path of names from its root (the first child of each name at each step), the
+/// children of that element that make the piece together (none: the element itself), and how each
+/// one's box is read.
 #[derive(Clone, Copy, Debug)]
 pub struct Piece {
-    pub name: &'static str,
+    pub panel: HudPiece,
     pub document: &'static str,
     pub path: &'static [&'static str],
+    pub parts: &'static [&'static str],
     pub extent: Extent,
-    pub size: (u32, u32),
 }
+
+/// The pieces' panels, in the same order: what the dynamic HUD is told
+/// (`monaka_stereo::hud_panels::HudPieces::PIECES`).
+pub const fn panels<const N: usize>(pieces: &[Piece; N]) -> [HudPiece; N] {
+    let mut panels = [HudPiece { name: "", size: (0, 0) }; N];
+    let mut i = 0;
+    while i < N {
+        panels[i] = pieces[i].panel;
+        i += 1;
+    }
+    panels
+}
+
+/// A piece's box grown by this share of its larger side on each side for its panel
+/// (`monaka_stereo::hud_panels::HudPieces::MARGIN`): small, as the compass bar is twenty times as
+/// wide as tall and the immunity widget sits right under it.
+pub const MARGIN: f32 = 0.02;
 
 /// The most pieces a game may take.
 pub const MAX_PIECES: usize = 8;
+/// The most children one piece is made of.
+pub const MAX_PARTS: usize = 4;
 
 /// The pieces' boxes on screen this frame.
 #[derive(Clone, Copy, Debug, Default)]
@@ -152,8 +175,18 @@ pub struct Layout {
 }
 
 static LAYOUT: Mutex<Option<Layout>> = Mutex::new(None);
-/// Each piece's element, once found: (its document's root, the element).
-static FOUND: Mutex<[Option<(usize, usize)>; MAX_PIECES]> = Mutex::new([None; MAX_PIECES]);
+
+/// A piece's elements, once found: its document's root, the element at its path, and the parts
+/// under it it is made of (the first `parts` of `part`; none: the element itself).
+#[derive(Clone, Copy, Debug)]
+struct Found {
+    root: usize,
+    element: usize,
+    part: [usize; MAX_PARTS],
+    parts: usize,
+}
+
+static FOUND: Mutex<[Option<Found>; MAX_PIECES]> = Mutex::new([None; MAX_PIECES]);
 /// The game's pieces, and whether its HUD is live (the frames count) now.
 static PIECES: Mutex<&'static [Piece]> = Mutex::new(&[]);
 static ACTIVE: AtomicUsize = AtomicUsize::new(0);
@@ -211,6 +244,16 @@ const LAYOUT_EVERY_MS: u64 = 8;
 /// The latest reading of the pieces.
 pub fn layout() -> Option<Layout> {
     LAYOUT.lock().ok().and_then(|l| *l)
+}
+
+/// Each piece's box now (`monaka_stereo::hud_panels::LayerPieces::boxes`): the latest reading's,
+/// in the frame's pixels (the HUD layer's), while it is fresh; none shown once the game has stopped
+/// laying its HUD out.
+pub fn boxes(boxes: &mut [Option<[f32; 4]>]) {
+    let layout = layout().filter(|l| monaka_channel::tick().saturating_sub(l.taken) <= LAYOUT_FRESH_MS);
+    for (i, slot) in boxes.iter_mut().enumerate() {
+        *slot = layout.and_then(|l| l.pieces.get(i).copied().flatten());
+    }
 }
 
 /// What this run wants of the tree: the probe's log, and the game's `pieces` for the dynamic HUD
@@ -432,15 +475,46 @@ fn leaf_box(calls: &Calls, element: usize, depth: usize, found: &mut Option<[f32
     }
 }
 
-/// Reads the pieces' boxes this frame: each piece's element found by its path once (and again
-/// when its document's root changes or its name no longer matches), then its shown leaves' box.
+/// A piece's elements under `root`: the element at its path, and the parts under it it is made of
+/// (all of them found, or none).
+fn find_piece(calls: &Calls, root: usize, piece: &Piece) -> Option<Found> {
+    let element = piece.path.iter().try_fold(root, |at, name| child_named(calls, at, name))?;
+    let mut found = Found { root, element, part: [0; MAX_PARTS], parts: 0 };
+    for name in piece.parts.iter().take(MAX_PARTS) {
+        found.part[found.parts] = child_named(calls, element, name)?;
+        found.parts += 1;
+    }
+    Some(found)
+}
+
+/// One element's box on screen (left, top, right, bottom) while it shows: its own box as laid out
+/// (its place and size on screen), or its shown leaves'. Markers that float beyond the box (the
+/// compass's location icons) are left to the eyes.
+fn element_box(calls: &Calls, element: usize, extent: Extent) -> Option<[f32; 4]> {
+    let node = read(calls, element);
+    if !node.actually_visible || node.actual_opacity <= 0.0 {
+        return None;
+    }
+    let scale = node.scale.abs();
+    let own = (extent == Extent::Declared && node.size[0] > 1.0 && node.size[1] > 1.0 && scale.is_finite() && scale > 0.0 && node.world[0].is_finite())
+        .then(|| [node.world[0], node.world[1], node.world[0] + node.size[0] * scale, node.world[1] + node.size[1] * scale]);
+    own.or_else(|| {
+        let mut b = None;
+        let mut visited = 0;
+        leaf_box(calls, element, 0, &mut b, &mut visited);
+        b
+    })
+}
+
+/// Reads the pieces' boxes this frame: each piece's elements found by its path (and parts) once,
+/// and again when its document's root changes or the element's name no longer matches; then the
+/// element's box, or its shown parts' boxes together.
 fn read_pieces(calls: &Calls, now: u64) {
     let Ok(roots) = ROOTS.lock() else { return };
     let Ok(mut found) = FOUND.lock() else { return };
     let mut layout = Layout { pieces: [None; MAX_PIECES], screen: [0.0; 2], origin: [0.0; 2], taken: now };
     for (i, piece) in pieces().iter().enumerate() {
-        let (document, path, extent) = (piece.document, piece.path, &piece.extent);
-        let Some(&(_, root)) = roots.iter().find(|(name, _)| name == document) else { continue };
+        let Some(&(_, root)) = roots.iter().find(|(name, _)| name == piece.document) else { continue };
         if layout.screen[0] <= 0.0 {
             let top = read(calls, root);
             let scale = top.scale.abs();
@@ -449,30 +523,23 @@ fn read_pieces(calls: &Calls, now: u64) {
                 layout.origin = [top.world[0], top.world[1]];
             }
         }
-        let element = match found[i] {
-            Some((r, element)) if r == root && name_of(calls, element) == *path.last().unwrap_or(&"") => Some(element),
+        let piece_found = match found[i] {
+            Some(f) if f.root == root && name_of(calls, f.element) == *piece.path.last().unwrap_or(&"") => Some(f),
             _ => {
-                let element = path.iter().try_fold(root, |at, name| child_named(calls, at, name));
-                found[i] = element.map(|e| (root, e));
-                element
+                found[i] = find_piece(calls, root, piece);
+                found[i]
             }
         };
-        let Some(element) = element else { continue };
-        // The widget's own box as laid out (its place and size on screen), or its shown leaves'.
-        // Markers that float beyond the box (the compass's location icons) are left to the eyes.
-        let node = read(calls, element);
-        if !node.actually_visible || node.actual_opacity <= 0.0 {
-            continue;
-        }
-        let scale = node.scale.abs();
-        let own = (*extent == Extent::Declared && node.size[0] > 1.0 && node.size[1] > 1.0 && scale.is_finite() && scale > 0.0 && node.world[0].is_finite())
-            .then(|| [node.world[0], node.world[1], node.world[0] + node.size[0] * scale, node.world[1] + node.size[1] * scale]);
-        let b = own.or_else(|| {
-            let mut b = None;
-            let mut visited = 0;
-            leaf_box(calls, element, 0, &mut b, &mut visited);
-            b
-        });
+        let Some(piece_found) = piece_found else { continue };
+        let b = if piece_found.parts == 0 {
+            element_box(calls, piece_found.element, piece.extent)
+        } else {
+            // The parts shown, together (a part hidden, an empty slot, takes up nothing).
+            let element = read(calls, piece_found.element);
+            (element.actually_visible && element.actual_opacity > 0.0)
+                .then(|| piece_found.part[..piece_found.parts].iter().filter_map(|&part| element_box(calls, part, piece.extent)).reduce(monaka_core::hud::union))
+                .flatten()
+        };
         layout.pieces[i] = b.filter(|b| b[2] > b[0] && b[3] > b[1]);
     }
     note_pieces(&layout);
@@ -486,7 +553,7 @@ fn note_pieces(layout: &Layout) {
     static SHOWN: AtomicU64 = AtomicU64::new(u64::MAX);
     let shown = layout.pieces.iter().enumerate().filter(|(_, b)| b.is_some()).fold(0u64, |bits, (i, _)| bits | 1 << i);
     if SHOWN.swap(shown, Relaxed) != shown {
-        let names: Vec<String> = pieces().iter().zip(layout.pieces).filter_map(|(piece, b)| b.map(|b| format!("{} [{:.0} {:.0} {:.0} {:.0}]", piece.name, b[0], b[1], b[2], b[3]))).collect();
+        let names: Vec<String> = pieces().iter().zip(layout.pieces).filter_map(|(piece, b)| b.map(|b| format!("{} [{:.0} {:.0} {:.0} {:.0}]", piece.panel.name, b[0], b[1], b[2], b[3]))).collect();
         log!(
             "dynamic HUD: pieces shown: {} (layout {:.0}x{:.0} at [{:.0} {:.0}] in the frame)",
             if names.is_empty() { "none".to_owned() } else { names.join(", ") },

@@ -142,6 +142,18 @@ pub const CAMERA_FAR: usize = 0x1b4;
 // `GetVectorFromHorzVertAngle(+0xbb0, +0xbb4)`), and the look update smooth-damps them toward the
 // targets the input accumulates into. Yaw is taken to turn right as it grows, as in DL2.
 pub const CAMERA_TARGET: usize = 0x40;
+/// Where the arms visual's camera target takes the camera's direction from, as its direction getter
+/// (gamedll 0x1151450) chooses: while the byte 0x560 before the target is set, from the first of two
+/// camera components on the character (type ids at 0x34109d0 and 0x341082c, found by the lookup at
+/// 0x1ef3970) that says it gives the camera (its slot +0x3c0), each an animated model's bone; else,
+/// while the byte 0x45c before the target is set, from an animated bone; else from the look angles.
+pub const CAMERA_SOURCES: eng_chr::providers::look_fields::CameraSources = eng_chr::providers::look_fields::CameraSources {
+    animated: 0x45c,
+    components: 0x560,
+    lookup: 0x1ef3970,
+    component_ids: [0x34109d0, 0x341082c],
+    gives_camera: 0x3c0,
+};
 /// The renderer's `CCamera` behind a game camera (the engine's camera calls are thunks into it).
 pub const CAMERA_RENDERER: usize = 0x38;
 pub const FPP_VIS_VTABLE: usize = 0x259eda8;
@@ -190,18 +202,43 @@ pub const GUI_BUILD: eng_chr::providers::gui::Build = eng_chr::providers::gui::B
     position: (0xaa4f70, &[Instruction::plain(&[0x40, 0x53]), Instruction::plain(&[0x48, 0x83, 0xec, 0x20]), Instruction::plain(&[0x48, 0x8b, 0xd9])]),
     size: (0xaa4f90, &[Instruction::plain(&[0x40, 0x53]), Instruction::plain(&[0x48, 0x83, 0xec, 0x20]), Instruction::plain(&[0x48, 0x8b, 0xd9])]),
 };
-/// The pieces of the HUD the dynamic HUD takes, by Dying Light 2's widget names (`probe_gui=1`
-/// logs this game's documents and widgets).
+/// The pieces of the HUD the dynamic HUD takes, by this game's widget names (`probe_gui=1` logs its
+/// documents and widgets), on the hands as Dying Light 1 has them: the compass (`minimap`) with
+/// the quest objectives beside it on the back of the right hand, the weapon slot above its palm;
+/// health on the back of the left hand, the two tool slots above its palm. Health and the three
+/// slots sit together at the bottom left of the HUD (`group2`): the weapon selector's slots are
+/// `left` and `up` (the tools, read together as one piece) and `right_wpn` (the weapon, its ammo
+/// beside it). The slots and health are read by their own boxes: their leaves include hidden
+/// groups (a key label 200 px tall, a mods group at three times the scale) that would stretch the
+/// crop over the neighbouring slots; health by its bars (`group3`: health and fury). The list is
+/// read by its shown leaves; the compass by its own box (its markers float about in it). Each panel
+/// has its piece's shape, so a crop takes in nothing around it.
 pub const PIECES: [eng_chr::providers::gui::Piece; 5] = {
     use eng_chr::providers::gui::{Extent, Piece};
+    use monaka_stereo::hud_panels::Piece as Panel;
+    const SLOTS: &[&str] = &["extendend_hud_group", "group2", "weapon_selector", "group1"];
     [
-        Piece { name: "minimap", document: "hud_screen_layer_radar", path: &["radar"], extent: Extent::Declared, size: (1280, 96) },
-        Piece { name: "weapon", document: "hud_screen_layer_0", path: &["extendend_hud_group", "weapon_selector"], extent: Extent::Declared, size: (768, 384) },
-        Piece { name: "quests", document: "hud_screen_layer_0", path: &["extendend_hud_group", "group1", "group1", "wrap_panel", "hud_objectives"], extent: Extent::Leaves, size: (1024, 352) },
-        Piece { name: "health", document: "hud_screen_layer_0", path: &["extendend_hud_group", "health_buff_revive_groupped"], extent: Extent::Leaves, size: (768, 256) },
-        Piece { name: "tool", document: "hud_screen_layer_0", path: &["extendend_hud_group", "stamina_bar"], extent: Extent::Leaves, size: (768, 96) },
+        Piece { panel: Panel { name: "minimap", size: (1280, 96) }, document: "hud_screen_layer_radar", path: &["radar"], parts: &[], extent: Extent::Declared },
+        Piece { panel: Panel { name: "weapon", size: (384, 261) }, document: "hud_screen_layer_0", path: SLOTS, parts: &["right_wpn"], extent: Extent::Declared },
+        Piece {
+            panel: Panel { name: "quests", size: (1152, 480) },
+            document: "hud_screen_layer_0",
+            path: &["extendend_hud_group", "group3", "group1", "group1", "wrap_panel", "hud_objectives"],
+            parts: &[],
+            extent: Extent::Leaves,
+        },
+        Piece {
+            panel: Panel { name: "health", size: (768, 101) },
+            document: "hud_screen_layer_0",
+            path: &["extendend_hud_group", "group2", "health_buff_revive_groupped"],
+            parts: &["group3"],
+            extent: Extent::Declared,
+        },
+        Piece { panel: Panel { name: "tool", size: (768, 374) }, document: "hud_screen_layer_0", path: SLOTS, parts: &["left", "up"], extent: Extent::Declared },
     ]
 };
+/// The pieces' panels (`monaka_stereo::hud_panels::HudPieces::PIECES`).
+pub const PANELS: [monaka_stereo::hud_panels::Piece; 5] = eng_chr::providers::gui::panels(&PIECES);
 
 /// The player's `HeadBobFactor` in its parameter block (for `eng_chr::providers::view_bob`).
 pub const VIEW_BOB: eng_chr::providers::view_bob::Build = eng_chr::providers::view_bob::Build { player_vtable: PLAYER_VTABLE, parameters_slot: 0x5e0, head_bob: 0x3420 };

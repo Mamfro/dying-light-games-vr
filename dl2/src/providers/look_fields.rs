@@ -70,6 +70,7 @@ pub static AIM: HeadAim = HeadAim::new(Fields {
     player_vtable: engine::PLAYER_VTABLE,
     vis_vtable: engine::FPP_VIS_VTABLE,
     target_character: engine::TARGET_CHARACTER,
+    camera_sources: None,
 });
 
 /// `IBaseCamera::FromForwardUpPos`; its "forward" argument is the camera's backward axis. Four

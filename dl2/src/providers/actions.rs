@@ -6,17 +6,29 @@
 use crate::Dl2;
 use monaka_body::lockpick::{Lockpicking, Lockpicks};
 use monaka_pad::actions::{Action, Actions, Ask, Binding};
+use monaka_pad::remap::{Remap, Remaps};
 use monaka_producer::game::{Lack, Start};
 
-/// The actions Dying Light 2 is known to take (`eng_chr::providers::actions`): on the pad, and the reload
-/// and the lockpick's pick and turn its own way.
+/// The actions Dying Light 2 is known to take (`eng_chr::providers::actions`): on the pad as its
+/// default layout has them (crouching on B, the flashlight on the d-pad's down), and the reload and
+/// the lockpick's pick and turn its own way.
 impl Actions for Dl2 {
     fn binding(action: Action) -> Binding {
-        eng_chr::providers::actions::binding(action)
+        eng_chr::providers::actions::binding_dl2(action)
     }
 
     fn engine(action: Action, ask: Ask) -> bool {
         eng_chr::providers::actions::engine(action, ask)
+    }
+}
+
+/// The VR button layout Dying Light 2 and The Beast share (`eng_chr::providers::actions`): in play
+/// the controllers' B is the flashlight. Its component is `crate::CONTROLS`.
+impl Remaps for Dl2 {
+    const REMAPS: &'static [Remap] = eng_chr::providers::actions::VR_BUTTONS;
+
+    fn applies() -> bool {
+        eng_chr::providers::actions::in_play()
     }
 }
 

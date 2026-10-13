@@ -22,7 +22,7 @@ const DL2: [Opt; COMPONENTS + 2] = {
 pub const MANIFESTS: &[Manifest] = &[Manifest {
     id: "dl2",
     name: "Dying Light 2",
-    status: Status::Beta,
+    status: Status::PreAlpha,
     executables: &["DyingLightGame_x64_rwdi.exe"],
     steam_app: 534380,
     producer: "monaka_dl2",

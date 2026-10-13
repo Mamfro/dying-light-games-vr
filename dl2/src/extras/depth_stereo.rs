@@ -87,7 +87,6 @@ pub fn present(buffer: &ID3D12Resource) -> bool {
     const COMMON: D3D12_RESOURCE_STATES = D3D12_RESOURCE_STATE_COMMON;
     // SAFETY: reads a descriptor.
     let desc = unsafe { buffer.GetDesc() };
-    let tick = monaka_channel::tick();
     let presents = PAIRS.presents();
     // No UI layer tagged by the game this frame (it tags one only in gameplay with its DLSS Frame
     // Generation on): the HUD layer made from the game's own HUD draws stands in
@@ -145,7 +144,7 @@ pub fn present(buffer: &ID3D12Resource) -> bool {
         && let Some(Some(ui)) = with_warp(|warp| warp.ui().cloned())
     {
         // The pieces onto the hands; the warp leaves them out of the HUD over the eyes.
-        for (slot, rect) in params.pieces.iter_mut().zip(hud::publish_pieces(&queue, &ui, tick)) {
+        for (slot, rect) in params.pieces.iter_mut().zip(hud::publish_pieces(&queue, &ui)) {
             *slot = rect;
         }
         params.markers = hud::world_markers(&desc, centre, pair_head.ipd);

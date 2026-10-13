@@ -21,7 +21,6 @@ use crate::providers::camera_update::Vec3;
 use crate::providers::engine;
 use crate::Beast;
 use eng_chr::providers::look_fields::PlayerUpdate;
-use monaka_channel::ChannelName;
 use monaka_core::camera::{self, Base, EyeView, Frustum, Mat34};
 use monaka_core::options::Shared;
 use monaka_core::protocol::HeadPose;
@@ -71,7 +70,6 @@ pub static CAMERAS: Tally = Tally::new("player camera updates");
 static FRUSTA: AtomicU64 = AtomicU64::new(0);
 
 pub struct Settings {
-    pub channel: ChannelName,
     /// The eye distance and the head model (`head_position`) the eyes are drawn with.
     pub shared: Shared,
     pub eye_test_degrees: f32,
@@ -82,16 +80,8 @@ pub struct Settings {
     pub hud: Option<(f32, f32)>,
 }
 
-/// The stereo channel's name, once stereo started (the dynamic HUD's panel channels sit beside it).
-static CHANNEL: Mutex<Option<ChannelName>> = Mutex::new(None);
-
-pub fn channel() -> Option<ChannelName> {
-    CHANNEL.lock().ok().and_then(|c| c.clone())
-}
-
 /// The run's eye settings (the loop itself is the present component's).
 pub fn install(settings: Settings) {
-    *CHANNEL.locked() = Some(settings.channel.clone());
     *SHARED.locked() = Some(settings.shared);
     EYE_TEST.store(settings.eye_test_degrees.to_radians());
     LATENCY_TEST.store(settings.latency_test_degrees.to_radians());
@@ -131,10 +121,6 @@ pub fn quiet(wait_ms: u64) {
     HEADSET_FOV.store(false, Release);
 }
 
-pub fn release() {
-    CHANNEL.locked().take();
-}
-
 /// Whether stereo runs (eye cameras are written).
 pub fn running() -> bool {
     DRIVER.running()
@@ -151,6 +137,7 @@ pub fn rendering_eye() -> Option<usize> {
 /// shown noted for the history probe. Frame warping and per-eye frame generation publish their own
 /// pairs at the loop's step after this. True when the loop is to publish nothing itself.
 pub fn before_present(driver: &Driver, chain: &IDXGISwapChain, n: u64) -> bool {
+    monaka_producer::situation::report(monaka_producer::situation::Situation::WorldHidden, !monaka_stereo::eye_site::world_drawn_recently::<crate::Beast>(), 500);
     if monaka_stereo::eye_size::hold_labelled::<crate::Beast>(driver, chain, n) {
         return true;
     }
@@ -244,6 +231,8 @@ pub fn eye_vectors(camera: usize, update: &PlayerUpdate) -> Option<[Vec3; 3]> {
     if pose.valid == 0 {
         return None;
     }
+    // Crouching by ducking follows the head's height.
+    monaka_body::duck::note_head(pose.position[1]);
     // The head yaw head aim baked into the camera (the share the update left in the targets),
     // while it steers.
     let baked = monaka_body::look::baked::<crate::Beast>(None).map(|share| share.yaw);
@@ -349,9 +338,9 @@ pub fn report_rates(seconds: f64) {
 }
 
 fn install_eyes(start: &mut Start<'_, Beast>) -> Result<(), Lack> {
-    let (options, shared, channel) = (start.options, start.shared, start.channel()?);
+    start.channel()?;
+    let (options, shared) = (start.options, start.shared);
     install(Settings {
-        channel: channel.clone(),
         shared: *shared,
         eye_test_degrees: options.angle("eye_test", 30.0).unwrap_or(0.0),
         latency_test_degrees: options.angle("latency_test", 30.0).unwrap_or(0.0),

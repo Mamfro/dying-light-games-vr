@@ -5,13 +5,14 @@
 //! camera setters, the present request, the present loop, the eye size, the eyes, frame
 //! generation, frame warping, depth to the headset, the frame inputs), look (head aim, the pitch
 //! lock, the level view), the arms (the hand rig, fingers, melee, the bow and throw, reloading by hand, room-scale),
-//! [`GRABS`], the flashlight, the pad, the upscaler per eye and DLSS's inputs, FSR's inputs,
+//! [`GRABS`], the flashlight, the pad (with the VR button layout and crouching by ducking), the
+//! upscaler per eye and DLSS's inputs, FSR's inputs,
 //! [`FOVEATION`], the HUD and the probes.
 //!
 //! The code is sorted by who should own it: [`providers`] (what only The Beast knows: its facts,
-//! its hooks, reading and writing the game) and [`extras`] (features only this game has); its
-//! cooking is the Chrome Engine's, in `eng_chr::cooking`, and [`research`] holds the probes. The
-//! components are listed here, the extras' beside their features.
+//! its hooks, reading and writing the game) and [`extras`] (features only this game has); it has
+//! no cooking, and [`research`] holds the probes. The components are listed here, the extras'
+//! beside their features.
 
 mod config;
 mod extras;
@@ -36,7 +37,7 @@ use monaka_producer::game::{Adapter, Component, Every, Game, Lack, On, Start, Sw
 use monaka_producer::{Rejection, Session, log, require_build};
 use monaka_stereo::providers::{GameQueue, frame_inputs};
 use monaka_stereo::upscaler::UPSCALE_PER_EYE;
-use monaka_stereo::{afw12, depth_layer, foveate12, framegen12};
+use monaka_stereo::{afw, afw12, depth_layer, foveate12, framegen12};
 use providers::{cameras, dlss, engine, eye_site, fsr, present12, video};
 use windows::Win32::Graphics::Direct3D12::ID3D12CommandQueue;
 
@@ -83,6 +84,8 @@ impl Game for Beast {
             &extras::flashlight::FLASHLIGHT,
             &ACTIONS,
             &GAMEPAD,
+            &CONTROLS,
+            &CROUCH_BY_DUCKING,
             &PER_EYE,
             &STREAMLINE,
             &FSR,
@@ -132,7 +135,9 @@ impl Chrome for Beast {
         grabs: Some(engine::GRABS),
         walk: Some(engine::WALK),
         melee: Some(engine::MELEE),
-        melee_reach: Some(engine::MELEE_REACH),
+        // The search for what the blade reaches finds nothing in this build (its target facts are
+        // not confirmed), so swings attack as they are made until it is.
+        melee_reach: None,
         attacks_on_release: true,
         hands: Some(engine::HANDS),
         reload: Some(engine::RELOAD),
@@ -197,6 +202,7 @@ pub const PRESENT_REQUEST: Component<Beast> = Component {
 /// Monaka's present loop, entered from the present request; it starts with the eyes, once the eye
 /// size is asked for ([`eye_site`]).
 pub const PRESENT: Component<Beast> = Component {
+    reports: &[monaka_core::situation::Situation::WorldHidden],
     needs: &[&PRESENT_REQUEST],
     switch: Some(Switch::new("stereo", true, "stereo is off: the probes only")),
     arm: || {},
@@ -228,7 +234,6 @@ pub const EYES: Component<Beast> = Component {
     arm: eye_site::arm,
     quiet: || eye_site::quiet(1000),
     every: &[Every::millis(2000, eye_site::report_rates)],
-    release: eye_site::release,
     ..monaka_stereo::eye_site::eyes()
 };
 
@@ -252,7 +257,7 @@ pub const PER_EYE_FRAMEGEN: Component<Beast> =
 /// AFW (Frame-warp): each frame warped into the other eye at the same head pose, so every present
 /// is a pair of one moment.
 pub const AFW: Component<Beast> =
-    Component { needs: &[&EYES], on: |run| On::when(config::method(run.options) == StereoMethod::Afw, "AER chosen"), ..afw12::frame_warping() };
+    Component { needs: &[&EYES], on: |run| afw::on(config::method(run.options)), ..afw12::frame_warping() };
 
 /// AFW with frame generation: in-between pairs of the warped pairs.
 pub const AFW_FRAMEGEN: Component<Beast> = Component { needs: &[&AFW, &FRAMEGEN], ..afw12::frame_generation() };
@@ -336,6 +341,19 @@ pub const GAMEPAD: Component<Beast> = Component {
     ..monaka_pad::feature::gamepad()
 };
 
+/// The VR button layout (`vr_buttons`, on by default; off: the game's own buttons), as Dying Light
+/// 1's: in play the controllers' B toggles the flashlight (the game's d-pad down) instead of
+/// crouching ([`providers::actions`]); crouching is by ducking.
+pub const CONTROLS: Component<Beast> = Component {
+    switch: Some(Switch::new("vr_buttons", true, "the game's own buttons")),
+    needs: &[&GAMEPAD],
+    ..monaka_pad::feature::remap()
+};
+
+/// Crouching by ducking (`monaka_body::duck`), on the game's crouch toggle, which the VR button
+/// layout leaves to it: the eye site hands it the head's height.
+pub const CROUCH_BY_DUCKING: Component<Beast> = Component { needs: &[&CONTROLS], ..monaka_body::duck::duck() };
+
 // ---- The upscaler per eye, and the upscalers' inputs ----
 
 /// The upscaler per eye is off unless asked for: it is still being tried.
@@ -381,10 +399,13 @@ pub const FSR: Component<Beast> = Component {
 
 // ---- The HUD ----
 
-/// The HUD as a layer laid over each eye (`eng_chr::feature`'s ready-made; the lay-over at each
-/// present is [`present12`]'s, at the HUD's size and distance the layer offers).
+/// The HUD as a layer laid over each eye (`eng_chr::feature`'s layer of the game's HUD draws; the
+/// lay-over at each present is Monaka's, `monaka_stereo::hud_layer::present12`, run by
+/// [`present12`], at the HUD's size and distance the layer offers).
 pub const HUD: Component<Beast> = Component { needs: &[&EYES], ..eng_chr::feature::hud() };
-/// The HUD's pieces on the hands (`eng_chr::feature`'s ready-made).
+/// The dynamic HUD (Monaka's `monaka_stereo::hud_panels`, its layer crops): the pieces on the hands
+/// as Dying Light 1 has them, health and the two tool slots on the left hand, the compass, the
+/// quests and the weapon slot on the right ([`providers::hud_pieces`]).
 pub const PANELS: Component<Beast> = Component { needs: &[&HUD], ..eng_chr::feature::panels() };
 
 /// The research probes: their hooks and reports. Each probe checks its own option.

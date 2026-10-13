@@ -2,7 +2,11 @@
 //!
 //! The player's walk body: the engine's
 //! `CODEPhysicsWalkFly`, stepped at 50 Hz by its vtable slot 9 `(body, dt)`. Hooked for room-scale
-//! following ([`crate::cooking::room_scale_rules`]) and its probe ([`crate::research::walk`]).
+//! following and its probe ([`crate::research::walk`]). The walk body's step is not measured
+//! inside it, so following measures each step at the next one
+//! ([`monaka_body::roomscale::begin_step`]): the body's position as each step begins, and why
+//! following waits (a scripted move, the position locked, physics off, a cutscene, the mod not
+//! drawing the view).
 //!
 //! Extra velocity goes into the body's wanted velocity, the one the stick sets: the game writes it
 //! only when it changes it and reads it outside the step, so the extra stays in it, on top of the
@@ -11,6 +15,7 @@
 
 use crate::Dl1;
 use crate::providers::skeleton;
+use monaka_body::roomscale::{self, Wait};
 use monaka_producer::game::{Lack, Start};
 use monaka_hook::module::Module;
 use monaka_hook::{Hooks, InFlight, Original, mem};
@@ -26,9 +31,29 @@ impl monaka_body::feature::Steps for Dl1 {
         Ok(())
     }
 
+    fn waiting(full: usize) -> Option<Wait> {
+        if !crate::providers::eye_site::capturing() {
+            return Some(Wait::NotRunning);
+        }
+        flags_waiting(full).or_else(|| monaka_body::look::facing::cutscene().then_some(Wait::Cutscene))
+    }
+
+    fn position(full: usize) -> Option<[f32; 3]> {
+        let body = body(full);
+        (body != 0).then(|| vec3(body + BODY_POSITION))
+    }
+
     fn restore() {
         self::restore();
     }
+}
+
+/// Why the walk body's own flags hold following, if they do (an unreadable flag holds it).
+fn flags_waiting(full: usize) -> Option<Wait> {
+    [(SCRIPTED_MOVE, Wait::ScriptedMove), (LOCK_POSITION, Wait::PositionLocked), (PHYSICS_OFF, Wait::PhysicsOff)]
+        .into_iter()
+        .find(|&(flag, _)| mem::read::<u8>(full + flag).unwrap_or(1) != 0)
+        .map(|(_, wait)| wait)
 }
 
 /// `CODEPhysicsWalkFly`'s pre-step (its primary vtable's slot 9, before the physics step):
@@ -180,11 +205,11 @@ unsafe extern "C" fn step(full: *mut c_void, dt: f32) {
     let walk = player_walk();
     let player = walk != 0 && at + WALK == walk;
     if player {
-        let mut extra = crate::cooking::room_scale_rules::before_step(at, dt);
+        let mut extra = roomscale::begin_step::<Dl1>(at, dt);
         if let Some(push) = crate::research::walk::push() {
             extra = [extra[0] + push[0], extra[1] + push[1]];
         }
-        crate::cooking::room_scale_rules::asked(set_extra(at, extra));
+        roomscale::game_velocity(set_extra(at, extra));
     }
     // SAFETY: forwards the engine's own call.
     unsafe { STEP_ORIGINAL.get()(full, dt) };
@@ -192,3 +217,6 @@ unsafe extern "C" fn step(full: *mut c_void, dt: f32) {
         crate::research::walk::note(at, dt);
     }
 }
+
+#[cfg(test)]
+mod lift_checks;
