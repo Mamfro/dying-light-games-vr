@@ -1,4 +1,4 @@
-//! Provider: the skeleton (`monaka_arms::Skeleton`) of the first-person arms, as Dying Light 2
+//! Provider: the skeleton (`monaka_body::Skeleton`) of the first-person arms, as Dying Light 2
 //! and The Beast reach it.
 //!
 //! The arms skeleton of Dying Light 2 and The Beast: a `CoSkeleton` component, reached from the
@@ -8,7 +8,7 @@
 //! engine's `IModelObject::IsElementABone` tests.
 
 use crate::providers::fpp::ArmsSkeleton;
-use monaka_arms::Skeleton;
+use monaka_body::Skeleton;
 use monaka_core::camera::Mat34;
 use monaka_hook::mem;
 use monaka_hook::module::Module;

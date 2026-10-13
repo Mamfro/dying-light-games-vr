@@ -1,5 +1,5 @@
-//! Provider part: the throw release (`monaka_arms::launch::Throws`), what Dying Light 2 and The
-//! Beast share, with their throwing by hand ([`THROWING`], `monaka_arms::throw::ThrowsByHand`);
+//! Provider part: the throw release (`monaka_body::launch::Throws`), what Dying Light 2 and The
+//! Beast share, with their throwing by hand ([`THROWING`], `monaka_body::throw::ThrowsByHand`);
 //! and the throw's span ([`ThrowSpan`]), which Dying Light 1 keeps too.
 //!
 //! The game's throw controller (`WeaponThrowController`) runs the throw as states (idle, wind-up,
@@ -26,8 +26,8 @@
 //! the swing) and its velocity replaces the game's; the weapon starts from where it is, in the hand.
 
 use crate::feature::Chrome;
-use monaka_arms::launch::{self, HandThrow, Leaving, Thrown, Way};
-use monaka_arms::throw::Throwing;
+use monaka_body::launch::{self, HandThrow, Leaving, Thrown, Way};
+use monaka_body::throw::Throwing;
 use monaka_core::math;
 use monaka_hook::module::Module;
 use monaka_hook::{Hooks, InFlight, Original, mem};
@@ -206,11 +206,6 @@ pub const THROWING: Throwing = Throwing { given: 1.6, launched: 3.0, weapon_with
 /// Whether the throw's hooks are in.
 pub fn installed() -> bool {
     BUILD.get().is_some()
-}
-
-/// Whether the melee weapon's throw is hooked.
-pub fn weapon_installed() -> bool {
-    WEAPON_BUILD.get().is_some()
 }
 
 /// Whether `controller` is the local player's (its player is a `PlayerDI_PH`).

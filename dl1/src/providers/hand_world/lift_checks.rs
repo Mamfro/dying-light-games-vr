@@ -4,7 +4,7 @@
 
 use super::*;
 use crate::Dl1;
-use monaka_arms::hand_rig::{self, HandRig};
+use monaka_body::hand_rig::{self, HandRig};
 
 #[test]
 fn the_hands_are_the_ones_read_before() {

@@ -17,7 +17,7 @@ fn old_pitch(pitch: f32) -> f32 {
 
 #[test]
 fn the_targets_are_the_ones_written_before() {
-    let units = <Dl1 as LooksByFacing>::TARGETS;
+    let units = UNITS;
     for current in [-725.0f32, -180.0, -90.0, 0.0, 12.5, 179.0, 540.0, 1e-3, -33.3] {
         for k in -400..=400 {
             // Head aim's look: the facing plus the head, wrapped (radians), in degrees before.

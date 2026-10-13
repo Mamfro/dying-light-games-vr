@@ -15,7 +15,7 @@ pub mod history;
 pub mod motion;
 pub mod streamline;
 
-use crate::{ARMS, Beast, LOOK, stereo_on};
+use crate::{HAND_RIG, Beast, LOOK, stereo_on};
 use monaka_hook::Hooks;
 use monaka_producer::game::{Lack, Start};
 use monaka_hook::module::Module;
@@ -78,7 +78,7 @@ pub(crate) fn install_probes(start: &mut Start<'_, Beast>) -> Result<(), Lack> {
     let stereo = stereo_on(start.options);
     if options().hands
         && start.is_on(&LOOK)
-        && !start.is_on(&ARMS)
+        && !start.is_on(&HAND_RIG)
         && let Err(Lack::Missing(why)) = eng_chr::feature::install_rig(start, false)
     {
         log!("arms probe off: {why}");

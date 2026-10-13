@@ -1,4 +1,4 @@
-//! Provider: melee hits (`monaka_arms::melee_hit::Hits`): Dying Light 1's hit detection, what its
+//! Provider: melee hits (`monaka_body::melee_hit::Hits`): Dying Light 1's hit detection, what its
 //! melee can hit, and where it types a hit. Its component is `crate::MELEE`.
 //!
 //! DL1's own hit detection sweeps a blade along the arms' `R_HandHolder` element frame to frame and
@@ -12,7 +12,7 @@
 //!   not the blade's motion: that override is cleared, so the game keeps the direction the hand
 //!   moved;
 //! - the blade reaches 1.3 times the weapon's range plus 0.1 m (2.4 m for a machete): here it is
-//!   the length of the weapon in the hand (`monaka_arms::melee_hit::blade`), or a fist's reach
+//!   the length of the weapon in the hand (`monaka_body::melee_hit::blade`), or a fist's reach
 //!   ([`reach`]).
 //!
 //! What the melee can hit is found by the level's search with the class the game's melee passes,
@@ -22,8 +22,8 @@
 
 use crate::Dl1;
 use crate::providers::{engine, skeleton};
-use monaka_arms::melee::Held;
-use monaka_arms::melee_hit::{self, Hits};
+use monaka_body::held::Kind;
+use monaka_body::melee_hit::{self, Hits};
 use monaka_core::sync::Locked;
 use monaka_hook::module::Module;
 use monaka_hook::{InFlight, Original, mem};
@@ -239,11 +239,11 @@ unsafe extern "C" fn take_damage(victim: *mut c_void, info: *mut u8) {
             mem::read::<usize>(at + INFO_ATTACKER).unwrap_or(0),
             model + ATTACKER_IN_PLAYER,
             mem::read::<i32>(at + INFO_DAMAGE_TYPE).unwrap_or(-1),
-            monaka_arms::melee::held(),
+            melee_hit::wielded(),
             melee_hit::edge_led(),
         );
     }
-    if ours && mem::read::<i32>(at + INFO_DAMAGE_TYPE) == Some(DAMAGE_CUT) && monaka_arms::melee::held().is_some_and(|h| matches!(h, Held::Melee | Held::Blade)) {
+    if ours && mem::read::<i32>(at + INFO_DAMAGE_TYPE) == Some(DAMAGE_CUT) && melee_hit::wielded().is_some_and(|h| matches!(h, Kind::Melee | Kind::Blade)) {
         match melee_hit::edge_led() {
             Some(false) => {
                 // The game's own damage info for this hit, on its thread, before the victim reads it.
@@ -267,8 +267,8 @@ unsafe extern "C" fn take_damage(victim: *mut c_void, info: *mut u8) {
 
 /// The player's melee controller, with what the arms hold: the controller's player is the arms
 /// model the rig poses, and the arms hold no gun.
-fn player_melee(controller: *mut c_void) -> Option<Held> {
-    let held = monaka_arms::melee::held().filter(|&h| h != Held::Gun)?;
+fn player_melee(controller: *mut c_void) -> Option<Kind> {
+    let held = melee_hit::wielded().filter(|&h| h != Kind::Gun)?;
     skeleton::players(controller as usize).then_some(held)
 }
 
@@ -304,7 +304,7 @@ unsafe extern "C" fn reach(controller: *mut c_void, weapon: *mut c_void) -> f32 
     let Some((held, length)) = player_melee(controller).and_then(|held| melee_hit::blade(held).map(|length| (held, length))) else { return game };
     let ours = ((length - REACH_EXTRA) / REACH_SCALE).max(0.01);
     let n = REACHES.fetch_add(1, Relaxed);
-    if n < 10 || n.is_power_of_two() {
+    if log::seldom(n, 9) {
         log!("physical melee: reach {game:.2} m -> {ours:.2} m (a {length} m blade with {held:?})");
     }
     ours

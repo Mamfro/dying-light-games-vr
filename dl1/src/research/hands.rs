@@ -9,7 +9,7 @@ use crate::providers::engine;
 use crate::providers::skeleton::{arms_of, camera_matrix};
 use crate::providers::eye_site;
 use eng_chr::providers::fpp::{self, ArmsSkeleton};
-use monaka_arms::{Placed, Skeleton, Snapshot};
+use monaka_body::{Placed, Skeleton, Snapshot};
 use monaka_core::camera::{Mat34, compose, rigid_inverse};
 use monaka_hook::module::Module;
 use monaka_hook::probe::{caller, class_name};

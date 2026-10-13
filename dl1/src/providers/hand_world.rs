@@ -1,4 +1,4 @@
-//! Provider part: the hands in the world, the hand rig's (`monaka_arms::hand_rig::HandRig`): its
+//! Provider part: the hands in the world, the hand rig's (`monaka_body::hand_rig::HandRig`): its
 //! trail ([`CONTROLLERS`], noted here at each arms callback, not by the rig), where the game's hands
 //! are after the rig and its animation ([`HANDS`]) and where the right hand holds a bowstring
 //! ([`string_point`]), for the throw, bow and reload ready-mades.
@@ -7,10 +7,10 @@
 //! (throwing, the bow, the reload gesture): after each arms callback the rig has posed the arms
 //! model on the controllers, and each hand's element (`L_Hand`, `R_Hand`) is read back with the
 //! engine's element getters ([`sample`]). A short trail of each, and of each controller
-//! ([`CONTROLLERS`]), gives its velocity (`monaka_arms::hand_trail`).
+//! ([`CONTROLLERS`]), gives its velocity (`monaka_body::hand_trail`).
 
 use crate::providers::skeleton;
-use monaka_arms::hand_trail::{HandTrails, Lost, TrailRules};
+use monaka_body::hand_trail::{HandTrails, Lost, TrailRules};
 use monaka_hook::mem;
 use monaka_hook::module::Module;
 use monaka_producer::{Rejection, log};

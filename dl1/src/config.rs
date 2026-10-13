@@ -1,8 +1,8 @@
 //! What the launcher can set, from `dl1-options.txt` beside the DLL: the shared settings
 //! ([`Shared`], the manifest's defaults) and this game's own. Defaults are the headset play mode.
 
-use monaka_arms::aim::AimSettings;
-use monaka_arms::{melee, roomscale};
+use monaka_body::look::aim::AimSettings;
+use monaka_body::{melee, roomscale};
 use monaka_core::camera::Frustum;
 use monaka_core::manifest::{Kind, Manifest, Opt, Shown, SteamFiles, choice, opt};
 use monaka_core::options::{Options, Shared};
@@ -35,8 +35,8 @@ pub const FSR_SHARPNESS: Opt =
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Config {
     pub shared: Shared,
-    /// What aims (`monaka_arms::aim`): the shared aim plus `melee_aim_head` and `tool_aim`.
-    pub arms_aim: AimSettings,
+    /// What aims (`monaka_body::look::aim`): the shared aim plus `melee_aim_head` and `tool_aim`.
+    pub aim_settings: AimSettings,
     /// Swinging a controller like the melee weapon it holds (or punching with it, bare-handed)
     /// attacks (needs the hand rig; `swing_attack=0` turns it off, `swing_speed=` tunes it).
     pub melee: melee::Settings,
@@ -74,10 +74,10 @@ pub struct Config {
     pub climb_pullback: f32,
     /// Diagnostic: the real pad's input is dropped from the reads the VR pad merges into.
     pub pad_mask_real: bool,
-    /// Room-scale following (with the hand rig; `monaka_arms::roomscale` on
+    /// Room-scale following (with the hand rig; `monaka_body::roomscale` on
     /// [`crate::cooking::room_scale_rules`]).
     pub room_scale: Option<roomscale::Settings>,
-    /// Physical melee (with the hand rig; `monaka_arms::melee_hit`). DL1 starts a light attack
+    /// Physical melee (with the hand rig; `monaka_body::melee_hit`). DL1 starts a light attack
     /// when it is let go: swings press briefly.
     pub physical_melee: Option<melee::Physical>,
     /// With physical melee, a weapon's swing attacks only once the blade is about to reach
@@ -150,11 +150,11 @@ impl Fsr {
 impl Config {
     pub fn from_options(options: &Options, manifest: &Manifest) -> Self {
         let shared = Shared::from_options(options, manifest);
-        let arms_aim = AimSettings::from_options(options, shared.aim, true);
+        let aim_settings = AimSettings::from_options(options, shared.aim, true);
         let throw_by_hand = options.switch("throw_by_hand", true);
         Self {
             shared,
-            arms_aim,
+            aim_settings,
             melee: melee::Settings::from_options(options, shared.aim.side),
             // Head aim turns the character itself, so its camera already looks where the head does.
             // Hand aim points that camera along the controller: turning it back to the view keeps
@@ -254,14 +254,14 @@ mod tests {
         assert!(!config.symmetric_projection && !config.afw, "experiments are opt-in, AER the method");
         assert!(config.fsr.is_none(), "FSR is opt-in");
         let without = Config::parse("aim=off");
-        assert!(!without.aim.head && without.turn_live_camera && !without.arms_aim.head_aim);
+        assert!(!without.aim.head && without.turn_live_camera && !without.aim_settings.head_aim);
         let hands = Config::parse("aim=controller\naim_hand=Left");
-        assert!(hands.aim.hand && hands.aim.side == LEFT_HAND && !hands.aim.rig && hands.arms_aim.hand_aim);
+        assert!(hands.aim.hand && hands.aim.side == LEFT_HAND && !hands.aim.rig && hands.aim_settings.hand_aim);
         assert!(hands.turn_live_camera, "hand aim turns the live camera back to the view");
         assert_eq!(Config::parse("aim=head").aim.side, RIGHT_HAND);
         let rig = Config::parse("aim=hand_rig\nhand_hold=-0.02, 0.01,0.03");
         assert!(rig.aim.rig && rig.hand_hold == [-0.02, 0.01, 0.03]);
-        assert!(rig.melee.swing && rig.arms_aim.melee_aim_head, "melee by swinging comes with the rig");
+        assert!(rig.melee.swing && rig.aim_settings.melee_aim_head, "melee by swinging comes with the rig");
         assert_eq!(rig.physical_melee, Some(melee::Physical { blade: 1.1, fist: 0.15, press_ms: Some(40) }), "and physical melee");
         assert!(Config::parse("aim=head").physical_melee.is_none());
         assert!(!Config::parse("swing_attack=0").melee.swing);

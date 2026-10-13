@@ -1,5 +1,5 @@
 //! Provider part: one game call aimed from the hands, the fire hook's means
-//! ([`crate::providers::bow`], `monaka_arms::launch::Fires`).
+//! ([`crate::providers::bow`], `monaka_body::launch::Fires`).
 //!
 //! The player's aim, from the hands for one game call: every controller's eye and look (and the
 //! player's own shots) come from two functions of the player's aim part (player +0x1b0: its eye

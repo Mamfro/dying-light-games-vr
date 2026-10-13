@@ -18,7 +18,7 @@ pub mod markers;
 pub mod melee;
 
 use crate::extras;
-use crate::{ARMS, Dl2};
+use crate::{HAND_RIG, Dl2};
 use monaka_producer::game::{Lack, Start};
 use monaka_producer::log;
 use monaka_producer::research::Research;
@@ -67,7 +67,7 @@ pub(crate) fn install_probes(start: &mut Start<'_, Dl2>) -> Result<(), Lack> {
     let probes = options();
     let Some(gamedll) = start.build.gamedll.as_ref() else { return Ok(()) };
     if probes.hands
-        && !start.is_on(&ARMS)
+        && !start.is_on(&HAND_RIG)
         && let Err(Lack::Missing(why)) = eng_chr::feature::install_rig(start, false)
     {
         log!("arms probe off: {why}");

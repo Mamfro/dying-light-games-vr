@@ -10,7 +10,7 @@
 //! input when the reload action is pressed with the gun ready (state 0): it calls the reload start
 //! with `from input` set (The Beast first marks some weapons, [`Prepare`]). The start checks for
 //! itself that a reload can happen (spare ammo, the clip not full). After each update of the
-//! player's ready gun, reloading by hand reads its gesture there (`monaka_arms::reload::update`),
+//! player's ready gun, reloading by hand reads its gesture there (`monaka_body::reload::update`),
 //! and a reload asked is started by that same call; the reload then runs as the game's.
 
 use monaka_core::pad::Gamepad;
@@ -158,8 +158,8 @@ pub fn report_reload() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use monaka_arms::melee::Held;
-    use monaka_arms::reload::{Reloading, gestured};
+    use monaka_body::held::Kind;
+    use monaka_body::reload::{Reloading, gestured};
     use monaka_core::gesture::{TouchAway, TouchAwayRules};
     use monaka_pad::actions::standard;
     use std::cell::Cell;
@@ -212,7 +212,7 @@ mod tests {
                     players,
                     || state,
                     || {
-                        let done = gestured(&mut new, time, Held::Gun, apart, &Reloading::FRESH.touch);
+                        let done = gestured(&mut new, time, Kind::Gun, apart, &Reloading::FRESH.touch);
                         asked.set(asked.get() || done);
                         done
                     },

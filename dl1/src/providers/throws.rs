@@ -1,6 +1,6 @@
-//! Provider: the throw release (`monaka_arms::launch::Throws`): the game's throw hooked where the
+//! Provider: the throw release (`monaka_body::launch::Throws`): the game's throw hooked where the
 //! player lets go and where what is thrown leaves, each asking the throw ready-made; and throwing
-//! by hand's facts (`monaka_arms::throw::ThrowsByHand`). Its component is `crate::THROW_BY_HAND`.
+//! by hand's facts (`monaka_body::throw::ThrowsByHand`). Its component is `crate::THROW_BY_HAND`.
 //!
 //! The game's throw controller (`WeaponThrowController`) winds up while the trigger is held and,
 //! once it is let go, plays the throw up to the animation's release time before the object leaves
@@ -25,8 +25,8 @@
 use crate::Dl1;
 use crate::providers::skeleton;
 use eng_chr::providers::throws::ThrowSpan;
-use monaka_arms::launch::{self, HandThrow, Leaving, Throws, Thrown, Way};
-use monaka_arms::throw::{Throwing, ThrowsByHand};
+use monaka_body::launch::{self, HandThrow, Leaving, Throws, Thrown, Way};
+use monaka_body::throw::{Throwing, ThrowsByHand};
 use monaka_core::math::length;
 use monaka_hook::module::Module;
 use monaka_hook::{Hooks, InFlight, Original, mem};

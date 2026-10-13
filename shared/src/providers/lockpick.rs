@@ -1,4 +1,4 @@
-//! Provider part: lockpicking (`monaka_arms::lockpick::Lockpicks`: the Chrome games' twist rules,
+//! Provider part: lockpicking (`monaka_body::lockpick::Lockpicks`: the Chrome games' twist rules,
 //! [`LOCKPICKING`], and whether a lock is being picked, [`picking`]), with the lockpick minigame's
 //! analog actions taken the game's own way (`monaka_pad::actions::Actions::engine` for
 //! `Action::Pick` and `Action::Turn`, through [`crate::providers::actions`]), as Dying Light 2 has
@@ -15,8 +15,8 @@
 //! the pick's input step runs on a lock in play, the pick free (and for [`GONE`] after).
 
 use crate::feature::Chrome;
-use monaka_arms::hands::{At, Point};
-use monaka_arms::lockpick::{Lockpicking, Twist};
+use monaka_body::hands::{At, Point};
+use monaka_body::lockpick::{Lockpicking, Twist};
 use monaka_core::sync::Locked;
 use monaka_hook::module::Module;
 use monaka_hook::{Hooks, InFlight, Original, mem};

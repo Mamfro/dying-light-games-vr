@@ -14,7 +14,7 @@ use crate::Dl1;
 use crate::config::Config;
 use crate::providers::look_fields;
 use crate::providers::{eye_site, hud_draws};
-use monaka_arms::owned_facing::FACING;
+use monaka_body::look::facing;
 use monaka_core::protocol::HeadPose;
 use monaka_producer::log;
 use monaka_stereo::driver::Driver;
@@ -59,16 +59,16 @@ pub fn before_present(driver: &Driver, _: &IDXGISwapChain, n: u64) -> bool {
 
 /// After present `n`, with the pair's head `pose` chosen and recorded by the driver: the
 /// culling relaxed again, the stick kept from the game, the controllers sampled for the next frame
-/// (with hand aim, `monaka_arms::hands::sample_frame`), the live camera turned to the view, and what
+/// (with hand aim, `monaka_body::hands::sample_frame`), the live camera turned to the view, and what
 /// the next view setup draws from.
 pub fn after_present(_: &Driver, n: u64, pose: &HeadPose) {
     let config = eye_site::config();
     eye_site::apply_mesh_culling(config.mesh_cull_scale);
     if config.aim.head {
-        FACING.keep_stick();
+        facing::keep_stick();
     }
     if config.aim.hand {
-        monaka_arms::hands::sample_frame();
+        monaka_body::hands::sample_frame();
     }
     let pose = *pose;
     suggest_render_size(config, &pose);
@@ -99,7 +99,7 @@ fn suggest_render_size(config: &Config, pose: &HeadPose) {
 pub fn finish(_: &Driver) {
     checks::report();
     eye_site::give_back();
-    monaka_arms::owned_facing::release::<Dl1>();
+    facing::release::<Dl1>();
     look_fields::report();
     crate::providers::skeleton::report();
     crate::research::finish();
@@ -121,8 +121,8 @@ pub fn finish(_: &Driver) {
 
 /// Forgets the frame's controllers, releases their block and the scene depth after the hooks are off.
 pub fn release() {
-    monaka_arms::hands::forget_frame();
-    monaka_arms::controllers::close();
+    monaka_body::hands::forget_frame();
+    monaka_body::controllers::close();
     crate::providers::depth::release();
     crate::research::release();
 }

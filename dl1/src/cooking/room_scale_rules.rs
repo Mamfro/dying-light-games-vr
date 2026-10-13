@@ -3,7 +3,7 @@
 //! room-scale ready-made decides both itself.
 //!
 //! Room-scale following (`room_scale`) on DL1's walk body: the shared following
-//! ([`monaka_arms::roomscale`]) with what only DL1 knows, when following waits and how far a step
+//! ([`monaka_body::roomscale`]) with what only DL1 knows, when following waits and how far a step
 //! followed.
 //!
 //! Each step of the player's walk body ([`crate::providers::steps`], 50 Hz), following's velocity
@@ -12,7 +12,7 @@
 //! wanted velocity.
 
 use crate::providers::steps::{self, BODY_POSITION, LOCK_POSITION, PHYSICS_OFF, SCRIPTED_MOVE};
-use monaka_arms::roomscale;
+use monaka_body::roomscale;
 use monaka_hook::mem;
 use std::sync::Mutex;
 
@@ -39,7 +39,7 @@ fn gate(full: usize) -> Option<&'static str> {
     if mem::read::<u8>(full + PHYSICS_OFF).unwrap_or(1) != 0 {
         return Some("physics off");
     }
-    if monaka_arms::owned_facing::FACING.cutscene() {
+    if monaka_body::look::facing::cutscene() {
         return Some("cutscene");
     }
     None

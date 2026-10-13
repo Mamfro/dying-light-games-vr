@@ -7,7 +7,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-monaka_arms.workspace = true
+monaka_body.workspace = true
 monaka_core.workspace = true
 monaka_hook.workspace = true
 monaka_producer.workspace = true

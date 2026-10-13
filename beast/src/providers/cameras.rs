@@ -33,10 +33,8 @@ pub unsafe extern "system" fn set_vectors(camera: usize, forward: usize, up: usi
     if let Some(pitch) = player.and_then(|update| update.pitch()).filter(|_| !crate::providers::look_fields::AIM.live()) {
         crate::providers::look_fields::AIM.note_camera_pitch(pitch);
     }
-    // The head yaw head aim baked into it (from the previous update's targets), while it steers.
-    let baked = player.and_then(|_| crate::providers::look_fields::AIM.current_share());
     if let Some(update) = player
-        && let Some([back, up, position]) = eye_site::eye_vectors(camera, &update, baked)
+        && let Some([back, up, position]) = eye_site::eye_vectors(camera, &update)
     {
         // SAFETY: the original, with the game's camera and our own vectors, which live until it
         // returns.

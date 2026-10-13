@@ -3,7 +3,7 @@
 //! Whether the player climbs, from the game itself: its movement controllers (hanging from or
 //! climbing a ledge, a ladder, a zip line) each have an id, and the player keeps a table of which
 //! run (a byte per id at `[player + 0xb98]`, set by the controller's start and cleared by its end).
-//! The hand rig is told each update ([`monaka_arms::traverse::report_climbing`]): the arms go to
+//! The hand rig is told each update ([`monaka_body::traverse::report_climbing`]): the arms go to
 //! the game's animation exactly while one of them runs, whatever else raises the hands (a throw's
 //! wind-up).
 

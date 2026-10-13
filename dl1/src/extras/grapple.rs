@@ -8,7 +8,7 @@
 //! reticle sits on ([`note_reticle`], from the arms callback).
 
 use crate::Dl1;
-use crate::ARMS;
+use crate::HAND_RIG;
 use monaka_hook::module::Module;
 use monaka_producer::game::{Component, Switch};
 use monaka_hook::{Hooks, InFlight, Original, mem};
@@ -23,7 +23,7 @@ use std::time::{Duration, Instant};
 /// where the character looks).
 pub const GRAPPLE: Component<Dl1> = Component {
     name: "grapple",
-    needs: &[&ARMS],
+    needs: &[&HAND_RIG],
     switch: Some(Switch::new("grapple_by_hand", true, "the game's grapple")),
     install: |start| Ok(install(start.hooks, &start.build.gamedll)?),
     release: report,
@@ -80,7 +80,7 @@ pub fn on_screen_point(result: usize) {
     let Some(point) = RETICLE.lock().ok().and_then(|r| *r).filter(|(_, at)| at.elapsed() < FRESH).map(|(p, _)| p) else { return };
     mem::write::<[f32; 3]>(result, point);
     let n = AIMED.fetch_add(1, Relaxed) + 1;
-    if n == 1 || n.is_power_of_two() {
+    if log::seldom(n, 1) {
         log!("grappling hook by hand: the hook searched toward the left reticle at {point:.2?} ({n})");
     }
 }

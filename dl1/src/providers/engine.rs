@@ -25,7 +25,6 @@ const fn exported<F>(name: &'static str, export: &'static str, prologue: &'stati
 pub const CAMERA: CameraConvention = CameraConvention::DYING_LIGHT;
 pub const PROJECTION: ProjectionConvention = ProjectionConvention::RIGHT_HANDED;
 
-pub use eng_chr::ENGINE;
 pub const ENGINE_SHA256: &str = "24C8BC14D65EFE282E4CDAE678D0230D71167AFA37F8611715E5084F9733B361";
 pub const RENDERER: &str = eng_chr::RD3D11;
 pub const RENDERER_SHA256: &str = "293748B442E3744209DED5BECA80BB5B58B292504BAAC0998B385080B331D2F7";
@@ -65,6 +64,13 @@ pub const FROM_FORWARD: Site<FromForwardFn> = exported(
 /// at +0x1174/+0x1178, the same layout DL2's `PlayerDI_PH` has at +0xb90..+0xb9c.
 pub const GAMEDLL: &str = "gamedll_x64_rwdi.dll";
 pub const GAMEDLL_SHA256: &str = "76F20D27C45C0B807D2F099022AD0ABC42CA90A8ADE7F761641518AF346D26A0";
+
+/// The game object (`GameDI`) global; its input manager is at +0xc8 (busy while +0x128 is set).
+pub const GAME: usize = 0x1c16348;
+pub const MANAGER_IN_GAME: usize = 0xc8;
+pub const MANAGER_BUSY: usize = 0x128;
+/// The pad last used (`-1` after the keyboard or mouse): the pad the buttons are pressed on.
+pub const MANAGER_LAST_PAD: usize = 0x124;
 
 /// Vertical look input (the same converter as DL2's): every input action runs through
 /// `InputAction::Execute(action, targets, value, flag)`, the action handing its value to its targets.

@@ -6,7 +6,7 @@ version = 4
 name = "eng_chr"
 version = "0.2.0"
 dependencies = [
- "monaka_arms",
+ "monaka_body",
  "monaka_channel",
  "monaka_core",
  "monaka_hook",
@@ -17,22 +17,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "monaka_arms"
-version = "0.1.0"
-dependencies = [
- "monaka_channel",
- "monaka_core",
- "monaka_hook",
- "monaka_pad",
- "monaka_producer",
-]
-
-[[package]]
 name = "monaka_beast"
 version = "0.2.0"
 dependencies = [
  "eng_chr",
- "monaka_arms",
+ "monaka_body",
  "monaka_channel",
  "monaka_core",
  "monaka_framegen",
@@ -43,6 +32,17 @@ dependencies = [
  "monaka_stereo",
  "monaka_streamline",
  "windows",
+]
+
+[[package]]
+name = "monaka_body"
+version = "0.1.0"
+dependencies = [
+ "monaka_channel",
+ "monaka_core",
+ "monaka_hook",
+ "monaka_pad",
+ "monaka_producer",
 ]
 
 [[package]]
@@ -62,7 +62,7 @@ name = "monaka_dl1"
 version = "0.2.0"
 dependencies = [
  "eng_chr",
- "monaka_arms",
+ "monaka_body",
  "monaka_channel",
  "monaka_core",
  "monaka_framegen",
@@ -81,7 +81,7 @@ name = "monaka_dl2"
 version = "0.2.0"
 dependencies = [
  "eng_chr",
- "monaka_arms",
+ "monaka_body",
  "monaka_channel",
  "monaka_core",
  "monaka_framegen",

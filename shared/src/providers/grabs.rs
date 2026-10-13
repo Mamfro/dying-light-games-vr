@@ -137,7 +137,7 @@ fn refuses(condition: usize, participants: usize, what: &str) -> bool {
         return false;
     }
     let n = REFUSED.fetch_add(1, Relaxed) + 1;
-    if n <= 20 || n.is_power_of_two() {
+    if log::seldom(n, 20) {
         log!("zombie grabs: grab {n} refused ({what})");
     }
     true

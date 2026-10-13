@@ -229,7 +229,7 @@ unsafe extern "C" fn set(varlist: *mut c_void, name: *const u64, value: f32) {
             let mut names = PROBED_NAMES.locked();
             if let Some((text, seen)) = names.get_mut(index) {
                 *seen += 1;
-                if *seen <= 3 || seen.is_power_of_two() {
+                if log::seldom(*seen, 3) {
                     log!("flashlight probe: {text} = {value} (set {seen}x)");
                 }
             }

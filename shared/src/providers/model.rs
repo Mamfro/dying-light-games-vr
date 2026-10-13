@@ -1,4 +1,4 @@
-//! Provider: a held item's model (`monaka_arms::held::HeldItems::Model`), its elements read and
+//! Provider: a held item's model (`monaka_body::held::HeldItems::Model`), its elements read and
 //! written.
 //!
 //! A model visual's elements (a held weapon's visual is an `IModelObject` at its start, as the bow's
@@ -11,7 +11,7 @@
 //! model (it marks the model for one), which works the world matrices out from the locals.
 
 use crate::providers::fpp::ArmsSkeleton;
-use monaka_arms::Skeleton;
+use monaka_body::Skeleton;
 use monaka_core::camera::Mat34;
 use monaka_hook::mem;
 use monaka_hook::module::Module;

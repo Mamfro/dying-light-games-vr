@@ -1,13 +1,15 @@
-//! Provider: Chrome's look fields, which the look method by targets reads and writes
-//! (`monaka_arms::look_targets`, Chrome's head aim [`HeadAim`] around it): where a game keeps the
+//! Provider: Chrome's look fields, which the look's targets delivery reads and writes
+//! (`monaka_body::look::targets`, Chrome's head aim [`HeadAim`] around it): where a game keeps the
 //! character's look targets and the character ([`Fields`]), the player character behind the arms
 //! visual's camera target ([`HeadAim::character_of`]), the game's player camera update seen at its
 //! camera setter ([`PlayerUpdate`], [`HeadAim::player_update`]), the engine's cutscene query
 //! ([`Cutscene`]), and the game's input-action converter with the build's vertical look actions
 //! ([`input_action`], [`pitch_actions_match`]).
 
-use monaka_arms::aim::{AimSettings, neutral_pitch};
-use monaka_arms::look_targets::{StandDown, Steered, TargetAim};
+use monaka_body::look::aim::neutral_pitch;
+use monaka_body::look::targets::{self, LookFields, Steered};
+use monaka_body::look::{self, StandDown};
+use monaka_core::aim::Convention;
 use monaka_core::camera::{Mat34, from_back_up};
 use monaka_core::protocol::HeadPose;
 use monaka_core::sync::Locked;
@@ -133,14 +135,13 @@ impl Default for Cutscene {
     }
 }
 
-/// Head aim on a Chrome Engine character: Monaka's steering of its look targets
-/// (`monaka_arms::look_targets::TargetAim`) with what the Chrome Engine adds: where the character
-/// and its targets are ([`Fields`]), the game DLL its classes are in, the player camera its latest
-/// update set, the engine's cutscene query, the view bob held while it steers and the throw or bow
-/// by hand that aims itself.
+/// Head aim on a Chrome Engine character: the look's steering of its look targets
+/// (`monaka_body::look::targets`) with what the Chrome Engine adds: where the character and its
+/// targets are ([`Fields`]), the game DLL its classes are in, the player camera its latest update
+/// set, the engine's cutscene query, the view bob held while it steers and the throw or bow by hand
+/// that aims itself.
 pub struct HeadAim {
     pub(crate) fields: Fields,
-    target: TargetAim,
     pub(crate) gamedll: AtomicUsize,
     /// The player camera as its latest update set it (camera-to-world, the game's own), keyed by
     /// the camera object the game set it on.
@@ -158,7 +159,6 @@ impl HeadAim {
     pub const fn new(fields: Fields) -> Self {
         Self {
             fields,
-            target: TargetAim::new(fields.target_yaw, fields.target_pitch),
             gamedll: AtomicUsize::new(0),
             player_camera: Mutex::new((0, [0.0; 12])),
             cutscene: Cutscene::new(),
@@ -196,9 +196,9 @@ impl HeadAim {
         }
     }
 
-    /// The steering itself (Monaka's), for the look method's component.
-    pub fn target(&self) -> &TargetAim {
-        &self.target
+    /// Where the character's look targets are, for the look's steering.
+    pub fn look_fields(&self) -> LookFields {
+        LookFields { yaw: self.fields.target_yaw, pitch: self.fields.target_pitch, convention: Convention::DEGREES_YAW_RIGHT }
     }
 
     /// The cutscene detector head aim stands down by (resolved at start where the engine has it).
@@ -211,34 +211,19 @@ impl HeadAim {
         self.gamedll.store(gamedll, Release);
     }
 
-    /// What aims this run (nothing until configured).
-    pub fn settings(&self) -> AimSettings {
-        self.target.settings()
-    }
-
     /// Whether head aim steered the character within the last half second.
     pub fn live(&self) -> bool {
-        self.target.live()
+        look::live()
     }
 
-    /// The head yaw (radians) the targets carry for `character` now.
-    pub fn share(&self, character: usize) -> f32 {
-        self.target.share(character)
-    }
-
-    /// The share the latest update's camera carries, while head aim steers.
-    pub fn current_share(&self) -> Option<f32> {
-        self.target.current_share()
-    }
-
-    /// One player camera update ([`TargetAim::steer`]): steers `character` toward the head (or the
+    /// One player camera update ([`targets::steer`]): steers `character` toward the head (or the
     /// aiming controller), standing down while a cutscene has the player (the engine's own query,
     /// [`Cutscene::ask`]); a throw or a bow by hand aims itself (`crate::providers::fpp::head_aims`);
     /// the view held level while it steers (`crate::providers::view_bob::hold`).
     pub fn steer(&self, character: usize, head: Option<HeadPose>, counter: Option<u64>) -> Option<Steered> {
         let asked = self.cutscene.ask(character);
         let stand_down = StandDown { now: asked.cutscene, changed: asked.changed };
-        let steered = self.target.steer(character, head, counter, stand_down, crate::providers::fpp::head_aims);
+        let steered = targets::steer(self.look_fields(), character, head, counter, stand_down, crate::providers::fpp::head_aims);
         crate::providers::view_bob::hold(character, steered.is_some());
         if let Some(steered) = &steered {
             self.note_pitch(steered.own.pitch.to_radians(), true);
@@ -248,22 +233,17 @@ impl HeadAim {
 
     /// The head yaw (radians) baked into the game camera of frame `counter`.
     pub fn baked_at(&self, counter: Option<u64>) -> f32 {
-        self.target.baked_at(counter)
+        targets::baked_at(counter)
     }
 
-    /// The head yaw (radians) the game camera of frame `counter` carries, while head aim steers.
-    pub fn baked_in_view(&self, counter: Option<u64>) -> f32 {
-        self.target.baked_in_view(counter)
-    }
-
-    /// The tracking origin the eyes and arms are built on ([`TargetAim::tracking_origin`]).
+    /// The tracking origin the eyes and arms are built on ([`targets::tracking_origin`]).
     pub fn tracking_origin(&self, game: &Mat34, counter: Option<u64>) -> Option<Mat34> {
-        self.target.tracking_origin(game, counter)
+        targets::tracking_origin(game, counter)
     }
 
     /// Vertical look inputs neutralised so far.
     pub fn pitch_blocked(&self) -> u64 {
-        self.target.pitch_blocked()
+        look::pitch_blocked()
     }
 
     pub fn fields(&self) -> &Fields {
@@ -326,16 +306,16 @@ pub fn convert_for(aim: &'static HeadAim, table: &'static PitchActions) {
 
 /// The game's input-action converter: while head aim steers the character, the head alone pitches
 /// it, so vertical look input (mouse and stick) gets its neutral value; otherwise the pitch lock
-/// passes it only back toward level (`monaka_arms::pitch_lock`, when on).
+/// passes it only back toward level (`monaka_body::pitch_lock`, when on).
 ///
 /// # Safety
 /// Only as the converter's detour ([`INPUT_ACTION`] its original), with the game's own arguments.
 pub unsafe extern "system" fn input_action(binding: usize, receivers: usize, value: f32, source: bool, repeat: bool) {
     let _flight = InFlight::enter();
     let value = match CONVERTER.get() {
-        Some((aim, table)) if aim.live() => aim.target().neutral_pitch_if_live(binding, value, |action| is_pitch_action(table, action)),
+        Some((aim, table)) if aim.live() => look::neutral_pitch_if_live(binding, value, |action| is_pitch_action(table, action)),
         Some((_, table)) => match neutral_pitch(binding, |action| is_pitch_action(table, action)) {
-            Some(neutral) => monaka_arms::pitch_lock::pass(value, neutral, turns_up(table, mem::read::<u32>(binding).unwrap_or(0))),
+            Some(neutral) => monaka_body::pitch_lock::pass(value, neutral, turns_up(table, mem::read::<u32>(binding).unwrap_or(0))),
             None => value,
         },
         None => value,

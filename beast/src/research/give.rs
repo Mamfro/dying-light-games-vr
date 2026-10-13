@@ -72,7 +72,7 @@ pub fn frame(_game: usize) {
 
 fn give() -> Result<(), &'static str> {
     let items = ITEMS.get().ok_or("no items")?;
-    let gamedll = Module::find(crate::providers::engine::GAMEDLL).ok_or("no game DLL")?;
+    let gamedll = Module::find(eng_chr::GAMEDLL).ok_or("no game DLL")?;
     let game = mem::read::<usize>(gamedll.at(GAME)).filter(|&g| g != 0).ok_or("no game object")?;
     // SAFETY: the game's own local-player getter on its game object, on the game thread.
     let player = unsafe { std::mem::transmute::<usize, PlayerFn>(gamedll.at(LOCAL_PLAYER))(game) };

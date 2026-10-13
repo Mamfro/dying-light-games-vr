@@ -3,9 +3,9 @@
 //! - B turns the flashlight on and off (the d-pad up's action) instead of crouching;
 //! - tapping Y heals (the d-pad down's action), holding Y still repairs; Y no longer looks back
 //!   (in VR the head turns);
-//! - ducking in the room crouches the character ([`crate::CROUCH_BY_DUCKING`], `monaka_arms::duck`),
+//! - ducking in the room crouches the character ([`crate::CROUCH_BY_DUCKING`], `monaka_body::duck`),
 //!   and with the hand rig and a gun drawn the left hand brought to the gun and taken away reloads
-//!   ([`crate::RELOAD_BY_HAND`], `monaka_arms::reload`): both press the game's actions
+//!   ([`crate::RELOAD_BY_HAND`], `monaka_body::reload`): both press the game's actions
 //!   ([`crate::providers::actions`]), which this layout takes on buttons of its own.
 //!
 //! Crouching holds the game's hold-to-crouch action, bound to a button code no controller sends
@@ -27,8 +27,8 @@
 
 use crate::providers::actions::{CROUCH_ASKED, take_reload};
 use crate::providers::engine;
-use crate::{ARMS, Dl1, flat_kept};
-use monaka_arms::reload::{Reloading, Reloads};
+use crate::{HAND_RIG, Dl1, flat_kept};
+use monaka_body::reload::{Reloading, Reloads};
 use monaka_core::manifest::{Kind, Opt, Shown, opt};
 use monaka_producer::game::{Component, Lack, On, Start, Switch};
 use monaka_hook::module::Module;
@@ -64,7 +64,7 @@ impl Reloads for Dl1 {
 
 fn install_controls(start: &mut Start<'_, Dl1>) -> Result<(), Lack> {
     let config = crate::config(start);
-    let reload = config.reload_gesture && config.aim.rig && start.is_on(&ARMS);
+    let reload = config.reload_gesture && config.aim.rig && start.is_on(&HAND_RIG);
     install(start.hooks, &start.build.gamedll, &start.build.engine, reload)?;
     Ok(())
 }
@@ -74,10 +74,6 @@ const REGISTER: usize = 0x110ea80;
 /// The engine's input pass for a pad: `(input, pad index, events)`, on the game's thread; it hands
 /// each event to the game's input manager.
 const DISPATCH: usize = 0x2fb3c0;
-/// The game object (`GameDI`) global; its input manager is at +0xc8 (busy while +0x128 is set).
-const GAME: usize = 0x1c16348;
-const MANAGER_IN_GAME: usize = 0xc8;
-const MANAGER_BUSY: usize = 0x128;
 /// `GameDI`'s rebuild of the input bindings (its vtable slot +0x8e0): clears the manager's
 /// bindings and registers them again from the scripts.
 const REBUILD_SLOT: usize = 0x8e0;
@@ -88,8 +84,6 @@ const REBUILD: usize = 0x454930;
 /// pad (the manager makes a copy of each pad binding per pad).
 const PAD_BUTTON_SLOT: usize = 0x4a0;
 const PAD_BUTTON: usize = 0x110fd80;
-/// The pad last used (`-1` after the keyboard or mouse): the pad the buttons are pressed on.
-const MANAGER_LAST_PAD: usize = 0x124;
 
 /// A binding entry (0x2c bytes, one input action's definition): the action id, then the device at
 /// +0x08 and the key at +0x10.
@@ -256,9 +250,9 @@ unsafe extern "C" fn dispatched(input: *mut c_void, pad: usize, events: *mut c_v
     // SAFETY: forwards the engine's own call.
     unsafe { DISPATCH_ORIGINAL.get()(input, pad, events) };
     let Some(gamedll) = Module::find(engine::GAMEDLL) else { return };
-    let Some(game) = mem::read::<usize>(gamedll.at(GAME)).filter(|&g| g != 0) else { return };
-    let Some(manager) = mem::read::<usize>(game + MANAGER_IN_GAME).filter(|&m| m != 0) else { return };
-    if mem::read::<u8>(manager + MANAGER_BUSY) != Some(0) {
+    let Some(game) = mem::read::<usize>(gamedll.at(engine::GAME)).filter(|&g| g != 0) else { return };
+    let Some(manager) = mem::read::<usize>(game + engine::MANAGER_IN_GAME).filter(|&m| m != 0) else { return };
+    if mem::read::<u8>(manager + engine::MANAGER_BUSY) != Some(0) {
         return;
     }
     if REBUILD_WANTED.load(Relaxed) {
@@ -300,7 +294,7 @@ fn let_go_crouch(gamedll: &Module, manager: usize) {
 /// ([`crate::providers::actions`], by ducking).
 fn crouch(gamedll: &Module, manager: usize) {
     let held = CROUCH_HELD.load(Relaxed);
-    let wanted = crouch_wanted(CROUCH_ASKED.load(Relaxed), APPLYING.load(Relaxed), held, monaka_arms::traverse::traversing);
+    let wanted = crouch_wanted(CROUCH_ASKED.load(Relaxed), APPLYING.load(Relaxed), held, monaka_body::traverse::traversing);
     if wanted != held && press(gamedll, manager, CROUCH_KEY, wanted) {
         CROUCH_HELD.store(wanted, Relaxed);
         if wanted {
@@ -324,7 +318,7 @@ fn reload(gamedll: &Module, manager: usize) {
     } else if APPLYING.load(Relaxed)
         && RELOAD_GESTURE.load(Relaxed)
         && !is_held(&RELOAD_HELD)
-        && let Some(by) = reload_wanted(monaka_arms::reload::update::<Dl1>, take_reload)
+        && let Some(by) = reload_wanted(monaka_body::reload::update::<Dl1>, take_reload)
         && press(gamedll, manager, RELOAD_KEY, true)
     {
         hold(&RELOAD_HELD);
@@ -388,7 +382,7 @@ fn press(gamedll: &Module, manager: usize, key: u32, down: bool) -> bool {
     if slot != Some(gamedll.at(PAD_BUTTON)) {
         return false;
     }
-    let pad = mem::read::<i32>(manager + MANAGER_LAST_PAD).filter(|&p| (0..16).contains(&p)).unwrap_or(0);
+    let pad = mem::read::<i32>(manager + engine::MANAGER_LAST_PAD).filter(|&p| (0..16).contains(&p)).unwrap_or(0);
     // SAFETY: the input manager's own pad button event, on the game's thread, for a key only the
     // VR layout's bindings use.
     unsafe { PAD_BUTTON_ORIGINAL.get()(manager, pad, key, down as u8) };
@@ -398,9 +392,9 @@ fn press(gamedll: &Module, manager: usize, key: u32, down: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use monaka_arms::duck::{Ducking, RULES};
-    use monaka_arms::melee::Held;
-    use monaka_arms::reload::gestured;
+    use monaka_body::duck::{Ducking, RULES};
+    use monaka_body::held::Kind;
+    use monaka_body::reload::gestured;
     use monaka_core::gesture::{Duck, DuckRules, TouchAway};
 
     /// Dying Light 1's crouch before the ready-made: the head's crouch kept at each view, and on
@@ -563,7 +557,7 @@ mod tests {
         if !applying {
             return None;
         }
-        let held = if gun { Held::Gun } else { Held::Nothing };
+        let held = if gun { Kind::Gun } else { Kind::Nothing };
         let asked = std::cell::Cell::new(r.asked);
         let gesture = &mut r.gesture;
         let by = reload_wanted(

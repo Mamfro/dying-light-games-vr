@@ -377,9 +377,11 @@ fn track_left(game: usize, token: u32, a: usize, b: usize) -> Option<(SceneInput
     // Decoupled aim: the view is built on the game camera without its pitch (only the head looks
     // up and down) while the game keeps its pitched camera for aiming. With head aim the game camera
     // also carries the head's yaw; that share is turned back out.
-    let level = Base::Level { baked_yaw: look_fields::baked_in_view(&base.inverse, base.counter) };
+    crate::research::aim::view(&base.inverse, base.counter);
+    let baked = monaka_body::look::baked::<crate::Dl2>(Some(base.counter as u64)).map_or(0.0, |share| share.yaw);
+    let level = Base::Level { baked_yaw: baked };
     // Room-scale following: the head's movement the character has walked is in the camera now.
-    let game = monaka_arms::roomscale::follow_view(&base.inverse, level, config.head_position.position(&base.head))?;
+    let game = monaka_body::roomscale::follow_view(&base.inverse, level, config.head_position.position(&base.head))?;
     // The view centre and the eyes, the head placed by the head model (`head_position`).
     let (centre, [left_eye, right_eye]) = camera::head_cameras(&game, level, &base.head, config.head_position, base.head.ipd)?;
     let (mut left, mut left_projection) = (left_eye, camera::eye_projection(&base.projection, &base.fovs[0])?);
@@ -583,8 +585,8 @@ pub fn report() {
         SHADOW_JUMPS_RUN.load(Ordering::Relaxed),
         SHADOW_JUMPS_SKIPPED.load(Ordering::Relaxed),
         ONCE_SKIPPED.load(Ordering::Relaxed),
-        look_fields::AIM.pitch_blocked() + monaka_arms::pitch_lock::blocked(),
-        monaka_arms::pitch_lock::levelling(),
+        look_fields::AIM.pitch_blocked() + monaka_body::pitch_lock::blocked(),
+        monaka_body::pitch_lock::levelling(),
         MENU_FRAMES.load(Ordering::Relaxed),
     );
 }

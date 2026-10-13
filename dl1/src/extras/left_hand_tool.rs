@@ -1,10 +1,10 @@
 //! The tool shown in the hand that throws it. Dying Light 1 holds a throwable in the right hand's
-//! weapon slot for its throw, while the hands throw it with the left (`monaka_arms::throw`): while
+//! weapon slot for its throw, while the hands throw it with the left (`monaka_body::throw`): while
 //! a throw runs (`crate::providers::throws::throwing`) the tool goes into the left hand, held as
 //! the right holds it, mirrored ([`place_tool`], after the rig placed the arms).
 
 use crate::providers::{hand_world, throws};
-use monaka_arms::Skeleton;
+use monaka_body::Skeleton;
 use monaka_core::camera::{Mat34, compose, rigid_inverse};
 use monaka_core::math::length;
 use monaka_producer::log;

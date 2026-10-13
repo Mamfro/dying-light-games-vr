@@ -1,6 +1,6 @@
-//! Provider part: the bow's fire hook (`monaka_arms::launch::Fires`) and draw
-//! (`monaka_arms::launch::Draws`), with the bow by hand's facts ([`BOWING`], [`KEEPS`],
-//! `monaka_arms::bow::Bows`), what Dying Light 2 and The Beast share.
+//! Provider part: the bow's fire hook (`monaka_body::launch::Fires`) and draw
+//! (`monaka_body::launch::Draws`), with the bow by hand's facts ([`BOWING`], [`KEEPS`],
+//! `monaka_body::bow::Bows`), what Dying Light 2 and The Beast share.
 //!
 //! The bow controller (`WeaponBowController`) draws in one state: each update it works the power
 //! out from the time drawn over the full draw time `t`, as the most power times `1 - (1 - t)^2`.
@@ -14,8 +14,8 @@
 
 use crate::feature::Chrome;
 use crate::providers::aim;
-use monaka_arms::bow::{Bowing, Keeps};
-use monaka_arms::launch::{self, Fired, Flight, Weapon};
+use monaka_body::bow::{Bowing, Keeps};
+use monaka_body::launch::{self, Fired, Flight, Weapon};
 use monaka_core::gesture::PullRules;
 use monaka_core::sync::Locked;
 use monaka_hook::module::Module;

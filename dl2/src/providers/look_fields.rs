@@ -1,6 +1,6 @@
 //! Provider: look fields (`eng_chr::providers::look_fields`), where DL2 keeps its look targets and
-//! character, for head aim (`monaka_arms::look_targets`, its component `crate::LOOK`), steered at
-//! the player camera update ([`from_forward`]); and the pitch lock's input (`monaka_arms::pitch_lock`,
+//! character, for head aim (`monaka_body::look`, its component `crate::LOOK`), steered at
+//! the player camera update ([`from_forward`]); and the pitch lock's input (`monaka_body::pitch_lock`,
 //! its component `crate::PITCH_LOCK`) on the game camera's own pitch, noted at that update.
 //!
 //! The game sets its player camera once per update through `FromForwardUpPos`, called from
@@ -18,21 +18,19 @@ use crate::providers::game;
 use monaka_stereo::same_frame::PAIRS;
 use eng_chr::providers::look_fields::HeadAim;
 use eng_chr::providers::look_fields::Fields;
-use monaka_arms::aim::TOOL;
+use monaka_body::look::aim::TOOL;
 use monaka_hook::{InFlight, Original, mem};
-use monaka_arms::look_targets::{LooksByTargets, TargetAim};
-use monaka_arms::pitch_lock::PitchInput;
+use monaka_body::look::{Carried, Delivery, Looks};
+use monaka_body::pitch_lock::PitchInput;
 use monaka_core::situation::Situation;
 use monaka_producer::game::{Lack, Start};
 
-/// Head aim on the character (`monaka_arms::look_targets`), steered at the player camera update
-/// (`FromForwardUpPos`, [`from_forward`]).
-impl LooksByTargets for Dl2 {
+/// Head aim on the character (`monaka_body::look`, into its look targets), steered at the player
+/// camera update (`FromForwardUpPos`, [`from_forward`]): the camera of a game frame is built from
+/// the targets as that frame's update began.
+impl Looks for Dl2 {
+    const DELIVERY: Delivery<Self> = Delivery::Targets { carried: Carried::AtUpdate };
     const REPORTS: &'static [Situation] = eng_chr::feature::look_reports::<Dl2>();
-
-    fn aim() -> &'static TargetAim {
-        AIM.target()
-    }
 
     fn install(start: &mut Start<'_, Dl2>) -> Result<(), Lack> {
         eng_chr::feature::install_look(start)?;
@@ -45,7 +43,7 @@ impl LooksByTargets for Dl2 {
     }
 }
 
-/// The pitch lock (`monaka_arms::pitch_lock`) at the game's input-action converter, which head aim
+/// The pitch lock (`monaka_body::pitch_lock`) at the game's input-action converter, which head aim
 /// hooks too (it is hooked here when head aim is off), on the game camera's own pitch
 /// ([`HeadAim::game_pitch`](eng_chr::providers::look_fields::HeadAim::game_pitch)), while the eyes
 /// are drawn.
@@ -73,13 +71,6 @@ pub static AIM: HeadAim = HeadAim::new(Fields {
     vis_vtable: engine::FPP_VIS_VTABLE,
     target_character: engine::TARGET_CHARACTER,
 });
-
-/// The head yaw (radians) head aim baked into the game camera `game` of frame `counter`, to be
-/// turned back out of the view so a head turn is not counted twice.
-pub fn baked_in_view(game: &[f32; 12], counter: u32) -> f32 {
-    crate::research::aim::view(game, counter);
-    AIM.baked_in_view(Some(counter as u64))
-}
 
 /// `IBaseCamera::FromForwardUpPos`; its "forward" argument is the camera's backward axis. Four
 /// arguments, so no shim: the stack walk finds the caller (a few calls per frame).

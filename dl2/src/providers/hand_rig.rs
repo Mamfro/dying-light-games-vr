@@ -1,55 +1,57 @@
-//! Providers: the skeleton (the rig on The Beast's offsets, [`RIG`], with its posing moment
-//! [`moment`] and the hand rig's facts), the held item (`monaka_arms::held::HeldItems`), the throw
-//! release (`monaka_arms::launch::Throws`, with `monaka_arms::throw::ThrowsByHand`), the bow's
-//! fire hook and draw (`monaka_arms::launch::Fires`, `Draws`, with `monaka_arms::bow::Bows`) and
-//! steps (`monaka_arms::feature::Steps`), for the hand rig and what rides on it (`crate::ARMS` and
-//! the components after it: fingers, physical melee, the hands' throw, bow and reload, room-scale
+//! Providers: the skeleton (the rig on DL2's offsets, [`RIG`], with its posing moment [`moment`]
+//! and the hand rig's facts), the held item (`monaka_body::held::HeldItems`), the throw release
+//! (`monaka_body::launch::Throws`, with `monaka_body::throw::ThrowsByHand`), the bow's fire hook
+//! and draw (`monaka_body::launch::Fires`, `Draws`, with `monaka_body::bow::Bows`) and steps
+//! (`monaka_body::feature::Steps`), for the hand rig and what rides on it (`crate::HAND_RIG` and the
+//! components after it: fingers, physical melee, the hands' throw, bow and reload, room-scale
 //! following).
 //!
-//! As in Dying Light 2, the player camera update calls the arms visual's camera-target callback
-//! (`engine::FPP_CAMERA_TARGET`) right after setting the camera. The camera the callback gets is
-//! already the eye's ([`eye_site`]); the arms go against the game's own camera, noted before the
-//! eye replaced it (`eng_chr::providers::look_fields::HeadAim::player_update`, keyed by the renderer's
-//! camera behind the game's). Head aim steers the character there too, so the look hooks the
-//! callback (`head_aim_here`) and the arms only configure it. `probe_hands=1` (with stereo) logs
-//! the skeleton's elements and the weapon visuals' classes.
+//! The player camera update calls the arms visual's camera-target callback
+//! (`engine::FPP_CAMERA_TARGET`) right after setting the camera; around it the arms are snapshot as
+//! animated, then put on the controllers, and melee swings attack (`eng_chr::providers::fpp`).
+//! `probe_hands=1` logs the skeleton's elements (name, type, parent, place against the camera) and the weapon
+//! visuals' classes.
 
-use crate::Beast;
-use crate::providers::{engine, eye_site};
+use crate::Dl2;
+use crate::providers::{engine, game};
+use monaka_stereo::same_frame::PAIRS;
 use eng_chr::providers::rig::{Facts, Moment, Rig};
-use monaka_arms::hand_rig::{self, Climbing, HandRig};
-use monaka_arms::hand_trail::HandTrails;
-use monaka_arms::held::{HeldItems, Item, Line};
-use monaka_arms::bow::{Bowing, Bows, Keeps};
-use monaka_arms::launch::{Draws, Fires, Throws};
-use monaka_arms::melee::Held;
-use monaka_arms::melee_hit::Hits;
-use monaka_arms::throw::{Throwing, ThrowsByHand};
+use monaka_body::hand_rig::{self, Climbing, HandRig};
+use monaka_body::hand_trail::HandTrails;
+use monaka_body::held::{HeldItems, Item, Kind, Line};
+use monaka_body::bow::{Bowing, Bows, Keeps};
+use monaka_body::launch::{Draws, Fires, Throws};
+use monaka_body::melee_hit::Hits;
+use monaka_body::throw::{Throwing, ThrowsByHand};
 use monaka_core::camera::Mat34;
 use monaka_producer::game::{Lack, Start};
 use std::time::Duration;
 
-/// The rig on The Beast's offsets.
+/// The rig on DL2's offsets.
 pub static RIG: Rig = Rig::new(Facts {
     callback: engine::FPP_CAMERA_TARGET,
     icamera_target: engine::FPP_ICAMERA_TARGET,
     skeleton: engine::SKELETON_LAYOUT,
     arms: engine::ARMS_LAYOUT,
-    camera_key_at: Some(engine::CAMERA_RENDERER),
+    camera_key_at: None,
 });
 
-/// What the arms callback sees: stereo running and the present loop's head (no game frame).
+/// What the arms callback sees: VR on, the head the pair is drawn with, the game frame.
 pub fn moment() -> Moment {
-    Moment { active: eye_site::running(), head: monaka_stereo::feature::DRIVER.head().current(), counter: None }
+    Moment { active: PAIRS.running(), head: PAIRS.head().current(), counter: game::get().counter().map(|(_, c)| c as u64) }
 }
 
-/// The hand rig (Monaka's) on The Beast's bone axes; the climbing measured from the hands, the
-/// palms kept for the hands' throw, bow and reload (`eng_chr::providers::hands::PALMS`).
-impl HandRig for Beast {
+/// The hand rig (Monaka's) on DL2's bone axes; the climbing measured from the hands, the palms
+/// kept for the hands' throw, bow and reload (`eng_chr::providers::hands::PALMS`).
+impl HandRig for Dl2 {
     const RIG: hand_rig::Rig = eng_chr::providers::fpp::chrome_rig(engine::BONE_AXES, None, Climbing::Animated);
 
-    fn held(side: usize) -> Held {
+    fn held(side: usize) -> Kind {
         eng_chr::providers::held::kind(side)
+    }
+
+    fn item(side: usize) -> Option<Item> {
+        eng_chr::providers::held::item(side)
     }
 
     fn holder(side: usize) -> Option<i32> {
@@ -61,9 +63,8 @@ impl HandRig for Beast {
     }
 }
 
-/// The throw release on The Beast's throw controller and dropped-item launch
-/// (`eng_chr::providers::throws`).
-impl Throws for Beast {
+/// The throw release on DL2's throw controller and dropped-item launch (`eng_chr::providers::throws`).
+impl Throws for Dl2 {
     fn install(start: &mut Start<'_, Self>) -> Result<(), Lack> {
         eng_chr::providers::throws::install_for(start)
     }
@@ -75,14 +76,14 @@ impl Throws for Beast {
 
 /// Throwing by hand on the Chrome games' gains (`eng_chr::providers::throws::THROWING`), from the
 /// palms the hand rig notes.
-impl ThrowsByHand for Beast {
+impl ThrowsByHand for Dl2 {
     const THROWING: Throwing = eng_chr::providers::throws::THROWING;
 }
 
-/// Melee hits on the Chrome games' hit detection and its melee targets
-/// (`eng_chr::providers::melee`).
-impl Hits for Beast {
-    const ATTACKS_ON_RELEASE: bool = <Beast as eng_chr::feature::Chrome>::FACTS.attacks_on_release;
+/// Melee hits on the Chrome games' hit detection (`eng_chr::providers::melee`); DL2's melee
+/// targets are not read, so every swing attacks.
+impl Hits for Dl2 {
+    const ATTACKS_ON_RELEASE: bool = <Dl2 as eng_chr::feature::Chrome>::FACTS.attacks_on_release;
 
     fn install(start: &mut Start<'_, Self>) -> Result<(), Lack> {
         eng_chr::providers::melee::install_for(start)
@@ -103,7 +104,7 @@ impl Hits for Beast {
 
 /// The fire hook on the bow's arrow (`eng_chr::providers::bow`): each arrow takes its eye point and
 /// look from the bow ready-made's answer; its speed is the draw's.
-impl Fires for Beast {
+impl Fires for Dl2 {
     const SPEED: bool = false;
 
     fn install(start: &mut Start<'_, Self>) -> Result<(), Lack> {
@@ -112,7 +113,7 @@ impl Fires for Beast {
 }
 
 /// The draw at the bow's update, set as its power by the game's curve (`eng_chr::providers::bow`).
-impl Draws for Beast {
+impl Draws for Dl2 {
     fn install(start: &mut Start<'_, Self>) -> Result<(), Lack> {
         eng_chr::providers::bow::install_draw_for(start)
     }
@@ -125,7 +126,7 @@ impl Draws for Beast {
 /// The bow by hand on the Chrome games' rules (`eng_chr::providers::bow::BOWING`), the bow model's
 /// elements placed against their parents by the engine's own local matrices
 /// (`eng_chr::providers::bow::KEEPS`).
-impl Bows for Beast {
+impl Bows for Dl2 {
     const BOWING: Bowing = eng_chr::providers::bow::BOWING;
     const KEEPS: Keeps = eng_chr::providers::bow::KEEPS;
 
@@ -139,13 +140,9 @@ impl Bows for Beast {
 }
 
 /// What the hands hold (`eng_chr::providers::held`): each line read from the held weapon's model
-/// (The Beast's gun holder is not calibrated: a gun has none).
-impl HeldItems for Beast {
+/// (DL2's gun holder is not calibrated: a gun has none).
+impl HeldItems for Dl2 {
     type Model = eng_chr::providers::model::Model;
-
-    fn item(side: usize) -> Option<Item> {
-        eng_chr::providers::held::item(side)
-    }
 
     fn line(side: usize) -> Option<Line> {
         eng_chr::providers::held::line(side, &eng_chr::providers::held::FROM_MODELS)
@@ -157,7 +154,7 @@ impl HeldItems for Beast {
 }
 
 /// Room-scale following at the player's movement step (`eng_chr::providers::walk`).
-impl monaka_arms::feature::Steps for Beast {
+impl monaka_body::feature::Steps for Dl2 {
     fn install(start: &mut Start<'_, Self>) -> Result<(), Lack> {
         eng_chr::feature::hook_steps(start)
     }

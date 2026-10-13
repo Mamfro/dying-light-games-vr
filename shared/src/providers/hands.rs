@@ -9,10 +9,10 @@
 //! aim's share turned out, room-scale following's walk) and each tracked palm on it: the
 //! controllers themselves, not the arms the game animates (an animated arm lags its controller, and
 //! rides the gun when the game holds it with both hands). Each palm's way is a trail
-//! (`monaka_arms::hand_trail`), for its speed and stroke, kept while a controller is briefly lost
+//! (`monaka_body::hand_trail`), for its speed and stroke, kept while a controller is briefly lost
 //! (it empties as time goes on).
 
-use monaka_arms::hand_trail::{HandTrails, Lost, TrailRules};
+use monaka_body::hand_trail::{HandTrails, Lost, TrailRules};
 use monaka_core::camera::Mat34;
 
 /// One build's addresses for what the hands do with the game's own throw, bow and lockpick (none

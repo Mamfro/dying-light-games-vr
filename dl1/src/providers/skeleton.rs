@@ -1,6 +1,6 @@
-//! Provider: the skeleton (`monaka_arms::Skeleton`: bones, rest pose, reading and writing the
+//! Provider: the skeleton (`monaka_body::Skeleton`: bones, rest pose, reading and writing the
 //! pose, the posing moment), with the hand rig's hook; and the held item
-//! (`monaka_arms::held::HeldItems`: what each hand holds, noted at that hook).
+//! (`monaka_body::held::HeldItems`: what each hand holds, noted at that hook).
 //!
 //! The first-person arms follow the controllers (`hand_rig`): around the arms visual's
 //! camera-target callback (`engine::FPP_CAMERA_TARGET`) the shared Chrome rig
@@ -25,13 +25,12 @@ use crate::providers::engine::{self, Camera, CameraTargetFn};
 use crate::providers::eye_site;
 use eng_chr::providers::fpp;
 use eng_chr::providers::model::Model;
-use monaka_arms::{BoneAxes, Skeleton};
+use monaka_body::{BoneAxes, Skeleton};
 use eng_chr::providers::held::Lines;
-use monaka_arms::hand_rig::{self, Climbing, HandRig, Hands, Palms};
-use monaka_arms::hand_trail::HandTrails;
-use monaka_arms::hands::{self, At, In, Point};
-use monaka_arms::held::{HeldItems, Item, Line};
-use monaka_arms::melee::Held;
+use monaka_body::hand_rig::{self, Climbing, HandRig, Hands, Palms};
+use monaka_body::hand_trail::HandTrails;
+use monaka_body::hands::{self, At, In, Point};
+use monaka_body::held::{HeldItems, Item, Kind, Line};
 use monaka_core::camera::Mat34;
 use monaka_core::protocol::{LEFT_HAND, RIGHT_HAND};
 use monaka_hook::Hooks;
@@ -51,8 +50,12 @@ use std::sync::Mutex;
 impl HandRig for Dl1 {
     const RIG: hand_rig::Rig = eng_chr::providers::fpp::chrome_rig(BoneAxes::DYING_LIGHT_1, Some(LEFT_MIRROR), Climbing::Reported);
 
-    fn held(side: usize) -> Held {
+    fn held(side: usize) -> Kind {
         eng_chr::providers::held::kind(side)
+    }
+
+    fn item(side: usize) -> Option<Item> {
+        eng_chr::providers::held::item(side)
     }
 
     fn holder(side: usize) -> Option<i32> {
@@ -94,10 +97,6 @@ const LINES: Lines = Lines {
 impl HeldItems for Dl1 {
     type Model = Model;
 
-    fn item(side: usize) -> Option<Item> {
-        eng_chr::providers::held::item(side)
-    }
-
     fn line(side: usize) -> Option<Line> {
         eng_chr::providers::held::line(side, &LINES)
     }
@@ -107,9 +106,9 @@ impl HeldItems for Dl1 {
     }
 }
 
-/// The arms component's install (`crate::ARMS`): the hand rig's part, the arms visual's callback
+/// The hand rig component's install (`crate::HAND_RIG`): the hand rig's part, the arms visual's callback
 /// hooked, the hands' world functions looked up.
-pub(crate) fn install_arms(start: &mut Start<'_, Dl1>) -> Result<(), Lack> {
+pub(crate) fn install_hand_rig(start: &mut Start<'_, Dl1>) -> Result<(), Lack> {
     hand_rig::install::<Dl1>(start)?;
     hook_arms(start.hooks, &start.build.engine, &start.build.gamedll)?;
     hand_world::resolve(&start.build.engine)?;
@@ -303,7 +302,7 @@ pub unsafe extern "system" fn camera_target(vis: *mut c_void, camera: *mut c_voi
     let throwing = crate::providers::throws::throwing();
     // The game says when it climbs (not the hands' height: a throw's wind-up raises them too).
     if let Some(climbing) = crate::providers::climbing::climbing(arms_model()) {
-        monaka_arms::traverse::report_climbing(climbing);
+        monaka_body::traverse::report_climbing(climbing);
     }
     let options = fpp::Options {
         rig: config.aim.rig,
@@ -317,7 +316,7 @@ pub unsafe extern "system" fn camera_target(vis: *mut c_void, camera: *mut c_voi
     };
     let game = camera_matrix(camera);
     let hands = |game: Mat34| -> Result<Hands, &'static str> {
-        if !monaka_arms::owned_facing::FACING.live() {
+        if !monaka_body::look::facing::live() {
             return Err("head aim not steering");
         }
         // The same tracking origin the view is drawn from, so a hand lands where its controller is seen.
@@ -325,8 +324,8 @@ pub unsafe extern "system" fn camera_target(vis: *mut c_void, camera: *mut c_voi
         Ok(Hands::Palms(Palms { game, origin, head: eye_site::pending_pose(), palms, aim_side: config.aim.side, hold: config.hand_hold, bones: None }))
     };
     let outcome = fpp::around::<crate::Dl1, _>(vis, &LAYOUT, &options, arms_of, game, original, hands);
-    crate::research::arms::moved(outcome.placed.as_ref(), game);
-    crate::research::arms::after(vis, camera, outcome.before.as_ref());
+    crate::research::hands::moved(outcome.placed.as_ref(), game);
+    crate::research::hands::after(vis, camera, outcome.before.as_ref());
     // Where the viewer's left reticle sits in the world: along where the left controller points.
     let left_reticle = game.zip(palms[LEFT_HAND]).map(|(game, palm)| {
         let m = monaka_core::camera::apply_head(&eye_site::tracking_origin(&game, true, config.aim.hand), palm.orientation, palm.position);
@@ -334,7 +333,7 @@ pub unsafe extern "system" fn camera_target(vis: *mut c_void, camera: *mut c_voi
         [m[3] - m[2] * reach, m[7] - m[6] * reach, m[11] - m[10] * reach]
     });
     crate::extras::grapple::note_reticle(left_reticle);
-    monaka_arms::bow::posed::<crate::Dl1>(outcome.placed.is_some(), left_reticle);
+    monaka_body::bow::posed::<crate::Dl1>(outcome.placed.is_some(), left_reticle);
     crate::extras::left_hand_tool::place_tool(vis);
     crate::research::bow::after(vis);
     hand_world::sample();

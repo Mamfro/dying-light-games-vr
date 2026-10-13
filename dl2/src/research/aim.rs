@@ -3,7 +3,7 @@
 //! first levelled views.
 
 use super::options;
-use monaka_arms::look_targets::Steered;
+use monaka_body::look::targets::Steered;
 use monaka_producer::log;
 
 /// A levelled game camera `view` of frame `counter`, before the baked head yaw is turned out.

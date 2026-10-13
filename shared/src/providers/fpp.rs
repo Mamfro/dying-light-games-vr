@@ -5,17 +5,18 @@
 //! camera update calls it right after setting the camera, the moment the arms are placed for the
 //! frame. A producer hooks it and calls [`around`] with the game's own call: the arms are snapshot
 //! before it, then put on the controllers with their fingers by Monaka's hand rig
-//! ([`monaka_arms::hand_rig`], [`chrome_rig`]) and melee swings fed ([`monaka_arms::melee`]).
+//! ([`monaka_body::hand_rig`], [`chrome_rig`]) and melee swings fed ([`monaka_body::melee`]).
 //! Games differ in addresses ([`Layout`]), in how they reach the arms skeleton (an
 //! [`ArmsSkeleton`]: Dying Light 2 and The Beast through the `CoSkeleton` component, Dying Light 1
 //! through `IModelObject`'s element exports) and in how they know their camera and view (the
 //! `hands` closure).
 
-use monaka_arms::finger_rig::{ChainSource, FingerNames};
-use monaka_arms::hand_rig::{self, Climbing, Hands, Holds, Method, Moment, Rig};
-use monaka_arms::held::HeldItems;
-use monaka_arms::melee::{self, Held};
-use monaka_arms::{BoneAxes, Placed, Skeleton, Snapshot};
+use monaka_body::finger_rig::{ChainSource, FingerNames};
+use monaka_body::hand_rig::{self, Climbing, Hands, Holds, Method, Moment, Rig};
+use monaka_body::held::HeldItems;
+use monaka_body::held::Kind;
+use monaka_body::melee;
+use monaka_body::{BoneAxes, Placed, Skeleton, Snapshot};
 use monaka_core::camera::{Mat34, compose, rigid_inverse};
 use monaka_core::protocol::{HandPose, LEFT_HAND, RIGHT_HAND};
 use monaka_hook::module::Module;
@@ -60,11 +61,11 @@ pub fn is_throwable(weapon: usize) -> bool {
 
 /// What the arms' weapon visual `weapon` (0 for none) is, for the shared melee: a gun
 /// ([`is_gun`]), another weapon, or nothing.
-pub fn held_of(weapon: usize) -> Held {
+pub fn held_of(weapon: usize) -> Kind {
     match weapon {
-        0 => Held::Nothing,
-        w if is_gun(w) => Held::Gun,
-        _ => Held::Melee,
+        0 => Kind::Nothing,
+        w if is_gun(w) => Kind::Gun,
+        _ => Kind::Melee,
     }
 }
 
@@ -231,7 +232,7 @@ pub fn around<G: HeldItems, S: ArmsSkeleton>(
     let bow = bow_vis.is_some();
     let holders = skeleton.as_ref().map_or([None; 2], |s| [LEFT_HAND, RIGHT_HAND].map(|side| crate::providers::held::holder(s, side)));
     // The held item says a throwable where the game does; the swings below take it as before.
-    let kind = crate::providers::held::reported(held, held == Held::Melee && is_throwable(weapon), options.throw_in_hand);
+    let kind = crate::providers::held::reported(held, held == Kind::Melee && is_throwable(weapon), options.throw_in_hand);
     crate::providers::held::note(crate::providers::held::Noted::of(options.melee.aim_side, weapon, kind, bow_vis, holders, options.apart));
     let swung = LAST_WEAPON.lock().map(|mut last| swung_as(held, &mut last)).unwrap_or(held);
     if let Ok(mut seen) = BOW_SEEN.lock() {
@@ -245,10 +246,10 @@ pub fn around<G: HeldItems, S: ArmsSkeleton>(
     if options.apart {
         swinging[monaka_core::protocol::LEFT_HAND] = None;
     }
-    melee::update(if bow { Held::Gun } else { swung }, swinging, &options.melee);
+    melee::update(if bow { Kind::Gun } else { swung }, swinging, &options.melee);
     // A bow is held apart (the bow in the left hand, the string in the right), and whatever the
     // producer says is.
-    monaka_arms::hands_apart(options.apart || bow);
+    monaka_body::hands_apart(options.apart || bow);
     let moved = match (&skeleton, &before, camera) {
         (Some(skeleton), Some(before), Some(camera)) => hands(camera).and_then(|hands| hand_rig::frame::<G>(skeleton, before, Moment { hands, fingers: options.fingers })),
         (_, _, None) => Err("no player camera"),
@@ -265,18 +266,18 @@ pub fn around<G: HeldItems, S: ArmsSkeleton>(
 }
 
 /// The last weapon the arms held (not nothing), for [`swung_as`].
-static LAST_WEAPON: Mutex<Held> = Mutex::new(Held::Nothing);
+static LAST_WEAPON: Mutex<Kind> = Mutex::new(Kind::Nothing);
 
 /// What the swings take the arms to hold, given what they hold (`held`) and the last weapon they
 /// held (`last`, kept up to date here): hands left empty after a gun (the game puts it away for a
 /// climb or a vault, and back a few seconds later) still hold the gun, so an empty hand's swing
 /// does not press the attack, which would draw the gun and fire it. Another weapon ends it.
-fn swung_as(held: Held, last: &mut Held) -> Held {
-    if held != Held::Nothing {
+fn swung_as(held: Kind, last: &mut Kind) -> Kind {
+    if held != Kind::Nothing {
         *last = held;
         return held;
     }
-    if *last == Held::Gun { Held::Gun } else { held }
+    if *last == Kind::Gun { Kind::Gun } else { held }
 }
 
 /// Whether the rig saw the arms hold a bow lately.
@@ -288,7 +289,7 @@ pub fn bow_held() -> bool {
 /// themselves (with the bow by hand on), and the game's aim (the flashlight with it) following a
 /// controller then only gets in the way.
 pub fn head_aims() -> bool {
-    crate::providers::throws::throwing() || (monaka_arms::bow::installed() && bow_held())
+    crate::providers::throws::throwing() || (monaka_body::bow::installed() && bow_held())
 }
 
 /// The class of the arms' weapon visual for a bow.
@@ -419,7 +420,7 @@ pub fn report() {
             log!("  left to the game {n}x: {why}");
         }
     }
-    monaka_arms::report();
+    monaka_body::report();
 }
 
 #[cfg(test)]
@@ -428,11 +429,11 @@ mod tests {
 
     #[test]
     fn empty_hands_after_a_gun_still_hold_it_until_another_weapon() {
-        let mut last = Held::Nothing;
-        assert_eq!(swung_as(Held::Nothing, &mut last), Held::Nothing, "bare hands from the start punch");
-        assert_eq!(swung_as(Held::Gun, &mut last), Held::Gun);
-        assert_eq!(swung_as(Held::Nothing, &mut last), Held::Gun, "the gun put away for a climb");
-        assert_eq!(swung_as(Held::Melee, &mut last), Held::Melee);
-        assert_eq!(swung_as(Held::Nothing, &mut last), Held::Nothing, "after a melee weapon, empty hands punch");
+        let mut last = Kind::Nothing;
+        assert_eq!(swung_as(Kind::Nothing, &mut last), Kind::Nothing, "bare hands from the start punch");
+        assert_eq!(swung_as(Kind::Gun, &mut last), Kind::Gun);
+        assert_eq!(swung_as(Kind::Nothing, &mut last), Kind::Gun, "the gun put away for a climb");
+        assert_eq!(swung_as(Kind::Melee, &mut last), Kind::Melee);
+        assert_eq!(swung_as(Kind::Nothing, &mut last), Kind::Nothing, "after a melee weapon, empty hands punch");
     }
 }

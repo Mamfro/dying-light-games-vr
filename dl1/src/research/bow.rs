@@ -6,7 +6,7 @@
 
 use monaka_core::math::length;
 use crate::providers::hand_world;
-use monaka_arms::Skeleton;
+use monaka_body::Skeleton;
 use monaka_core::camera::{Mat34, compose, rigid_inverse};
 use monaka_producer::log;
 use std::sync::Mutex;

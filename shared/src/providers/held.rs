@@ -1,7 +1,7 @@
-//! Provider part: the held item (`monaka_arms::held::HeldItems`), what the Chrome games share.
+//! Provider part: the held item (`monaka_body::held::HeldItems`), what the Chrome games share.
 //!
 //! What the arms hold in the Chrome Engine games, for each game's held-item provider
-//! (`monaka_arms::held::HeldItems`, implemented by each game on these): noted at each arms callback
+//! (`monaka_body::held::HeldItems`, implemented by each game on these): noted at each arms callback
 //! ([`note`], from [`crate::providers::fpp::around`]) from the arms visual's weapon visuals, and
 //! read back by side. The aim hand holds the weapon visual's kind
 //! ([`crate::providers::fpp::held_of`]), a throwable where the game says it is one ([`reported`]);
@@ -10,13 +10,13 @@
 //! a game's `HandRig::holder` by [`holder_of`]); its line ([`line`]) is the game's own measured one
 //! where it has one ([`Lines`]), else read from the model: a melee weapon's or a throwable's blade
 //! toward its `DTrailStart1` ([`blade_line`]), a bow's arrow from its
-//! nock (`monaka_arms::bow::nock_line`).
+//! nock (`monaka_body::bow::nock_line`).
 
 use crate::providers::model::Model;
-use monaka_arms::Skeleton;
-use monaka_arms::bow;
-use monaka_arms::held::{Grip, Item, Line};
-use monaka_arms::melee::Held;
+use monaka_body::Skeleton;
+use monaka_body::bow;
+use monaka_body::held::{Grip, Item, Line};
+use monaka_body::held::Kind;
 use monaka_core::math::unit;
 use monaka_core::protocol::{LEFT_HAND, RIGHT_HAND};
 use monaka_core::sync::Locked;
@@ -29,12 +29,12 @@ use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 /// element it hangs from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Side {
-    pub kind: Held,
+    pub kind: Kind,
     pub visual: usize,
     pub holder: Option<i32>,
 }
 
-const EMPTY: Side = Side { kind: Held::Nothing, visual: 0, holder: None };
+const EMPTY: Side = Side { kind: Kind::Nothing, visual: 0, holder: None };
 
 /// Both hands at the latest arms callback, and how they hold what they hold.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -48,16 +48,16 @@ impl Noted {
     /// and the bow `bow` (its visual) if any, from the holders `holders`; each hand on its own
     /// controller when `apart` (a throw under way) or a bow is held. The bow is the left hand's
     /// where that hand holds nothing else.
-    pub fn of(aim_side: usize, weapon: usize, held: Held, bow: Option<usize>, holders: [Option<i32>; 2], apart: bool) -> Self {
+    pub fn of(aim_side: usize, weapon: usize, held: Kind, bow: Option<usize>, holders: [Option<i32>; 2], apart: bool) -> Self {
         let aim = aim_side.min(1);
         let mut sides = [LEFT_HAND, RIGHT_HAND].map(|side| {
-            let (kind, visual) = if side == aim { (held, weapon) } else { (Held::Nothing, 0) };
+            let (kind, visual) = if side == aim { (held, weapon) } else { (Kind::Nothing, 0) };
             Side { kind, visual, holder: holders[side] }
         });
         if let Some(bow) = bow
-            && sides[LEFT_HAND].kind == Held::Nothing
+            && sides[LEFT_HAND].kind == Kind::Nothing
         {
-            sides[LEFT_HAND] = Side { kind: Held::Bow, visual: bow, ..sides[LEFT_HAND] };
+            sides[LEFT_HAND] = Side { kind: Kind::Bow, visual: bow, ..sides[LEFT_HAND] };
         }
         Self { sides, grip: if apart || bow.is_some() { Grip::Apart } else { Grip::Measured } }
     }
@@ -67,9 +67,9 @@ impl Noted {
 /// holds as the held item says: a throwable where the visual is one's (`throwable`) or the hand's
 /// weapon slot holds what a throw under way throws (`throwing`), else as the melee takes it. A
 /// throwable grips as a melee weapon does, so the hand rig holds it alike.
-pub fn reported(held: Held, throwable: bool, throwing: bool) -> Held {
+pub fn reported(held: Kind, throwable: bool, throwing: bool) -> Kind {
     match held {
-        Held::Melee if throwable || throwing => Held::Throwable,
+        Kind::Melee if throwable || throwing => Kind::Throwable,
         held => held,
     }
 }
@@ -86,7 +86,7 @@ fn side(side: usize) -> Side {
 }
 
 /// The kind hand `side` holds as of the latest arms callback (a game's `HandRig::held`).
-pub fn kind(side: usize) -> Held {
+pub fn kind(side: usize) -> Kind {
     self::side(side).kind
 }
 
@@ -124,10 +124,10 @@ pub const FROM_MODELS: Lines = Lines { gun: None, melee: None };
 pub fn line(side: usize, lines: &Lines) -> Option<Line> {
     let hand = self::side(side);
     match hand.kind {
-        Held::Gun => lines.gun,
-        Held::Melee | Held::Blade | Held::Throwable => lines.melee.or_else(|| blade_line(hand.visual)),
-        Held::Bow => bow_line(hand.visual),
-        Held::Nothing | Held::Tool => None,
+        Kind::Gun => lines.gun,
+        Kind::Melee | Kind::Blade | Kind::Throwable => lines.melee.or_else(|| blade_line(hand.visual)),
+        Kind::Bow => bow_line(hand.visual),
+        Kind::Nothing | Kind::Tool => None,
     }
 }
 
@@ -199,70 +199,6 @@ pub fn holder(skeleton: &impl Skeleton, side: usize) -> Option<i32> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    const KINDS: [Held; 4] = [Held::Gun, Held::Melee, Held::Blade, Held::Nothing];
-
-    #[test]
-    fn the_hands_hold_what_they_held_before_with_the_bow_in_the_left() {
-        for aim in [LEFT_HAND, RIGHT_HAND] {
-            for held in KINDS {
-                let weapon = if held == Held::Nothing { 0 } else { 0x1000 };
-                for bow in [None, Some(0x2000)] {
-                    let noted = Noted::of(aim, weapon, held, bow, [Some(7), Some(9)], false);
-                    // The kinds kept before: the aim hand the weapon's, the other nothing.
-                    let before = [LEFT_HAND, RIGHT_HAND].map(|side| if side == aim { held } else { Held::Nothing });
-                    for side in [LEFT_HAND, RIGHT_HAND] {
-                        let now = noted.sides[side].kind;
-                        let bowed = bow.is_some() && side == LEFT_HAND && before[side] == Held::Nothing;
-                        assert_eq!(now, if bowed { Held::Bow } else { before[side] }, "{aim} {held:?} {bow:?} {side}");
-                        // What the hand rig does with them is unchanged: a free hand's fingers, a gun's grip.
-                        assert_eq!(now.grips(), before[side] != Held::Nothing);
-                        assert_eq!(now == Held::Gun, before[side] == Held::Gun);
-                    }
-                    assert_eq!(noted.grip, if bow.is_some() { Grip::Apart } else { Grip::Measured });
-                }
-            }
-        }
-    }
-
-    /// The tests that note what the hands hold, one at a time: it is one for the run.
-    static NOTING: Mutex<()> = Mutex::new(());
-
-    #[test]
-    fn an_item_is_its_visual_on_its_holder() {
-        let _serial = NOTING.locked();
-        note(Noted::of(RIGHT_HAND, 0x1000, Held::Melee, None, [Some(7), Some(9)], true));
-        assert_eq!(item(RIGHT_HAND), Some(Item { key: 0x1000, grip: Grip::Apart }));
-        assert_eq!((holder_of(LEFT_HAND), holder_of(RIGHT_HAND)), (Some(7), Some(9)), "each hand's holder, held or not");
-        assert_eq!(item(LEFT_HAND), None, "an empty hand has no item");
-        assert_eq!((kind(RIGHT_HAND), kind(LEFT_HAND)), (Held::Melee, Held::Nothing));
-        let dl1_gun = Line { from: [0.0; 3], along: [0.0, 0.0, 1.0], length: Some(0.25), edge: None };
-        note(Noted::of(RIGHT_HAND, 0x1000, Held::Gun, None, [None; 2], false));
-        assert_eq!(line(RIGHT_HAND, &Lines { gun: Some(dl1_gun), melee: None }), Some(dl1_gun));
-        assert_eq!(line(RIGHT_HAND, &FROM_MODELS), None, "a gun's line is the game's own or none");
-        note(Noted::of(RIGHT_HAND, 0, Held::Nothing, None, [None; 2], false));
-    }
-
-    #[test]
-    fn a_throwable_is_held_and_lined_as_the_melee_weapon_it_was_reported_as() {
-        let _serial = NOTING.locked();
-        let dl1 = Lines { gun: None, melee: Some(Line { from: [0.0; 3], along: [0.0, 1.0, 0.0], length: None, edge: Some([0.0, 0.0, 1.0]) }) };
-        for held in [Held::Gun, Held::Melee, Held::Blade, Held::Nothing] {
-            for (throwable, throwing) in [(false, false), (true, false), (false, true), (true, true)] {
-                let now = reported(held, throwable, throwing);
-                assert_eq!(now == Held::Throwable, held == Held::Melee && (throwable || throwing), "{held:?}");
-                // What the hand rig does with it is unchanged: the grip, a gun's hold.
-                assert_eq!((now.grips(), now == Held::Gun), (held.grips(), held == Held::Gun), "{held:?}");
-                // The line it had before.
-                let weapon = if held == Held::Nothing { 0 } else { 0x1000 };
-                note(Noted::of(RIGHT_HAND, weapon, held, None, [None; 2], false));
-                let before = line(RIGHT_HAND, &dl1);
-                note(Noted::of(RIGHT_HAND, weapon, now, None, [None; 2], false));
-                assert_eq!(line(RIGHT_HAND, &dl1), before, "{held:?} {throwable} {throwing}");
-            }
-        }
-        note(Noted::of(RIGHT_HAND, 0, Held::Nothing, None, [None; 2], false));
-    }
-}
+mod lift_checks;
+#[cfg(test)]
+mod tests;

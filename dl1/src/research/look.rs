@@ -1,10 +1,10 @@
-//! Head aim's probes (`monaka_arms::owned_facing`, on `crate::providers::look_fields`).
+//! Head aim's probes (`monaka_body::look::facing`, on `crate::providers::look_fields`).
 //!
 //! - `probe_look` (with head aim): how head aim steers the character.
 //! - `probe_cutscene`: each look update while the cutscene trace runs ([`super::view`]).
 
 use super::options;
-use monaka_arms::owned_facing::{Steered, Traced};
+use monaka_body::look::facing::{Steered, Traced};
 use monaka_hook::mem;
 use monaka_producer::log;
 use std::sync::atomic::{AtomicU64, Ordering::*};

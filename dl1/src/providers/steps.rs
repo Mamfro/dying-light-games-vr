@@ -1,4 +1,4 @@
-//! Provider: steps (`monaka_arms::feature::Steps`), the player's movement step.
+//! Provider: steps (`monaka_body::feature::Steps`), the player's movement step.
 //!
 //! The player's walk body: the engine's
 //! `CODEPhysicsWalkFly`, stepped at 50 Hz by its vtable slot 9 `(body, dt)`. Hooked for room-scale
@@ -9,7 +9,6 @@
 //! game's own value (the body then moves at exactly that velocity and stops against walls).
 //! `AdditionalLinVel` is not used: it does nothing to a standing body.
 
-use crate::providers::engine;
 use crate::Dl1;
 use crate::providers::skeleton;
 use monaka_producer::game::{Lack, Start};
@@ -21,7 +20,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::*};
 
 /// DL1's walk body for room-scale following: put back as the game had it.
-impl monaka_arms::feature::Steps for Dl1 {
+impl monaka_body::feature::Steps for Dl1 {
     fn install(start: &mut Start<'_, Self>) -> Result<(), Lack> {
         self::install(start.hooks, &start.build.engine)?;
         Ok(())
@@ -101,7 +100,7 @@ fn player_walk() -> usize {
     let bind = unsafe { std::mem::transmute::<usize, PhysicsBindFn>(bind_fn)((player + PLAYER_CONTROL) as *mut c_void) } as usize;
     let walk = mem::read::<usize>(bind)
         .and_then(|vtable| mem::read::<usize>(vtable + BIND_WALK))
-        .filter(|&get| Module::find(engine::ENGINE).is_some_and(|m| m.contains(get)))
+        .filter(|&get| Module::find(eng_chr::ENGINE).is_some_and(|m| m.contains(get)))
         // SAFETY: the bind's own getter (`GetPhysics` filtered to the walk type).
         .map_or(0, |get| unsafe { std::mem::transmute::<usize, GetterFn>(get)(bind as *mut c_void) } as usize);
     PLAYER.store(player, Relaxed);
@@ -119,7 +118,7 @@ pub fn body(full: usize) -> usize {
     let walk = full + WALK;
     mem::read::<usize>(walk)
         .and_then(|vtable| mem::read::<usize>(vtable + GET_BODY))
-        .filter(|&get| Module::find(engine::ENGINE).is_some_and(|m| m.contains(get)))
+        .filter(|&get| Module::find(eng_chr::ENGINE).is_some_and(|m| m.contains(get)))
         // SAFETY: the walk interface's own body getter.
         .map_or(0, |get| unsafe { std::mem::transmute::<usize, GetterFn>(get)(walk as *mut c_void) } as usize)
 }

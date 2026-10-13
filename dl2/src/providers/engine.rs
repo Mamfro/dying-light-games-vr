@@ -5,6 +5,7 @@
 //! addresses with their exact first instructions, globals and structure offsets. Some addresses
 //! are from farmerarmor/DyingLight2VR (MIT); every prologue is the shipped DLL's own.
 
+use eng_chr::providers::look_fields::InputActionFn;
 use monaka_hook::{Instruction, Site};
 
 /// A hook site of this build at `rva` in its module.
@@ -15,7 +16,6 @@ const fn site<F>(name: &'static str, rva: usize, prologue: &'static [Instruction
     unsafe { Site::new(name, rva, prologue) }
 }
 
-pub use eng_chr::{ENGINE, GAMEDLL};
 pub const ENGINE_SHA256: &str = "A06519EE1FD79DE1D665215F38E6B89F2B074BF9745912C64A6F0684617ADB63";
 pub const GAMEDLL_SHA256: &str = "B417213B3B1E70B9BB589B88D388BB99DD213B9082D44EF38F4021146F6EE6C4";
 pub const RENDERER_11: &str = eng_chr::RD3D11;
@@ -161,7 +161,6 @@ pub const ONCE_EXECUTES: [Target; 9] = [
 pub const CAMERA_WRITER_RETURNS: [usize; 7] = [0x11161b6, 0x11161e4, 0x1116243, 0x11162ad, 0x111632d, 0x11163a3, 0x111640d];
 
 // --- Game DLL ---------------------------------------------------------------------------------------
-pub use eng_chr::providers::look_fields::InputActionFn;
 pub const INPUT_ACTION: Site<InputActionFn> = site("input action", 0x1ec1700, &[Instruction::plain(&[0x48, 0x89, 0x5c, 0x24, 0x10])]);
 /// The vertical look actions, checked against the engine's action names: (instruction RVA in the
 /// engine that loads the id, name RVA, id, name).
@@ -214,7 +213,7 @@ pub const ARMS_LAYOUT: eng_chr::providers::fpp::Layout = eng_chr::providers::fpp
 /// DL2's bones against DL1's (the rig's calibrations are DL1's). The right wrist is half turned
 /// about its own x (along the forearm) against DL1's; without this the hands are upside down. The
 /// gun holder has no correction of its own.
-pub const BONE_AXES: monaka_arms::BoneAxes = monaka_arms::BoneAxes::DYING_LIGHT_2;
+pub const BONE_AXES: monaka_body::BoneAxes = monaka_body::BoneAxes::DYING_LIGHT_2;
 // --- D3D11 renderer -----------------------------------------------------------------------------------
 pub type PacketFn = unsafe extern "system" fn(packet: usize) -> usize;
 pub const DLSS_EVALUATE_11: Site<PacketFn> = site("DLSS evaluate", 0x37300, &[Instruction::plain(&[0x48, 0x89, 0x5c, 0x24, 0x18])]);
@@ -230,8 +229,7 @@ pub const QUEUE_BANK_11: usize = 0xe9e080;
 pub const DLSS_VIEWPORT_11: usize = 0xea5218;
 
 // --- D3D12 renderer -----------------------------------------------------------------------------------
-pub use eng_chr::providers::rd3d12::PresentRequestFn as PresentRequest12Fn;
-pub const PRESENT_REQUEST_12: Site<PresentRequest12Fn> =
+pub const PRESENT_REQUEST_12: Site<eng_chr::providers::rd3d12::PresentRequestFn> =
     site("rd3d12 present request", 0x6ab40, &[Instruction::plain(&[0x48, 0x8b, 0xc4]), Instruction::plain(&[0x55]), Instruction::plain(&[0x53])]);
 pub type Packet12Fn = unsafe extern "system" fn(state: usize, packet: usize) -> usize;
 pub const DLSS_EVALUATE_12: Site<Packet12Fn> = site("DLSS evaluate (D3D12)", 0x3a560, &[Instruction::plain(&[0x48, 0x8b, 0xc4]), Instruction::plain(&[0x48, 0x89, 0x58, 0x08])]);

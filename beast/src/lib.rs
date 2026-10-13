@@ -31,7 +31,7 @@ use monaka_core::manifest::{
 use monaka_core::options::Options;
 use monaka_core::rendering::StereoMethod;
 use monaka_hook::module::Module;
-use monaka_arms::reload::Reloads;
+use monaka_body::reload::Reloads;
 use monaka_producer::game::{Adapter, Component, Every, Game, Lack, On, Start, Switch};
 use monaka_producer::{Rejection, Session, log, require_build};
 use monaka_stereo::providers::{GameQueue, frame_inputs};
@@ -71,7 +71,7 @@ impl Game for Beast {
             &INPUTS,
             &LOOK,
             &PITCH_LOCK,
-            &ARMS,
+            &HAND_RIG,
             &FINGERS,
             &MELEE,
             &BOW,
@@ -98,10 +98,10 @@ impl Game for Beast {
     fn prepare(_: &'static Session, _: &'static Manifest, options: &Options) -> Result<Facts, Rejection> {
         let renderer = require_build(engine::RENDERER, engine::RENDERER_SHA256)?;
         log!("{} at {:#x}", engine::RENDERER, renderer.base());
-        let engine_module = Module::find(engine::ENGINE).ok_or_else(|| Rejection::not_ready("the engine is not loaded"))?;
+        let engine_module = Module::find(eng_chr::ENGINE).ok_or_else(|| Rejection::not_ready("the engine is not loaded"))?;
         let stereo = stereo_on(options);
         let gamedll = if stereo || cameras::turn_yaw(options).is_some() {
-            let gamedll = require_build(engine::GAMEDLL, engine::GAMEDLL_SHA256)?;
+            let gamedll = require_build(eng_chr::GAMEDLL, engine::GAMEDLL_SHA256)?;
             let (call, bytes) = engine::PLAYER_CAMERA_CALL;
             if !gamedll.bytes_match(call, bytes) {
                 return Err(Rejection::revision("the player camera update's call is not where it was inspected"));
@@ -127,7 +127,7 @@ impl Chrome for Beast {
     const FACTS: ChromeFacts = ChromeFacts {
         // The engine does not export the cutscene query: head aim steers through cutscenes.
         look: Some(Look { aim: &providers::look_fields::AIM, input_action: engine::INPUT_ACTION, pitch_actions: &engine::PITCH_ACTIONS, id_load: IdLoad::EdxImm32, cutscenes: false }),
-        arms: Some(Arms { rig: &providers::arms::RIG, moment: providers::arms::moment, head_aim_here: true }),
+        arms: Some(Arms { rig: &providers::hand_rig::RIG, moment: providers::hand_rig::moment, head_aim_here: true }),
         view_bob: Some(engine::VIEW_BOB),
         grabs: Some(engine::GRABS),
         walk: Some(engine::WALK),
@@ -278,35 +278,35 @@ pub const FOVEATION: Component<Beast> = Component { needs: &[&EYES, &STREAMLINE]
 
 // ---- Look ----
 
-/// Head aim on the character (`monaka_arms::look_targets`, on The Beast's look fields:
+/// Head aim on the character (`monaka_body::look`, its targets delivery on The Beast's look fields:
 /// [`providers::look_fields`]), steered at the arms visual's camera-target callback, which has the
 /// character (the arms' `head_aim_here`; the camera setter only sees the renderer's camera, where
 /// the game's own camera is noted before the eye camera replaces it).
-pub const LOOK: Component<Beast> = Component { needs: &[&EYES], ..monaka_arms::look_targets::look() };
+pub const LOOK: Component<Beast> = Component { needs: &[&EYES], ..monaka_body::look::look() };
 
-/// Without head aim, vertical look passes only back toward level (`monaka_arms::pitch_lock`, at the
+/// Without head aim, vertical look passes only back toward level (`monaka_body::pitch_lock`, at the
 /// input-action converter: [`providers::look_fields`]).
-pub const PITCH_LOCK: Component<Beast> = Component { needs: &[&EYES], ..monaka_arms::pitch_lock::pitch_lock() };
+pub const PITCH_LOCK: Component<Beast> = Component { needs: &[&EYES], ..monaka_body::pitch_lock::pitch_lock() };
 
 /// The view stays level while head aim steers (`eng_chr::providers::view_bob`).
 pub const VIEW_BOB: Component<Beast> = Component { needs: &[&LOOK], ..eng_chr::feature::view_bob() };
 
 // ---- The arms ----
 
-/// The arms on the controllers (`eng_chr::feature::arms`, on The Beast's rig:
-/// [`providers::arms`]), at the callback head aim steers in.
-pub const ARMS: Component<Beast> = Component { needs: &[&LOOK], ..eng_chr::feature::arms() };
+/// The arms on the controllers (`eng_chr::feature::hand_rig`, on The Beast's rig:
+/// [`providers::hand_rig`]), at the callback head aim steers in.
+pub const HAND_RIG: Component<Beast> = Component { needs: &[&LOOK], ..eng_chr::feature::hand_rig() };
 
 /// A free hand's fingers on the tracked fingers (the hand rig's, at the arms' pose).
-pub const FINGERS: Component<Beast> = Component { needs: &[&ARMS], ..monaka_arms::feature::fingers() };
-pub const MELEE: Component<Beast> = Component { needs: &[&ARMS], ..eng_chr::feature::melee() };
-/// The bow drawn and loosed by the hands (`monaka_arms::bow`, on [`providers::arms`]).
-pub const BOW: Component<Beast> = Component { needs: &[&ARMS], ..eng_chr::feature::bow() };
-/// A throwable leaves the left hand as it threw it (`monaka_arms::throw`, on [`providers::arms`]).
-pub const THROW: Component<Beast> = Component { needs: &[&ARMS], ..eng_chr::feature::throw() };
-/// The left hand to the gun and away reloads (`monaka_arms::reload`).
-pub const RELOAD_BY_HAND: Component<Beast> = Component { needs: &[&ARMS], ..monaka_arms::reload::reload() };
-pub const ROOM_SCALE: Component<Beast> = Component { needs: &[&ARMS], ..monaka_arms::feature::room_scale() };
+pub const FINGERS: Component<Beast> = Component { needs: &[&HAND_RIG], ..monaka_body::feature::fingers() };
+pub const MELEE: Component<Beast> = Component { needs: &[&HAND_RIG], ..eng_chr::feature::melee() };
+/// The bow drawn and loosed by the hands (`monaka_body::bow`, on [`providers::arms`]).
+pub const BOW: Component<Beast> = Component { needs: &[&HAND_RIG], ..eng_chr::feature::bow() };
+/// A throwable leaves the left hand as it threw it (`monaka_body::throw`, on [`providers::arms`]).
+pub const THROW: Component<Beast> = Component { needs: &[&HAND_RIG], ..eng_chr::feature::throw() };
+/// The left hand to the gun and away reloads (`monaka_body::reload`).
+pub const RELOAD_BY_HAND: Component<Beast> = Component { needs: &[&HAND_RIG], ..monaka_body::reload::reload() };
+pub const ROOM_SCALE: Component<Beast> = Component { needs: &[&HAND_RIG], ..monaka_body::feature::room_scale() };
 
 /// Zombies' grabs never land on the player (`eng_chr::providers::grabs`).
 pub const GRABS: Component<Beast> = eng_chr::feature::grabs();

@@ -1,7 +1,7 @@
 //! Provider: the skeleton's posing moment and the rig glue (the arms callback's hook, the pose the
-//! rig goes on), for the hand rig (`monaka_arms::hand_rig`).
+//! rig goes on), for the hand rig (`monaka_body::hand_rig`).
 //!
-//! The first-person arms on the controllers (`monaka_arms`) in Dying Light 2 and The Beast (Dying
+//! The first-person arms on the controllers (`monaka_body`) in Dying Light 2 and The Beast (Dying
 //! Light 1, whose aim is its own, calls [`crate::providers::fpp::around`] itself): the player
 //! camera update calls the arms visual's camera-target callback right after setting the camera;
 //! around it the arms are snapshot as animated, then put on the controllers, and melee swings
@@ -15,8 +15,8 @@
 use crate::feature::Chrome;
 use crate::providers::fpp::{self, CameraTargetFn, Layout};
 use crate::providers::look_fields::HeadAim;
-use monaka_arms::hand_rig::{Hands, Palms};
-use monaka_arms::{controllers, melee};
+use monaka_body::hand_rig::{Hands, Palms};
+use monaka_body::{controllers, melee};
 use monaka_core::camera::{HeadPosition, Mat34};
 use monaka_core::protocol::{HeadPose, LEFT_HAND};
 use monaka_hook::module::Module;
@@ -125,9 +125,9 @@ impl Rig {
         // The bow by hand's and the melee's posing moment, after the rig: the bow model read,
         // turned toward the left reticle and drawn, and where the blade reaches.
         if options.rig {
-            monaka_arms::bow::posed::<G>(outcome.placed.is_some(), crate::providers::hands::reticle(LEFT_HAND));
+            monaka_body::bow::posed::<G>(outcome.placed.is_some(), crate::providers::hands::reticle(LEFT_HAND));
             if outcome.placed.is_some() {
-                monaka_arms::melee_hit::look::<G>();
+                monaka_body::melee_hit::look::<G>();
             }
         }
     }

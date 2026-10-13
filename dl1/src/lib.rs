@@ -70,7 +70,7 @@ impl Game for Dl1 {
             &extras::ui_size::UI_SIZE,
             &LOOK,
             &PITCH_LOCK,
-            &ARMS,
+            &HAND_RIG,
             &FINGERS,
             &MELEE,
             &THROW_BY_HAND,
@@ -92,7 +92,7 @@ impl Game for Dl1 {
     type Frame = ();
 
     fn prepare(session: &'static Session, manifest: &'static Manifest, options: &Options) -> Result<Facts, Rejection> {
-        let engine_module = require_build(engine::ENGINE, engine::ENGINE_SHA256)?;
+        let engine_module = require_build(eng_chr::ENGINE, engine::ENGINE_SHA256)?;
         let renderer = require_build(engine::RENDERER, engine::RENDERER_SHA256)?;
         let gamedll = require_build(engine::GAMEDLL, engine::GAMEDLL_SHA256)?;
         log!("{:?}", Config::from_options(options, manifest));
@@ -250,76 +250,75 @@ fn arm_pad() {
 
 // ---- Look ----
 
-/// Head aim with the mod-owned facing (`monaka_arms::owned_facing`, on DL1's look fields:
+/// Head aim with the mod-owned facing (`monaka_body::look`, its facing delivery on DL1's look fields:
 /// [`providers::look_fields`]): the view faces where the player turned it, plus the head; the
 /// character is steered there. Reports the cutscenes that take the camera and the climbs.
-pub const LOOK: Component<Dl1> = Component { needs: &[&EYES], ..monaka_arms::owned_facing::look() };
+pub const LOOK: Component<Dl1> = Component { needs: &[&EYES], ..monaka_body::look::look() };
 
-/// Without head aim steering, vertical look passes only back toward level (`monaka_arms::pitch_lock`,
+/// Without head aim steering, vertical look passes only back toward level (`monaka_body::pitch_lock`,
 /// at the input-action converter: [`providers::look_fields`]).
-pub const PITCH_LOCK: Component<Dl1> = Component { needs: &[&EYES], ..monaka_arms::pitch_lock::pitch_lock() };
+pub const PITCH_LOCK: Component<Dl1> = Component { needs: &[&EYES], ..monaka_body::pitch_lock::pitch_lock() };
 
 // ---- The arms ----
 
 /// The arms on the controllers at the arms visual's camera-target callback (Monaka's hand rig, on
 /// [`providers::skeleton`]), a swing of a held weapon or a fist attacking; what the hands do with
 /// the world's objects from where the rig puts them ([`providers::hand_world`]).
-pub const ARMS: Component<Dl1> = Component {
-    name: "arms",
+pub const HAND_RIG: Component<Dl1> = Component {
     needs: &[&LOOK],
-    install: providers::skeleton::install_arms,
+    install: providers::skeleton::install_hand_rig,
     give_back: providers::skeleton::give_back,
     release: || {
         providers::hand_world::report();
-        monaka_arms::controllers::close();
+        monaka_body::controllers::close();
     },
-    ..monaka_arms::hand_rig::hand_rig()
+    ..monaka_body::hand_rig::hand_rig()
 };
 
 /// A free hand's fingers on the tracked fingers (the hand rig's, at the arms' pose).
-pub const FINGERS: Component<Dl1> = Component { needs: &[&ARMS], ..monaka_arms::feature::fingers() };
+pub const FINGERS: Component<Dl1> = Component { needs: &[&HAND_RIG], ..monaka_body::feature::fingers() };
 
 // ---- What the hands do ----
 
-/// Physical melee (`monaka_arms::melee_hit`, on [`providers::melee`]): a swing hits where the
+/// Physical melee (`monaka_body::melee_hit`, on [`providers::melee`]): a swing hits where the
 /// weapon in the hand is; with `melee_on_reach` a weapon's swing attacks only once the blade is
 /// about to reach something, and with `back_is_blunt` a cutting weapon's hit not led by its edge
 /// lands blunt.
-pub const MELEE: Component<Dl1> = Component { needs: &[&ARMS], ..monaka_arms::melee_hit::physical_melee() };
+pub const MELEE: Component<Dl1> = Component { needs: &[&HAND_RIG], ..monaka_body::melee_hit::physical_melee() };
 
-/// Tools thrown with the left hand's own throw (`monaka_arms::throw`, on
+/// Tools thrown with the left hand's own throw (`monaka_body::throw`, on
 /// [`providers::throws`]; `throw_by_hand=0`: the game's throw along the view).
-pub const THROW_BY_HAND: Component<Dl1> = Component { needs: &[&ARMS], ..monaka_arms::throw::throw() };
+pub const THROW_BY_HAND: Component<Dl1> = Component { needs: &[&HAND_RIG], ..monaka_body::throw::throw() };
 
-/// The bow drawn by pulling the string hand back, loosed along the bow (`monaka_arms::bow`, on
+/// The bow drawn by pulling the string hand back, loosed along the bow (`monaka_body::bow`, on
 /// [`providers::bow`] and [`providers::projectile`]; `bow_by_hand=0`: the game's shot along the
 /// view).
-pub const BOW_BY_HAND: Component<Dl1> = Component { needs: &[&ARMS], ..monaka_arms::bow::bow() };
+pub const BOW_BY_HAND: Component<Dl1> = Component { needs: &[&HAND_RIG], ..monaka_body::bow::bow() };
 
-/// A gun's shots leave its muzzle along its barrel (`monaka_arms::gun`, on
+/// A gun's shots leave its muzzle along its barrel (`monaka_body::gun`, on
 /// [`providers::projectile`] and the gun's line in the hand, [`providers::skeleton`];
 /// `shoot_from_barrel=0`: from the eye along the aim).
-pub const GUN: Component<Dl1> = Component { needs: &[&ARMS], ..monaka_arms::gun::gun() };
+pub const GUN: Component<Dl1> = Component { needs: &[&HAND_RIG], ..monaka_body::gun::gun() };
 
-/// Lockpicking by twisting the hands (`monaka_arms::lockpick`, on [`providers::lockpick`];
+/// Lockpicking by twisting the hands (`monaka_body::lockpick`, on [`providers::lockpick`];
 /// `lockpick_by_hand=0`: the sticks).
-pub const LOCKPICK: Component<Dl1> = Component { needs: &[&ARMS], ..monaka_arms::lockpick::lockpick() };
+pub const LOCKPICK: Component<Dl1> = Component { needs: &[&HAND_RIG], ..monaka_body::lockpick::lockpick() };
 
-/// The character follows the player's real steps (`monaka_arms::feature::room_scale` at DL1's own
+/// The character follows the player's real steps (`monaka_body::feature::room_scale` at DL1's own
 /// walk body, [`providers::steps`], with DL1's waits and step measure,
 /// [`room_scale_rules`](crate::cooking::room_scale_rules)), with the hand rig.
-pub const ROOM_SCALE: Component<Dl1> = Component { needs: &[&ARMS], ..monaka_arms::feature::room_scale() };
+pub const ROOM_SCALE: Component<Dl1> = Component { needs: &[&HAND_RIG], ..monaka_body::feature::room_scale() };
 
-/// Crouching by ducking (`monaka_arms::duck`), held on the VR button layout's hold-to-crouch
+/// Crouching by ducking (`monaka_body::duck`), held on the VR button layout's hold-to-crouch
 /// ([`extras::vr_buttons`]): the eye site hands it the head's height.
-pub const CROUCH_BY_DUCKING: Component<Dl1> = Component { needs: &[&extras::vr_buttons::CONTROLS], ..monaka_arms::duck::duck() };
+pub const CROUCH_BY_DUCKING: Component<Dl1> = Component { needs: &[&extras::vr_buttons::CONTROLS], ..monaka_body::duck::duck() };
 
-/// Reloading by hand (`monaka_arms::reload`), with the hand rig (`reload_gesture=0` turns it off):
+/// Reloading by hand (`monaka_body::reload`), with the hand rig (`reload_gesture=0` turns it off):
 /// read and pressed on the VR button layout's input pass ([`extras::vr_buttons`]).
 pub const RELOAD_BY_HAND: Component<Dl1> = Component {
-    needs: &[&ARMS, &extras::vr_buttons::CONTROLS],
+    needs: &[&HAND_RIG, &extras::vr_buttons::CONTROLS],
     switch: Some(Switch::new("reload_gesture", true, "reloading by hand is off")),
-    ..monaka_arms::reload::reload()
+    ..monaka_body::reload::reload()
 };
 
 /// The research probes: their hooks, each checking its own option; the look and arms probes take

@@ -42,7 +42,7 @@ use monaka_core::feature::Feature;
 use monaka_core::manifest::{CONTROLLER_PAD, CONTROLLER_PROXY, HEAD_MOVEMENT, Manifest, OWN_EYE_SIZE, RENDER_SIZE};
 use monaka_core::options::Options;
 use monaka_hook::module::Module;
-use monaka_arms::reload::Reloads;
+use monaka_body::reload::Reloads;
 use monaka_producer::game::{Adapter, Component, Game, Lack, On, Start};
 use monaka_producer::{Rejection, Session, log, require_build};
 use monaka_stereo::eye_size;
@@ -79,7 +79,7 @@ impl Game for Dl2 {
             &INPUTS,
             &LOOK,
             &PITCH_LOCK,
-            &ARMS,
+            &HAND_RIG,
             &FINGERS,
             &MELEE,
             &BOW,
@@ -101,7 +101,7 @@ impl Game for Dl2 {
     type Frame = ();
 
     fn prepare(_: &'static Session, manifest: &'static Manifest, options: &Options) -> Result<Facts, Rejection> {
-        let engine_module = require_build(engine::ENGINE, engine::ENGINE_SHA256)?;
+        let engine_module = require_build(eng_chr::ENGINE, engine::ENGINE_SHA256)?;
         let (renderer11, renderer12) = (Module::find(engine::RENDERER_11), Module::find(engine::RENDERER_12));
         let renderer = match (&renderer11, &renderer12) {
             (Some(_), None) => require_build(engine::RENDERER_11, engine::RENDERER_11_SHA256)?,
@@ -121,10 +121,10 @@ impl Game for Dl2 {
         log!("{config:?}");
         research::PROBES.configure(options);
         // The game DLL carries head aim and the hands; a different build only loses those.
-        let gamedll = Module::find(engine::GAMEDLL).filter(|m| match m.file_sha256() {
+        let gamedll = Module::find(eng_chr::GAMEDLL).filter(|m| match m.file_sha256() {
             Some(hash) if hash == engine::GAMEDLL_SHA256 => true,
             other => {
-                log!("{} is build {other:?}, not the inspected one; head aim and the hands are off", engine::GAMEDLL);
+                log!("{} is build {other:?}, not the inspected one; head aim and the hands are off", eng_chr::GAMEDLL);
                 false
             }
         });
@@ -150,7 +150,7 @@ impl Chrome for Dl2 {
     const FACTS: ChromeFacts = ChromeFacts {
         // The engine does not export the cutscene query: head aim steers through cutscenes.
         look: Some(Look { aim: &providers::look_fields::AIM, input_action: engine::INPUT_ACTION, pitch_actions: &engine::PITCH_ACTIONS, id_load: IdLoad::MemImm32, cutscenes: false }),
-        arms: Some(Arms { rig: &providers::arms::RIG, moment: providers::arms::moment, head_aim_here: false }),
+        arms: Some(Arms { rig: &providers::hand_rig::RIG, moment: providers::hand_rig::moment, head_aim_here: false }),
         view_bob: Some(engine::VIEW_BOB),
         grabs: Some(engine::GRABS),
         walk: Some(engine::WALK),
@@ -259,35 +259,35 @@ pub const INPUTS: Component<Dl2> = frame_inputs();
 
 // ---- Look ----
 
-/// Head aim on the character (`monaka_arms::look_targets`, on DL2's look fields:
+/// Head aim on the character (`monaka_body::look`, its targets delivery on DL2's look fields:
 /// [`providers::look_fields`]), steered at the player camera update (`FromForwardUpPos`).
-pub const LOOK: Component<Dl2> = Component { needs: &[&EYES], ..monaka_arms::look_targets::look() };
+pub const LOOK: Component<Dl2> = Component { needs: &[&EYES], ..monaka_body::look::look() };
 
-/// Without head aim, vertical look passes only back toward level (`monaka_arms::pitch_lock`, at the
+/// Without head aim, vertical look passes only back toward level (`monaka_body::pitch_lock`, at the
 /// input-action converter: [`providers::look_fields`]).
-pub const PITCH_LOCK: Component<Dl2> = Component { needs: &[&EYES], ..monaka_arms::pitch_lock::pitch_lock() };
+pub const PITCH_LOCK: Component<Dl2> = Component { needs: &[&EYES], ..monaka_body::pitch_lock::pitch_lock() };
 
 /// The view stays level while head aim steers (`eng_chr::providers::view_bob`).
 pub const VIEW_BOB: Component<Dl2> = Component { needs: &[&LOOK], ..eng_chr::feature::view_bob() };
 
 // ---- The arms ----
 
-/// The arms on the controllers (`eng_chr::feature::arms`, on DL2's rig: [`providers::arms`]),
+/// The arms on the controllers (`eng_chr::feature::hand_rig`, on DL2's rig: [`providers::hand_rig`]),
 /// steered by head aim first.
-pub const ARMS: Component<Dl2> = Component { needs: &[&LOOK], ..eng_chr::feature::arms() };
+pub const HAND_RIG: Component<Dl2> = Component { needs: &[&LOOK], ..eng_chr::feature::hand_rig() };
 
 /// A free hand's fingers on the tracked fingers (the hand rig's, at the arms' pose).
-pub const FINGERS: Component<Dl2> = Component { needs: &[&ARMS], ..monaka_arms::feature::fingers() };
-pub const MELEE: Component<Dl2> = Component { needs: &[&ARMS], ..eng_chr::feature::melee() };
-/// The bow drawn and loosed by the hands (`monaka_arms::bow`, on [`providers::arms`]).
-pub const BOW: Component<Dl2> = Component { needs: &[&ARMS], ..eng_chr::feature::bow() };
-/// A throwable leaves the left hand as it threw it (`monaka_arms::throw`, on [`providers::arms`]).
-pub const THROW: Component<Dl2> = Component { needs: &[&ARMS], ..eng_chr::feature::throw() };
-/// Twisting the wrists picks a lock (`monaka_arms::lockpick`, on [`providers::actions`]).
-pub const LOCKPICK: Component<Dl2> = Component { needs: &[&ARMS], ..eng_chr::feature::lockpick() };
-/// The left hand to the gun and away reloads (`monaka_arms::reload`).
-pub const RELOAD_BY_HAND: Component<Dl2> = Component { needs: &[&ARMS], ..monaka_arms::reload::reload() };
-pub const ROOM_SCALE: Component<Dl2> = Component { needs: &[&ARMS], ..monaka_arms::feature::room_scale() };
+pub const FINGERS: Component<Dl2> = Component { needs: &[&HAND_RIG], ..monaka_body::feature::fingers() };
+pub const MELEE: Component<Dl2> = Component { needs: &[&HAND_RIG], ..eng_chr::feature::melee() };
+/// The bow drawn and loosed by the hands (`monaka_body::bow`, on [`providers::arms`]).
+pub const BOW: Component<Dl2> = Component { needs: &[&HAND_RIG], ..eng_chr::feature::bow() };
+/// A throwable leaves the left hand as it threw it (`monaka_body::throw`, on [`providers::arms`]).
+pub const THROW: Component<Dl2> = Component { needs: &[&HAND_RIG], ..eng_chr::feature::throw() };
+/// Twisting the wrists picks a lock (`monaka_body::lockpick`, on [`providers::actions`]).
+pub const LOCKPICK: Component<Dl2> = Component { needs: &[&HAND_RIG], ..eng_chr::feature::lockpick() };
+/// The left hand to the gun and away reloads (`monaka_body::reload`).
+pub const RELOAD_BY_HAND: Component<Dl2> = Component { needs: &[&HAND_RIG], ..monaka_body::reload::reload() };
+pub const ROOM_SCALE: Component<Dl2> = Component { needs: &[&HAND_RIG], ..monaka_body::feature::room_scale() };
 
 /// Zombies' grabs never land on the player (`eng_chr::providers::grabs`).
 pub const GRABS: Component<Dl2> = eng_chr::feature::grabs();

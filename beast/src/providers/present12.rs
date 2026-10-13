@@ -11,7 +11,7 @@
 //! its pair published before it, the next eye chosen after it).
 
 use crate::Beast;
-use crate::providers::engine::{self, PresentRequest12Fn};
+use crate::providers::engine;
 use crate::providers::eye_site;
 use monaka_stereo::providers::HudLayer;
 use monaka_hook::{InFlight, Original};
@@ -20,14 +20,14 @@ use monaka_producer::log;
 use monaka_stereo::driver::Flat;
 use monaka_stereo::feature::{Entry, Graphics, Loop, Presents};
 use monaka_stereo::{afw12, framegen12};
-use eng_chr::providers::rd3d12::query;
+use eng_chr::providers::rd3d12::{PresentRequestFn, query};
 use std::sync::atomic::Ordering::{AcqRel, Relaxed};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize};
 use windows::Win32::Graphics::Direct3D12::{D3D12_RESOURCE_STATE_PRESENT, ID3D12CommandQueue, ID3D12Resource};
 use windows::Win32::Graphics::Dxgi::{IDXGISwapChain, IDXGISwapChain3};
 use windows::core::Interface;
 
-pub static PRESENT_REQUEST_ORIGINAL: Original<PresentRequest12Fn> = Original::new();
+pub static PRESENT_REQUEST_ORIGINAL: Original<PresentRequestFn> = Original::new();
 static RENDERER_12: AtomicUsize = AtomicUsize::new(0);
 static REQUESTS: AtomicU64 = AtomicU64::new(0);
 static PRESENTS: AtomicU64 = AtomicU64::new(0);

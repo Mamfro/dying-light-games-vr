@@ -4,12 +4,12 @@
 //! Each file says which provider it is, or will be once Monaka has the trait.
 
 pub(crate) mod actions;
-pub(crate) mod arms;
 pub(crate) mod camera;
 pub(crate) mod dlss;
 pub(crate) mod engine;
 pub(crate) mod eye_site;
 pub(crate) mod game;
+pub(crate) mod hand_rig;
 pub(crate) mod head;
 pub(crate) mod hud;
 pub(crate) mod look_fields;

@@ -1,4 +1,4 @@
-//! Provider part: melee hits (`monaka_arms::melee_hit::Hits`), what Dying Light 2 and The Beast
+//! Provider part: melee hits (`monaka_body::melee_hit::Hits`), what Dying Light 2 and The Beast
 //! share: their hit detection changed for the player's own controller ([`install_for`]), and what
 //! their melee can hit ([`near`]).
 //!
@@ -11,15 +11,15 @@
 //! - the hit's direction is the attack animation's, through the controller's direction getter:
 //!   here that getter returns zero, so each hit keeps the direction the hand moved ([`direction`]);
 //! - the blade is the weapon's range long (DL2: 1.49 m): here each swept segment is cut to the
-//!   weapon in the hand (`monaka_arms::melee_hit::blade`), or a fist's reach ([`test_segments`]).
+//!   weapon in the hand (`monaka_body::melee_hit::blade`), or a fist's reach ([`test_segments`]).
 //!
 //! What the melee can hit ([`near`], where the build has been read for it): the objects the
 //! engine's level finds near a point (`ILevel::FindObjectsInRadius`, with the class the game's own
 //! combat target search passes), the player and the AI's target markers left out.
 
 use crate::feature::Chrome;
-use monaka_arms::melee::Held;
-use monaka_arms::melee_hit;
+use monaka_body::held::Kind;
+use monaka_body::melee_hit;
 use monaka_core::sync::Locked;
 use monaka_hook::module::Module;
 use monaka_hook::probe::class_name;
@@ -115,14 +115,14 @@ fn install(hooks: &mut Hooks, gamedll: &Module, build: Build) -> Result<(), Reje
 }
 
 /// What the arms hold, if `player` is the player character and holds no gun.
-fn player_melee(player: usize) -> Option<Held> {
-    let held = monaka_arms::melee::held().filter(|&h| h != Held::Gun)?;
+fn player_melee(player: usize) -> Option<Kind> {
+    let held = melee_hit::wielded().filter(|&h| h != Kind::Gun)?;
     let vtable = PLAYER_VTABLE.load(Relaxed);
     (vtable != 0 && mem::read::<usize>(player) == Some(vtable)).then_some(held)
 }
 
 /// The same for the controller `ctrl` (its player at +8).
-fn controller_melee(ctrl: usize) -> Option<Held> {
+fn controller_melee(ctrl: usize) -> Option<Kind> {
     player_melee(mem::read::<usize>(ctrl + PLAYER)?)
 }
 
@@ -182,7 +182,7 @@ unsafe extern "C" fn test_segments(player: *mut c_void, interface: *mut c_void, 
                     // The game's own segment list, on the game thread inside its own call.
                     mem::write(segment + tip, [from[0] + cut[0], from[1] + cut[1], from[2] + cut[2]]);
                     let k = CUTS.fetch_add(1, Relaxed);
-                    if k < 5 || k.is_power_of_two() {
+                    if log::seldom(k, 4) {
                         log!("physical melee: blade {was:.2} m -> {length} m with {held:?} ({count} segments)");
                     }
                 }

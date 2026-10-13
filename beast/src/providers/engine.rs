@@ -7,6 +7,8 @@
 //! `CCamera` by name; the engine's `IBaseCamera` exports are thunks into it
 //! (`mov rcx, [rcx+0x38]; jmp [import]`). Every prologue is the shipped DLL's own.
 
+use eng_chr::providers::look_fields::InputActionFn;
+use eng_chr::providers::rd3d12::PresentRequestFn;
 use monaka_hook::{Instruction, Site};
 
 /// A hook site of this build at `rva` in its module.
@@ -25,7 +27,6 @@ const fn exported<F>(name: &'static str, export: &'static str, prologue: &'stati
 
 pub const RENDERER: &str = "renderer_x64_rwdi.dll";
 pub const RENDERER_SHA256: &str = "139ED6DD8B5BFC6A4E1D32722880F7A6557AFCA14083F0331C2A49507EC2059A";
-pub use eng_chr::GAMEDLL;
 pub const GAMEDLL_SHA256: &str = "DDB68C8F87BA2AFD0E561B2D1ADB9235467C29069FB1CD1619DB81E1056378EB";
 
 /// The player camera update: the game sets its player camera once per frame on the game thread
@@ -73,8 +74,7 @@ pub const RENDERER_12: &str = eng_chr::RD3D12;
 pub const RENDERER_12_SHA256: &str = "68BCDE0658BA0E93F5CA448C40AB10C1165A3B748CA06D50F3EF85239DDF2530";
 /// The present request (DL2's `PRESENT_REQUEST_12`; the function that reports
 /// `"hr = m_SwapChain4->Present1(interval, flags, &params)"`).
-pub use eng_chr::providers::rd3d12::PresentRequestFn as PresentRequest12Fn;
-pub const PRESENT_REQUEST_12: Site<PresentRequest12Fn> = site(
+pub const PRESENT_REQUEST_12: Site<PresentRequestFn> = site(
     "present request",
     0x76450,
     &[Instruction::plain(&[0x40, 0x53]), Instruction::plain(&[0x48, 0x81, 0xec, 0x70, 0x08, 0x00, 0x00])], // push rbx; sub rsp, 0x870
@@ -88,9 +88,8 @@ pub const RD3D12: eng_chr::providers::rd3d12::Layout = eng_chr::providers::rd3d1
 pub const DLSS_SET_OPTIONS_POINTER: usize = 0xe4eb0;
 
 // --- Video settings (headset resolution) -----------------------------------------------------------
-/// The engine (the game object comes from its `IGame::GetGameTimeDelta`:
-/// `eng_chr::providers::game`).
-pub use eng_chr::ENGINE;
+// The engine is `eng_chr::ENGINE` (the game object comes from its `IGame::GetGameTimeDelta`:
+// `eng_chr::providers::game`).
 /// `CVideoSettings` at `[[IGame+8]+0xd8]` (`IGame::GetScreenWidth`; DL2: +0xe0). Its
 /// `SVideoSettings` is at +8 (window mode +4, width +8, height +0xc, bit depth +0x18, change mask
 /// +0xf0: 1 window mode, 2 resolution); +0x7b9 and +0x7bb request an apply on the game's next
@@ -124,8 +123,6 @@ pub const RENDERER_FRAME_DATA: usize = 0x1890;
 pub const FRAME_MAIN_VIEW: usize = 0xf0;
 
 // --- CCamera (from its exported getters); the world is y up --------------------------------------
-/// World-to-camera 3x4 (`GetCameraMatrix`).
-pub const CAMERA_VIEW: usize = 0x10;
 /// Camera-to-world 3x4 (`GetInvCameraMatrix`); the position is its translation column
 /// (+0x4c, +0x5c, +0x6c, `GetPosition`).
 pub const CAMERA_INVERSE: usize = 0x40;
@@ -157,7 +154,6 @@ pub const TARGET_YAW: usize = 0xbb8;
 pub const TARGET_PITCH: usize = 0xbbc;
 /// The game's input-action converter `(binding, receivers, value, source, repeat)`, DL2's: action
 /// id at binding+0, flags at +0x10 (0x10: inverted, neutral 1).
-pub use eng_chr::providers::look_fields::InputActionFn;
 pub const INPUT_ACTION: Site<InputActionFn> = site("input action", 0x1fae0b0, &[Instruction::plain(&[0x48, 0x89, 0x5c, 0x24, 0x10])]);
 /// The vertical look actions, checked in the engine's action table: (RVA of `mov edx, id`, name
 /// RVA, id, name). The ids moved from DL2's (0x5e, 0x5f, 0x89, 0x8a).
@@ -184,7 +180,7 @@ pub const ARMS_LAYOUT: eng_chr::providers::fpp::Layout = eng_chr::providers::fpp
 /// DL2's skeleton (its wrist half turned about x against DL1's): The Beast's idle one-handed melee
 /// wrist frame matches DL2's within about a degree. The gun holder has no correction of its own,
 /// as in DL2.
-pub const BONE_AXES: monaka_arms::BoneAxes = monaka_arms::BoneAxes::DYING_LIGHT_2;
+pub const BONE_AXES: monaka_body::BoneAxes = monaka_body::BoneAxes::DYING_LIGHT_2;
 // --- The engine's gui tree (the dynamic HUD; `eng_chr::providers::gui`) -------------------------------
 /// The implementations the exported `gui::IElement` getters jump to: `GetWorldMatrix`'s
 /// `push rbx; sub rsp, 0x20; test byte

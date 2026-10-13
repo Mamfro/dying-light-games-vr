@@ -9,13 +9,13 @@
 //! A probe that has found its answer is a candidate for deletion: its finding belongs in the
 //! research notes, its facts in `engine.rs`.
 
-pub mod arms;
 pub mod backbuffer;
 pub mod bindings;
 pub mod bow;
 pub mod depth;
 pub mod drift;
 pub mod give;
+pub mod hands;
 pub mod hud;
 pub mod layer;
 pub mod look;
@@ -167,7 +167,7 @@ pub fn configure(read: &monaka_core::options::Options, dir: &Path) {
         give::configure(items);
     }
     // Head aim's updates, for `probe_look`, `probe_cutscene` and `probe_frames`.
-    monaka_arms::owned_facing::observe(monaka_arms::owned_facing::Observer { traced: look::traced, steered: look::steered });
+    monaka_body::look::facing::observe(monaka_body::look::facing::Observer { traced: look::traced, steered: look::steered });
 }
 
 /// The gameplay probes' hooks.
@@ -218,7 +218,7 @@ pub unsafe fn install(hooks: &mut Hooks, engine_module: &Module, gamedll: &Modul
 pub(crate) fn install_probes(start: &mut Start<'_, Dl1>) -> Result<(), Lack> {
     let probes = options();
     let Facts { engine: engine_module, gamedll, .. } = start.build;
-    if !probes.flat && probes.arms() && !start.is_on(&crate::ARMS) {
+    if !probes.flat && probes.arms() && !start.is_on(&crate::HAND_RIG) {
         crate::providers::skeleton::hook_arms(start.hooks, engine_module, gamedll)?;
     }
     // SAFETY: the engine and the game DLL are the builds `engine.rs` describes (hashes checked).

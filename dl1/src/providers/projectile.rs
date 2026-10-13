@@ -1,17 +1,17 @@
-//! Provider: the fire hook (`monaka_arms::launch::Fires`), where the bow and gun ready-mades place
+//! Provider: the fire hook (`monaka_body::launch::Fires`), where the bow and gun ready-mades place
 //! the player's shots.
 //!
 //! The projectiles the player's bow and guns fire, placed by the hands: every arrow and bullet is a
 //! projectile from the level's pool, given a start and a velocity and fired by one function
 //! ([`fire`]). While the player's bow looses (`crate::providers::bow`) or gun shoots ([`shoot`]),
 //! what calls it says which weapon this shot is ([`aim`]), and each projectile fired asks that
-//! weapon's ready-made where it goes (`monaka_arms::launch::shot`, with the projectile as the game
+//! weapon's ready-made where it goes (`monaka_body::launch::shot`, with the projectile as the game
 //! fires it and the aim it made the shot along): its start and direction from the hands, its speed
 //! kept unless the answer says its own.
 
 use crate::Dl1;
 use crate::providers::skeleton;
-use monaka_arms::launch::{self, Fired, Fires, Flight, Weapon};
+use monaka_body::launch::{self, Fired, Fires, Flight, Weapon};
 use monaka_core::math::{length, unit};
 use monaka_hook::module::Module;
 use monaka_hook::{Hooks, InFlight, Original, mem};

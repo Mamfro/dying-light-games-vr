@@ -1,10 +1,10 @@
 //! Providers: actions (`monaka_pad::actions::Actions`), the game's actions on the pad; its component
 //! is `crate::ACTIONS`, the pad itself `crate::GAMEPAD`. And lockpicking
-//! (`monaka_arms::lockpick::Lockpicks`), on the minigame the actions take the pick and the turn
+//! (`monaka_body::lockpick::Lockpicks`), on the minigame the actions take the pick and the turn
 //! through; its component is `crate::LOCKPICK`.
 
 use crate::Dl2;
-use monaka_arms::lockpick::{Lockpicking, Lockpicks};
+use monaka_body::lockpick::{Lockpicking, Lockpicks};
 use monaka_pad::actions::{Action, Actions, Ask, Binding};
 use monaka_producer::game::{Lack, Start};
 

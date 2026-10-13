@@ -1,20 +1,21 @@
-//! Provider: look fields, the look targets the look by owned facing (`monaka_arms::owned_facing`)
+//! Provider: look fields, the look targets the look by a facing the mod owns (`monaka_body::look`)
 //! reads and writes.
 //!
 //! DL1's look provider: where the player's look targets live ([`FIELDS`], their offsets in
 //! `engine.rs`: the character's wanted look), the hook where the game builds the player camera from
 //! them (`FromForwardUpPos`, [`from_forward`]), and the input actions that pitch the look
 //! ([`input_action`]). Each player camera update is handed to head aim
-//! (`monaka_arms::owned_facing::steer`), which says what the targets become; without head aim the
-//! pitch lock (`monaka_arms::pitch_lock`) reads the camera's pitch there and holds the look input.
+//! (`monaka_body::look::facing::steer`), which says what the targets become; without head aim the
+//! pitch lock (`monaka_body::pitch_lock`) reads the camera's pitch there and holds the look input.
 
 use crate::providers::engine::{self, FromForwardFn};
 use crate::extras::spots;
 use crate::{Dl1, Facts};
 use eng_chr::providers::look_fields::Cutscene;
-use monaka_arms::look_targets::StandDown;
-use monaka_arms::owned_facing::{self, FACING, LooksByFacing, PlayerUpdate, TargetUnits};
-use monaka_arms::pitch_lock::PitchInput;
+use monaka_body::look::facing::{self, Facing, PlayerUpdate, TargetUnits};
+use monaka_body::look::{Delivery, Looks, StandDown};
+use monaka_core::situation::Situation;
+use monaka_body::pitch_lock::PitchInput;
 use monaka_producer::game::{Lack, Start};
 use monaka_producer::{Rejection, log};
 use crate::providers::eye_site;
@@ -81,13 +82,16 @@ pub fn set_targets(character: usize, yaw: f32, pitch: f32) {
 /// `IsObjectOnSomeMovie` on the character, a `PlayerDI`, asked at every update); head aim needs it.
 static CUTSCENE: Cutscene = Cutscene::new();
 
-/// DL1's look by owned facing: the character turned by the head at `FromForwardUpPos`
+/// The look targets' units: degrees, the yaw turning right as it grows; a target yaw of `t` looks
+/// [`CAMERA_YAW_OF_TARGET`] minus `t` in the world.
+const UNITS: TargetUnits = TargetUnits { convention: FIELDS.convention, yaw_zero: CAMERA_YAW_OF_TARGET, turn: 360.0 };
+
+/// DL1's look by a facing the mod owns: the character turned by the head at `FromForwardUpPos`
 /// ([`from_forward`]), the look input actions held ([`input_action`]); spots to come back to are
 /// taken at its updates ([`spots`]).
-impl LooksByFacing for Dl1 {
-    /// Degrees, the yaw turning right as it grows; a target yaw of `t` looks [`CAMERA_YAW_OF_TARGET`]
-    /// minus `t` in the world.
-    const TARGETS: TargetUnits = TargetUnits { convention: FIELDS.convention, yaw_zero: CAMERA_YAW_OF_TARGET, turn: 360.0 };
+impl Looks for Dl1 {
+    const DELIVERY: Delivery<Self> = Delivery::Facing(Facing { units: UNITS, read: target_yaw, write: set_targets, command: facing_command });
+    const REPORTS: &'static [Situation] = &[Situation::CameraTaken, Situation::Traversal];
 
     fn install(start: &mut Start<'_, Dl1>) -> Result<(), Lack> {
         let Facts { engine: engine_module, gamedll, .. } = start.build;
@@ -104,30 +108,28 @@ impl LooksByFacing for Dl1 {
         let asked = CUTSCENE.ask(character);
         StandDown { now: asked.cutscene, changed: asked.changed }
     }
+}
 
-    fn targets(character: usize) -> Option<f32> {
-        targets(character).0
-    }
+/// The character's target yaw now, if readable.
+fn target_yaw(character: usize) -> Option<f32> {
+    targets(character).0
+}
 
-    fn set_targets(character: usize, yaw: f32, pitch: f32) {
-        set_targets(character, yaw, pitch);
-    }
-
-    fn facing_command(now: u64, character: usize, facing: f32) -> Option<f32> {
-        match spots::take_command(now)? {
-            spots::Command::Save(name) => {
-                spots::save(&name, character, facing);
-                None
-            }
-            spots::Command::Go(name) => spots::go(&name, character),
+/// A spot the player saved or asked to come back to at this update, given the facing now.
+fn facing_command(now: u64, character: usize, facing: f32) -> Option<f32> {
+    match spots::take_command(now)? {
+        spots::Command::Save(name) => {
+            spots::save(&name, character, facing);
+            None
         }
+        spots::Command::Go(name) => spots::go(&name, character),
     }
 }
 
 /// Logs the vertical look inputs neutralised and where the aim came from (end of a run).
 pub fn report() {
     log!("vertical look inputs neutralised: {}", pitch_inputs_blocked());
-    owned_facing::report();
+    facing::report();
 }
 
 /// (head aim then knows the player camera), the look the camera was built from, and the head pose
@@ -157,9 +159,9 @@ static LOOK_STEERS: AtomicBool = AtomicBool::new(false);
 /// bits; NaN: not known).
 static CAMERA_PITCH: AtomicU32 = AtomicU32::new(u32::MAX);
 
-/// The pitch lock (`monaka_arms::pitch_lock`) at the game's input-action converter, on the game
+/// The pitch lock (`monaka_body::pitch_lock`) at the game's input-action converter, on the game
 /// camera's pitch as each player camera update sets it, while the eyes are drawn. Head aim hooks
-/// both ([`LooksByFacing::install`]); without it they are hooked here.
+/// both ([`Looks::install`]); without it they are hooked here.
 impl PitchInput for Dl1 {
     fn install(start: &mut Start<'_, Dl1>) -> Result<(), Lack> {
         if start.is_on(&crate::LOOK) {
@@ -179,6 +181,17 @@ impl PitchInput for Dl1 {
 
     fn holds() -> bool {
         eye_site::capturing()
+    }
+
+    /// The input manager's pad last used: `-1` after the keyboard or mouse, so the mouse keeps its
+    /// vertical look.
+    fn stick_in_use() -> bool {
+        let Some(gamedll) = Module::find(engine::GAMEDLL) else { return true };
+        let manager = mem::read::<usize>(gamedll.at(engine::GAME))
+            .filter(|&game| game != 0)
+            .and_then(|game| mem::read::<usize>(game + engine::MANAGER_IN_GAME))
+            .filter(|&manager| manager != 0);
+        manager.and_then(|manager| mem::read::<i32>(manager + engine::MANAGER_LAST_PAD)).is_none_or(|pad| pad >= 0)
     }
 }
 
@@ -218,19 +231,19 @@ pub fn pitch_inputs_blocked() -> u64 {
 
 /// The game's input-action converter (`InputAction::Execute`). While head aim steers the
 /// character, the head alone pitches it: vertical look input (mouse and stick) gets its neutral
-/// value; otherwise the pitch lock passes it only back toward level (`monaka_arms::pitch_lock`,
+/// value; otherwise the pitch lock passes it only back toward level (`monaka_body::pitch_lock`,
 /// when on).
 pub unsafe extern "system" fn input_action(action: *mut core::ffi::c_void, targets: *mut core::ffi::c_void, value: f32, flag: u8) {
     let _flight = InFlight::enter();
     let mut value = value;
-    if let Some(neutral) = monaka_arms::aim::neutral_pitch(action as usize, |id| engine::LOOK_ACTIONS.iter().any(|&(_, _, look)| look == id)) {
-        if eye_site::capturing() && FACING.live() {
+    if let Some(neutral) = monaka_body::look::aim::neutral_pitch(action as usize, |id| engine::LOOK_ACTIONS.iter().any(|&(_, _, look)| look == id)) {
+        if eye_site::capturing() && facing::live() {
             if value != neutral {
                 PITCH_INPUTS_BLOCKED.fetch_add(1, Relaxed);
             }
             value = neutral;
         } else {
-            value = monaka_arms::pitch_lock::pass(value, neutral, turns_up(mem::read::<u32>(action as usize).unwrap_or(0)));
+            value = monaka_body::pitch_lock::pass(value, neutral, turns_up(mem::read::<u32>(action as usize).unwrap_or(0)));
         }
     }
     // SAFETY: forwards the game's own call.
@@ -250,7 +263,7 @@ pub unsafe extern "system" fn from_forward(camera: *mut core::ffi::c_void, forwa
         if config.aim.head && LOOK_STEERS.load(Acquire) {
             player = player_call;
             if player && let Some(update) = player_update(camera as usize, forward as usize) {
-                owned_facing::steer::<Dl1>(update);
+                facing::steer::<Dl1>(update);
             }
         }
     }

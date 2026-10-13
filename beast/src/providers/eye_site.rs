@@ -230,7 +230,7 @@ fn shared() -> Option<Shared> {
 
 /// The player camera update (`update`) is about to set `camera`: the eye camera to set instead, as
 /// (back, up, position), or `None` to leave it.
-pub fn eye_vectors(camera: usize, update: &PlayerUpdate, baked: Option<f32>) -> Option<[Vec3; 3]> {
+pub fn eye_vectors(camera: usize, update: &PlayerUpdate) -> Option<[Vec3; 3]> {
     let call = CAMERAS.call();
     let taken = DRIVER.take_in_turn()?;
     PLAYER_CAMERA.store(camera, Relaxed);
@@ -244,6 +244,9 @@ pub fn eye_vectors(camera: usize, update: &PlayerUpdate, baked: Option<f32>) -> 
     if pose.valid == 0 {
         return None;
     }
+    // The head yaw head aim baked into the camera (the share the update left in the targets),
+    // while it steers.
+    let baked = monaka_body::look::baked::<crate::Beast>(None).map(|share| share.yaw);
     if baked.is_some() {
         CAMERAS.aimed();
     }
@@ -322,7 +325,7 @@ pub fn eye_camera(game: &Mat34, pose: &HeadPose, eye: usize, shared: &Shared, ga
         Some(baked_yaw) => {
             let base = Base::Level { baked_yaw };
             // Room-scale following: the head's movement the character has walked is in the camera.
-            (monaka_arms::roomscale::follow_view(game, base, shared.head_position.position(pose))?, base)
+            (monaka_body::roomscale::follow_view(game, base, shared.head_position.position(pose))?, base)
         }
         None => (*game, Base::Game),
     };

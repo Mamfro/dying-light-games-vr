@@ -5,13 +5,13 @@
 //! trait.
 
 pub(crate) mod actions;
-pub(crate) mod arms;
 pub(crate) mod camera_update;
 pub(crate) mod cameras;
 pub(crate) mod dlss;
 pub mod engine;
 pub(crate) mod eye_site;
 pub(crate) mod fsr;
+pub(crate) mod hand_rig;
 pub(crate) mod look_fields;
 pub(crate) mod present12;
 pub(crate) mod stereo;

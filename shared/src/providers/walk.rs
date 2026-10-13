@@ -1,7 +1,7 @@
-//! Provider: steps (`monaka_arms::feature::Steps`), the player's movement step.
+//! Provider: steps (`monaka_body::feature::Steps`), the player's movement step.
 //!
 //! The player's movement step as Dying Light 2 and The Beast take it, hooked for room-scale
-//! following ([`monaka_arms::roomscale`], through `crate::feature::hook_steps`; Dying Light 1's
+//! following ([`monaka_body::roomscale`], through `crate::feature::hook_steps`; Dying Light 1's
 //! walk body is its own).
 //!
 //! The player is a Bullet kinematic character: each step the player's `PlayerBulletPhysicsModule`
@@ -10,7 +10,7 @@
 //! capsule toward the target with collision. Following moves that target by its own velocity ×
 //! dt, inside the player's step only, and measures how far the capsule got.
 
-use monaka_arms::roomscale;
+use monaka_body::roomscale;
 use monaka_hook::module::Module;
 use monaka_hook::{Hooks, InFlight, Original, mem, thread_id};
 use monaka_producer::{Rejection, log};

@@ -15,7 +15,7 @@
 //! DL1's steps around the present loop are its present entry's (`crate::providers::present_entry`); the site's
 //! measurements are Monaka's (`monaka_stereo::eye_site::checks`).
 
-use monaka_arms::owned_facing::FACING;
+use monaka_body::look::facing;
 use crate::config::{Config, widened_fov};
 use crate::providers::engine::{self, Camera, CameraWriter, SetFovFn, SetInverseFn, ViewStageFn};
 use crate::Dl1;
@@ -77,9 +77,9 @@ fn install_eyes(start: &mut Start<'_, Dl1>) -> Result<(), Lack> {
     }
     let channel = start.channel()?;
     // Hand aim reads the controllers the viewer writes beside the pose (sampled with each frame,
-    // `monaka_arms::hands`); without them, head aim.
+    // `monaka_body::hands`); without them, head aim.
     if config.aim.hand {
-        monaka_arms::controllers::open(channel);
+        monaka_body::controllers::open(channel);
     }
     // SAFETY: the export is `void IBaseCamera::SetInvCameraMatrix(const mtx34&)` on x64.
     let camera = CameraWriter(unsafe { std::mem::transmute::<usize, SetInverseFn>(set_inverse) });
@@ -343,35 +343,35 @@ pub static SET_FOV_ORIGINAL: Original<SetFovFn> = Original::new();
 
 /// After present `n`, with the pair's head `pose`: the live camera turned to the view. Climbing,
 /// the game's camera is left as the game set it: hanging, the game turns the character by where
-/// its camera looks ([`monaka_arms::traverse`]). With no turn on record the view centre is made
+/// its camera looks ([`monaka_body::traverse`]). With no turn on record the view centre is made
 /// from the game's camera at render.
 pub(crate) fn turn_at_present(pose: &HeadPose, n: u64) {
     let setup = setup();
     if setup.config.turn_live_camera && pose.valid != 0 {
-        if monaka_arms::traverse::traversing() {
+        if monaka_body::traverse::traversing() {
             if let Ok(mut poses) = POSES.lock() {
                 poses.live.history = 0;
                 poses.live.base = None;
             }
         } else {
-            let steering = setup.config.aim.head && FACING.share_in_view();
+            let steering = setup.config.aim.head && facing::share_in_view();
             turn_live_camera(&setup.camera, pose, n & !1, steering, steering && setup.config.aim.hand);
         }
     }
 }
 
 /// How far the view backs off the wall now (metres) and which way (a horizontal world direction):
-/// `climb_pullback` away from where the hands hold on ([`monaka_arms::traverse::wall_direction`]),
+/// `climb_pullback` away from where the hands hold on ([`monaka_body::traverse::wall_direction`]),
 /// eased with the arms' blend into the climb.
 fn climb_pullback() -> Option<(f32, [f32; 2])> {
-    let distance = config().climb_pullback * monaka_arms::traverse::climb_share();
-    let wall = monaka_arms::traverse::wall_direction()?;
+    let distance = config().climb_pullback * monaka_body::traverse::climb_share();
+    let wall = monaka_body::traverse::wall_direction()?;
     (distance > 1e-4).then(|| (distance, [-wall[0], -wall[1]]))
 }
 
 /// How the view is built on the game camera `game`. The view's facing is the mod's: while head aim
 /// steers, `game` carries the aim (head or hand), so it is levelled with the aim's yaw `baked`
-/// ([`FACING`]'s baked yaw as the game built it) turned back out; otherwise (or for a camera looking
+/// (the facing's baked yaw as the game built it) turned back out; otherwise (or for a camera looking
 /// straight up or down) it is taken as the game set it.
 fn view_base(game: &Mat34, head_aim: bool, baked: f32) -> Base {
     match head_aim && camera::level(game).is_some() {
@@ -407,10 +407,10 @@ fn placed(game: &Mat34, unlean: bool, pullback: Option<(f32, [f32; 2])>) -> Mat3
 
 /// The game camera `game` the view for the head `pose` is built on as `base` ([`placed`]), moved
 /// back by room-scale following: the head's movement the character has walked is in the camera
-/// now ([`monaka_arms::roomscale::follow_view`], the head where the head model draws it).
+/// now ([`monaka_body::roomscale::follow_view`], the head where the head model draws it).
 fn view_game(game: &Mat34, base: Base, unlean: bool, pose: &HeadPose) -> Option<Mat34> {
-    monaka_arms::duck::note_head(pose.position[1]);
-    monaka_arms::roomscale::follow_view(&placed(game, unlean, climb_pullback()), base, config().head_position.position(pose))
+    monaka_body::duck::note_head(pose.position[1]);
+    monaka_body::roomscale::follow_view(&placed(game, unlean, climb_pullback()), base, config().head_position.position(pose))
 }
 
 /// The view centre (between the eyes) for the game camera `game` and head `pose`, as the eye site
@@ -421,13 +421,19 @@ fn view_center(game: &Mat34, pose: &HeadPose, head_aim: bool, unlean: bool, bake
     camera::view_centre(&view_game(game, base, unlean, pose)?, base, pose.orientation, config().head_position.position(pose))
 }
 
+/// The head yaw (radians) the game camera of the latest player camera update carries beyond the
+/// facing (`monaka_body::look::baked`).
+pub(crate) fn baked_yaw() -> f32 {
+    monaka_body::look::baked::<crate::Dl1>(None).map_or(0.0, |share| share.yaw)
+}
+
 /// Where the headset's tracking space sits in the world for the game camera `game` (see
 /// [`view_center`]), moved as the head model draws the pending head: any tracked pose, head or
 /// controller, lands in the world through it where the eyes see it.
 pub fn tracking_origin(game: &Mat34, head_aim: bool, unlean: bool) -> Mat34 {
     let placed = placed(game, unlean, climb_pullback());
-    let mut origin = view_base(game, head_aim, FACING.baked_yaw()).origin(&placed).unwrap_or(placed);
-    monaka_arms::roomscale::shift_origin(&mut origin);
+    let mut origin = view_base(game, head_aim, baked_yaw()).origin(&placed).unwrap_or(placed);
+    monaka_body::roomscale::shift_origin(&mut origin);
     config().head_position.drawn_origin(&origin, &pending_pose())
 }
 
@@ -439,7 +445,7 @@ const CAMERA_REACH: f32 = 5.0;
 fn note_implausible_camera(what: &str, written: &Mat34, game: &Mat34) {
     static COUNT: AtomicU64 = AtomicU64::new(0);
     let n = COUNT.fetch_add(1, Relaxed) + 1;
-    if n <= 5 || n.is_power_of_two() {
+    if log::seldom(n, 5) {
         log!("{n}x a camera would have been written implausibly; left as the game set it (first: {what} {written:?} for the game's {game:?})");
     }
 }
@@ -451,14 +457,14 @@ fn note_implausible_camera(what: &str, written: &Mat34, game: &Mat34) {
 /// places (with the head aiming the two are one).
 pub fn turn_after_game_update() {
     let setup = setup();
-    if !setup.config.turn_live_camera || !setup.config.turn_on_update || DRIVER.finished() || !DRIVER.capturing() || monaka_arms::traverse::traversing() {
+    if !setup.config.turn_live_camera || !setup.config.turn_on_update || DRIVER.finished() || !DRIVER.capturing() || monaka_body::traverse::traversing() {
         return;
     }
     let Some((pose, (chosen_at, _))) = POSES.lock().ok().map(|p| (p.pending, p.chosen)) else { return };
     if pose.valid == 0 {
         return;
     }
-    let steering = setup.config.aim.head && FACING.share_in_view();
+    let steering = setup.config.aim.head && facing::share_in_view();
     turn_live_camera(&setup.camera, &pose, chosen_at & !1, steering, steering && setup.config.aim.hand);
 }
 
@@ -477,7 +483,7 @@ fn turn_live_camera(writer: &CameraWriter, pose: &HeadPose, pair: u64, head_aim:
         Some(base) if live.history > 0 && camera.inverse == live.turned[last] => base,
         _ => camera.inverse,
     };
-    let baked = FACING.baked_yaw();
+    let baked = baked_yaw();
     let Some(turned) = view_center(&base, pose, head_aim, unlean, baked) else { return };
     if !camera::within_reach(&turned, &base, CAMERA_REACH) {
         note_implausible_camera("live camera", &turned, &base);
@@ -562,7 +568,7 @@ fn shift_render_camera(level: usize, view: usize) {
     // the game's own camera every time: the turn's base when the cache holds a turn, else what the
     // game set (it rewrote the camera after the turn), with this frame's head pose.
     let mut turned = false;
-    let mut base = (sample.inverse, FACING.baked_yaw());
+    let mut base = (sample.inverse, baked_yaw());
     if pose.valid != 0 && config.turn_live_camera
         && let Ok(poses) = POSES.lock()
     {
@@ -574,7 +580,7 @@ fn shift_render_camera(level: usize, view: usize) {
         // for a camera that is neither (another camera rendering, as in a conversation), and that
         // eye would then be made from the player's camera.
         turned = known > 0 && to_turned <= to_base && to_turned < CAMERA_MATCH;
-        checks::note_camera_match(known > 0, to_turned, to_base, CAMERA_MATCH, eye, FACING.cutscene());
+        checks::note_camera_match(known > 0, to_turned, to_base, CAMERA_MATCH, eye, facing::cutscene());
         if !turned {
             COUNTERS.head_reapplied.fetch_add(1, Relaxed);
         } else if let Some(i) = (0..known).min_by(|&a, &b| distance(&sample.inverse, &live.turned[a]).total_cmp(&distance(&sample.inverse, &live.turned[b]))) {
@@ -586,7 +592,7 @@ fn shift_render_camera(level: usize, view: usize) {
     // hand, from the previous update). The view is that camera levelled, with the aim's baked yaw
     // turned back out, plus the current head pose as the head model places it. Without a head
     // pose, the eyes straddle the cache's camera.
-    let steering = config.aim.head && FACING.share_in_view();
+    let steering = config.aim.head && facing::share_in_view();
     let taken = view_base(&base.0, steering, base.1);
     let game = match pose.valid != 0 {
         true => view_game(&base.0, taken, steering && config.aim.hand, &pose),
@@ -600,7 +606,7 @@ fn shift_render_camera(level: usize, view: usize) {
     };
     if pose.valid != 0 {
         // The head's gap from the character: less what room-scale following has walked.
-        crate::research::drift::note_head(pose.position, monaka_arms::roomscale::anchor());
+        crate::research::drift::note_head(pose.position, monaka_body::roomscale::anchor());
         COUNTERS.head_applied.fetch_add(1, Relaxed);
         if steering {
             VIEWS.aimed();

@@ -56,8 +56,10 @@ pub const ONCE_SKIP_DEFAULT: u32 = 0b1111 << 10;
 /// (Alt-eye), Depth-stereo (synthetic). Depth-stereo shows the hands no nearer than its nearest
 /// comfortable depth: the panels on them too.
 pub const STEREO: Opt = rendering::stereo_method(&[StereoMethod::SameFrame.offer(), StereoMethod::Aer.offer(), StereoMethod::DepthStereo.offer(), STEREO_OFF], StereoMethod::SameFrame).viewer_args("depth", &["--panel-nearest", "0.5"]);
-/// The frame generators DL2 offers: FSR's by default (per eye on the same-frame pairs), off.
-pub const FRAMEGEN: Opt = rendering::frame_generation(&[FrameGenerator::Off.offer(), FrameGenerator::Fsr.offer()], FrameGenerator::Fsr);
+/// The frame generators DL2 offers: FSR's by default (per eye on the same-frame pairs), off. DL2
+/// generates frames only on the same-frame pairs, so the choice is offered only with Standard
+/// (Same-frame).
+pub const FRAMEGEN: Opt = rendering::frame_generation(&[FrameGenerator::Off.offer(), FrameGenerator::Fsr.offer()], FrameGenerator::Fsr).only_when("stereo", "same");
 
 /// Whether the run asks for frame generation (`framegen=fsr`, the default), whichever method it
 /// picked.

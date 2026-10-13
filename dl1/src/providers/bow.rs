@@ -1,5 +1,5 @@
-//! Provider: the bow's draw (`monaka_arms::launch::Draws`) and loosing, with the bow by hand's facts
-//! (`monaka_arms::bow::Bows`). Its component is `crate::BOW_BY_HAND`; the arrows are placed by the
+//! Provider: the bow's draw (`monaka_body::launch::Draws`) and loosing, with the bow by hand's facts
+//! (`monaka_body::bow::Bows`). Its component is `crate::BOW_BY_HAND`; the arrows are placed by the
 //! fire hook ([`crate::providers::projectile`]).
 //!
 //! The bow controller (`WeaponBowController`) says each update whether it draws ([`update`]: its
@@ -10,8 +10,8 @@
 
 use crate::Dl1;
 use crate::providers::{projectile, skeleton};
-use monaka_arms::bow::{Bowing, Bows};
-use monaka_arms::launch::{self, Draws, Weapon};
+use monaka_body::bow::{Bowing, Bows};
+use monaka_body::launch::{self, Draws, Weapon};
 use monaka_core::gesture::PullRules;
 use monaka_core::sync::Locked;
 use monaka_hook::module::Module;

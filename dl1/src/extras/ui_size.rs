@@ -274,8 +274,8 @@ pub fn install(hooks: &mut Hooks, engine_module: &Module, gamedll: &Module) -> R
         hooks.inline(&CAMERA_ORIGINAL, "UI camera", engine_module.at(CAMERA), &CAMERA_PROLOGUE, camera as CameraFn)?;
         hooks.inline(&LETTERBOX_ORIGINAL, "UI letterbox", engine_module.at(LETTERBOX), &LETTERBOX_PROLOGUE, letterbox as LetterboxFn)?;
         hooks.inline(&POINT_ORIGINAL, "UI point to screen", point, &POINT_TO_SCREEN_PROLOGUE, point_to_screen as PointFn)?;
-        hooks.import(&WIDTH_ORIGINAL, "screen width", gamedll, engine::ENGINE, SCREEN_WIDTH, screen_width as ScreenSideFn)?;
-        hooks.import(&HEIGHT_ORIGINAL, "screen height", gamedll, engine::ENGINE, SCREEN_HEIGHT, screen_height as ScreenSideFn)?;
+        hooks.import(&WIDTH_ORIGINAL, "screen width", gamedll, eng_chr::ENGINE,SCREEN_WIDTH, screen_width as ScreenSideFn)?;
+        hooks.import(&HEIGHT_ORIGINAL, "screen height", gamedll, eng_chr::ENGINE,SCREEN_HEIGHT, screen_height as ScreenSideFn)?;
         hooks.inline(&TO_SCREEN_ORIGINAL, "camera point to screen", to, &TO_SCREEN_PROLOGUE, to_screen as ToScreenFn)?;
         hooks.inline(&TO_SCREEN_CLAMPED_ORIGINAL, "camera point to screen (clamped)", clamped, &TO_SCREEN_CLAMPED_PROLOGUE, to_screen_clamped as ToScreenFn)?;
         hooks.inline(&ON_SCREEN_VECTOR_ORIGINAL, "camera on-screen vector", vector, &ON_SCREEN_VECTOR_PROLOGUE, on_screen_vector as OnScreenFn)?;

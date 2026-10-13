@@ -10,7 +10,6 @@
 use monaka_hook::module::Module;
 use monaka_hook::{Hooks, InFlight, Original, mem};
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
-use std::time::{Duration, Instant};
 
 use crate::ENGINE;
 /// `float IGame::GetGameTimeDelta() const`, exported by the engine, imported by the game DLL.
@@ -65,15 +64,6 @@ pub fn observe(observer: fn(usize)) {
 /// The game object, once seen.
 pub fn game() -> Option<usize> {
     Some(GAME.load(Relaxed)).filter(|&g| g != 0)
-}
-
-/// The game object, waiting up to `limit` for the game to run a frame.
-pub fn wait_for_game(limit: Duration) -> Option<usize> {
-    let started = Instant::now();
-    while game().is_none() && started.elapsed() < limit {
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    game()
 }
 
 /// The video settings object at `[[game + 8] + offset]`.

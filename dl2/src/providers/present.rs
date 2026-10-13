@@ -10,9 +10,10 @@
 
 use crate::{Dl2, Facts};
 use crate::config::{self, debug};
-use crate::providers::engine::{self, CommandsFn, PresentRequest12Fn};
+use crate::providers::engine::{self, CommandsFn};
 use crate::providers::eye_site::{self, local};
 use crate::providers::game;
+use eng_chr::providers::rd3d12::PresentRequestFn;
 use monaka_hook::{InFlight, Original, mem};
 use monaka_producer::game::{Lack, Start};
 use monaka_stereo::providers::FrameLabels;
@@ -23,7 +24,7 @@ use windows::Win32::Graphics::Dxgi::IDXGISwapChain3;
 use windows::core::Interface;
 
 static COMMANDS: Original<CommandsFn> = Original::new();
-static PRESENT_REQUEST: Original<PresentRequest12Fn> = Original::new();
+static PRESENT_REQUEST: Original<PresentRequestFn> = Original::new();
 
 /// Hooks the present entry of the renderer the game loaded: D3D11's command dispatcher or D3D12's
 /// present request.

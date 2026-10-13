@@ -1,4 +1,4 @@
-//! Provider: lockpicking (`monaka_arms::lockpick::Lockpicks`: Dying Light 1's twist rules, its
+//! Provider: lockpicking (`monaka_body::lockpick::Lockpicks`: Dying Light 1's twist rules, its
 //! hands, whether a lock is being picked), with the minigame's analog actions taken the game's own
 //! way (`monaka_pad::actions::Actions::engine` for `Action::Pick` and `Action::Turn`, through
 //! [`crate::providers::actions`]). Its component is `crate::LOCKPICK`.
@@ -14,8 +14,8 @@
 
 use crate::Dl1;
 use crate::providers::skeleton;
-use monaka_arms::hands::{At, Point};
-use monaka_arms::lockpick::{Lockpicking, Lockpicks, Twist};
+use monaka_body::hands::{At, Point};
+use monaka_body::lockpick::{Lockpicking, Lockpicks, Twist};
 use monaka_core::sync::Locked;
 use monaka_hook::module::Module;
 use monaka_hook::{Hooks, InFlight, Original};
@@ -30,7 +30,7 @@ use std::time::{Duration, Instant};
 /// Each hand's roll about where it points, from its orientation as the lock began: the pick turns
 /// as far as the left hand, the screwdriver fully at 0.8 radians of the right hand.
 impl Lockpicks for Dl1 {
-    /// The controller's aim pose as sampled with the frame (`monaka_arms::hands`).
+    /// The controller's aim pose as sampled with the frame (`monaka_body::hands`).
     const LOCKPICKING: Lockpicking = Lockpicking { twist: Twist::FromStart, pick_gain: 1.0, full_turn: 0.8, hand: (Point::Controller, At::Frame) };
 
     fn picking() -> bool {

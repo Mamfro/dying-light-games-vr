@@ -14,7 +14,7 @@ repository = "https://github.com/Mamfro/dying-light-games-vr"
 # `monaka_adapters/dying-light-games-vr` beside it. Edits to both build together.
 [workspace.dependencies]
 eng_chr = { path = "shared" }
-monaka_arms = { path = "../../monaka_vr/crates/arms" }
+monaka_body = { path = "../../monaka_vr/crates/body" }
 monaka_channel = { path = "../../monaka_vr/crates/channel" }
 monaka_core = { path = "../../monaka_vr/crates/core" }
 monaka_framegen = { path = "../../monaka_vr/crates/framegen" }

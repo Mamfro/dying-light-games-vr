@@ -57,7 +57,7 @@ unsafe extern "C" fn may_grab(player: *mut c_void, attacker: *mut c_void, kind: 
     let ours = skeleton::arms_model();
     if !KINDS_KEPT.contains(&kind) && (ours == 0 || ours == player as usize) {
         let n = REFUSED.fetch_add(1, Relaxed) + 1;
-        if n <= 20 || n.is_power_of_two() {
+        if log::seldom(n, 20) {
             log!("zombie grabs: grab check {n} answered no (kind {kind}, attacker {attacker:p})");
         }
         return 0;
